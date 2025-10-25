@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Profit Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen py-8 px-4">
+    <div class="max-w-2xl mx-auto">
+        <div class="bg-white rounded-lg shadow-lg p-6 md:p-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">Crypto Profit Calculator</h1>
+            
+            <form id="calcForm" class="space-y-4">
+                <div>
+                    <label for="investment" class="block text-sm font-medium text-gray-700 mb-1">
+                        Investment Amount
+                    </label>
+                    <input 
+                        type="number" 
+                        id="investment" 
+                        step="0.01"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Enter investment amount"
+                    />
+                </div>
+
+                <div>
+                    <label for="buyPrice" class="block text-sm font-medium text-gray-700 mb-1">
+                        Buy Price
+                    </label>
+                    <input 
+                        type="number" 
+                        id="buyPrice" 
+                        step="0.01"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Enter buy price"
+                    />
+                </div>
+
+                <div>
+                    <label for="sellPrice" class="block text-sm font-medium text-gray-700 mb-1">
+                        Sell Price
+                    </label>
+                    <input 
+                        type="number" 
+                        id="sellPrice" 
+                        step="0.01"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Enter sell price"
+                    />
+                </div>
+
+                <div>
+                    <label for="fee" class="block text-sm font-medium text-gray-700 mb-1">
+                        Fee (%)
+                    </label>
+                    <input 
+                        type="number" 
+                        id="fee" 
+                        step="0.001"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Enter fee percentage"
+                    />
+                </div>
+
+                <button 
+                    type="submit" 
+                    class="w-full bg-blue-600 text-white py-3 rounded-md hover:bg-blue-700 transition font-semibold"
+                >
+                    Calculate
+                </button>
+            </form>
+
+            <div id="results" class="mt-6 hidden">
+                <div class="bg-gray-50 rounded-lg p-4 space-y-3">
+                    <h2 class="text-xl font-bold text-gray-800 mb-3">Results</h2>
+                    
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600">Coins Purchased:</span>
+                            <span id="coinsPurchased" class="font-semibold"></span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600">Buy Fee:</span>
+                            <span id="buyFee" class="font-semibold text-red-600"></span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600">Gross Sale Amount:</span>
+                            <span id="grossSale" class="font-semibold"></span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600">Sell Fee:</span>
+                            <span id="sellFee" class="font-semibold text-red-600"></span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600">Net Sale Amount:</span>
+                            <span id="netSale" class="font-semibold"></span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600">Total Fees:</span>
+                            <span id="totalFees" class="font-semibold text-red-600"></span>
+                        </div>
+                        
+                        <div class="border-t pt-3 mt-3">
+                            <div class="flex justify-between items-center">
+                                <span class="text-lg font-bold text-gray-800">Net Profit/Loss:</span>
+                                <span id="netProfit" class="text-2xl font-bold"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Default values
+        const defaults = {
+            investment: 50000,
+            buyPrice: 480000,
+            sellPrice: 485000,
+            fee: 0.01
+        };
+
+        // Set default values
+        function setDefaults() {
+            document.getElementById('investment').value = defaults.investment;
+            document.getElementById('buyPrice').value = defaults.buyPrice;
+            document.getElementById('sellPrice').value = defaults.sellPrice;
+            document.getElementById('fee').value = defaults.fee;
+        }
+
+        // Format number as currency
+        function formatCurrency(num) {
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }).format(num);
+        }
+
+        // Calculate profit
+        function calculate() {
+            const investment = parseFloat(document.getElementById('investment').value);
+            const buyPrice = parseFloat(document.getElementById('buyPrice').value);
+            const sellPrice = parseFloat(document.getElementById('sellPrice').value);
+            const feePercent = parseFloat(document.getElementById('fee').value);
+
+            // Validate inputs
+            if (isNaN(investment) || isNaN(buyPrice) || isNaN(sellPrice) || isNaN(feePercent)) {
+                alert('Please enter valid numbers for all fields');
+                return;
+            }
+
+            if (buyPrice <= 0 || sellPrice <= 0 || investment <= 0) {
+                alert('Prices and investment must be greater than zero');
+                return;
+            }
+
+            // Calculate buy fee (applied to investment amount)
+            const buyFee = investment * (feePercent / 100);
+            const amountAfterBuyFee = investment - buyFee;
+            
+            // Calculate coins purchased with amount after buy fee
+            const coinsPurchased = amountAfterBuyFee / buyPrice;
+            
+            // Calculate gross sale amount
+            const grossSaleAmount = coinsPurchased * sellPrice;
+            
+            // Calculate sell fee (applied to gross sale amount)
+            const sellFee = grossSaleAmount * (feePercent / 100);
+            
+            // Calculate net sale amount
+            const netSaleAmount = grossSaleAmount - sellFee;
+            
+            // Calculate net profit/loss
+            const netProfit = netSaleAmount - investment;
+            
+            // Calculate total fees
+            const totalFees = buyFee + sellFee;
+
+            // Display results
+            document.getElementById('coinsPurchased').textContent = coinsPurchased.toFixed(8);
+            document.getElementById('buyFee').textContent = formatCurrency(buyFee);
+            document.getElementById('grossSale').textContent = formatCurrency(grossSaleAmount);
+            document.getElementById('sellFee').textContent = formatCurrency(sellFee);
+            document.getElementById('netSale').textContent = formatCurrency(netSaleAmount);
+            document.getElementById('totalFees').textContent = formatCurrency(totalFees);
+            
+            const netProfitElement = document.getElementById('netProfit');
+            netProfitElement.textContent = formatCurrency(netProfit);
+            
+            // Color code profit/loss
+            if (netProfit > 0) {
+                netProfitElement.className = 'text-2xl font-bold text-green-600';
+            } else if (netProfit < 0) {
+                netProfitElement.className = 'text-2xl font-bold text-red-600';
+            } else {
+                netProfitElement.className = 'text-2xl font-bold text-gray-600';
+            }
+
+            // Show results
+            document.getElementById('results').classList.remove('hidden');
+        }
+
+        // Handle form submission
+        document.getElementById('calcForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            calculate();
+        });
+
+        // Run on page load
+        window.addEventListener('load', function() {
+            setDefaults();
+            calculate();
+        });
+    </script>
+</body>
+</html>
