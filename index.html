@@ -159,8 +159,23 @@
                 return;
             }
 
-            if (buyPrice <= 0 || sellPrice <= 0 || investment <= 0) {
-                alert('Prices and investment must be greater than zero');
+            if (investment <= 0) {
+                alert('Investment amount must be greater than zero');
+                return;
+            }
+
+            if (buyPrice <= 0) {
+                alert('Buy price must be greater than zero');
+                return;
+            }
+
+            if (sellPrice <= 0) {
+                alert('Sell price must be greater than zero');
+                return;
+            }
+
+            if (feePercent < 0 || feePercent > 100) {
+                alert('Fee percentage must be between 0 and 100');
                 return;
             }
 
