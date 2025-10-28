@@ -155,7 +155,7 @@
         };
 
         // Cookie helper functions
-        function setCookie(name, value, days = 365) {
+        function setCookie(name, value, days = 90) {
             const expires = new Date();
             expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
             document.cookie = name + '=' + encodeURIComponent(value) + ';expires=' + expires.toUTCString() + ';path=/';
@@ -177,8 +177,6 @@
             try {
                 // Try to detect currency from user's locale
                 const userLocale = navigator.language || navigator.userLanguage || 'en-US';
-                const formatter = new Intl.NumberFormat(userLocale, { style: 'currency', currency: 'USD' });
-                const parts = formatter.resolvedOptions();
                 
                 // Common currency mappings based on locale
                 const localeToCurrency = {
@@ -243,6 +241,7 @@
         // Format number as currency
         function formatCurrency(num) {
             const currency = document.getElementById('currency').value || 'USD';
+            // Use 'en-US' locale for consistent formatting across all users
             return new Intl.NumberFormat('en-US', {
                 style: 'currency',
                 currency: currency,
