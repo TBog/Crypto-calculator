@@ -64,6 +64,32 @@
                     />
                 </div>
 
+                <div>
+                    <label for="currency" class="block text-sm font-medium text-gray-700 mb-1">
+                        Currency
+                    </label>
+                    <select 
+                        id="currency" 
+                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                        <option value="USD">USD - US Dollar</option>
+                        <option value="EUR">EUR - Euro</option>
+                        <option value="GBP">GBP - British Pound</option>
+                        <option value="JPY">JPY - Japanese Yen</option>
+                        <option value="CNY">CNY - Chinese Yuan</option>
+                        <option value="AUD">AUD - Australian Dollar</option>
+                        <option value="CAD">CAD - Canadian Dollar</option>
+                        <option value="CHF">CHF - Swiss Franc</option>
+                        <option value="INR">INR - Indian Rupee</option>
+                        <option value="BRL">BRL - Brazilian Real</option>
+                        <option value="RUB">RUB - Russian Ruble</option>
+                        <option value="KRW">KRW - South Korean Won</option>
+                        <option value="MXN">MXN - Mexican Peso</option>
+                        <option value="SGD">SGD - Singapore Dollar</option>
+                        <option value="HKD">HKD - Hong Kong Dollar</option>
+                    </select>
+                </div>
+
                 <button 
                     type="submit" 
                     class="w-full bg-blue-600 text-white py-3 rounded-md hover:bg-blue-700 transition font-semibold"
@@ -128,6 +154,84 @@
             fee: 0.01
         };
 
+        // Cookie helper functions
+        function setCookie(name, value, days = 365) {
+            const expires = new Date();
+            expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
+            document.cookie = name + '=' + encodeURIComponent(value) + ';expires=' + expires.toUTCString() + ';path=/';
+        }
+
+        function getCookie(name) {
+            const nameEQ = name + '=';
+            const ca = document.cookie.split(';');
+            for (let i = 0; i < ca.length; i++) {
+                let c = ca[i];
+                while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+                if (c.indexOf(nameEQ) === 0) return decodeURIComponent(c.substring(nameEQ.length, c.length));
+            }
+            return null;
+        }
+
+        // Detect user's currency based on locale
+        function detectUserCurrency() {
+            try {
+                // Try to detect currency from user's locale
+                const userLocale = navigator.language || navigator.userLanguage || 'en-US';
+                const formatter = new Intl.NumberFormat(userLocale, { style: 'currency', currency: 'USD' });
+                const parts = formatter.resolvedOptions();
+                
+                // Common currency mappings based on locale
+                const localeToCurrency = {
+                    'en-US': 'USD', 'en-GB': 'GBP', 'en-AU': 'AUD', 'en-CA': 'CAD',
+                    'de': 'EUR', 'de-DE': 'EUR', 'fr': 'EUR', 'fr-FR': 'EUR', 
+                    'es': 'EUR', 'es-ES': 'EUR', 'it': 'EUR', 'it-IT': 'EUR',
+                    'pt-BR': 'BRL', 'ja': 'JPY', 'ja-JP': 'JPY',
+                    'zh-CN': 'CNY', 'ko': 'KRW', 'ko-KR': 'KRW',
+                    'en-IN': 'INR', 'hi': 'INR', 'ru': 'RUB', 'ru-RU': 'RUB',
+                    'es-MX': 'MXN', 'en-SG': 'SGD', 'zh-HK': 'HKD', 'en-HK': 'HKD'
+                };
+                
+                // Try exact match first, then language part
+                let detectedCurrency = localeToCurrency[userLocale];
+                if (!detectedCurrency) {
+                    const lang = userLocale.split('-')[0];
+                    detectedCurrency = localeToCurrency[lang];
+                }
+                
+                return detectedCurrency || 'USD';
+            } catch (e) {
+                return 'USD';
+            }
+        }
+
+        // Save form values to cookies
+        function saveFormValues() {
+            setCookie('crypto_calc_investment', document.getElementById('investment').value);
+            setCookie('crypto_calc_buyPrice', document.getElementById('buyPrice').value);
+            setCookie('crypto_calc_sellPrice', document.getElementById('sellPrice').value);
+            setCookie('crypto_calc_fee', document.getElementById('fee').value);
+            setCookie('crypto_calc_currency', document.getElementById('currency').value);
+        }
+
+        // Load form values from cookies
+        function loadFormValues() {
+            const savedInvestment = getCookie('crypto_calc_investment');
+            const savedBuyPrice = getCookie('crypto_calc_buyPrice');
+            const savedSellPrice = getCookie('crypto_calc_sellPrice');
+            const savedFee = getCookie('crypto_calc_fee');
+            const savedCurrency = getCookie('crypto_calc_currency');
+
+            // Set values from cookies or defaults
+            document.getElementById('investment').value = savedInvestment || defaults.investment;
+            document.getElementById('buyPrice').value = savedBuyPrice || defaults.buyPrice;
+            document.getElementById('sellPrice').value = savedSellPrice || defaults.sellPrice;
+            document.getElementById('fee').value = savedFee || defaults.fee;
+            
+            // Set currency: first try cookie, then detect, then default to USD
+            const currency = savedCurrency || detectUserCurrency();
+            document.getElementById('currency').value = currency;
+        }
+
         // Set default values
         function setDefaults() {
             document.getElementById('investment').value = defaults.investment;
@@ -138,9 +242,10 @@
 
         // Format number as currency
         function formatCurrency(num) {
+            const currency = document.getElementById('currency').value || 'USD';
             return new Intl.NumberFormat('en-US', {
                 style: 'currency',
-                currency: 'USD',
+                currency: currency,
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
             }).format(num);
@@ -228,12 +333,29 @@
         // Handle form submission
         document.getElementById('calcForm').addEventListener('submit', function(e) {
             e.preventDefault();
+            saveFormValues();
             calculate();
+        });
+
+        // Save values when currency changes and recalculate
+        document.getElementById('currency').addEventListener('change', function() {
+            saveFormValues();
+            // Only recalculate if results are visible
+            if (!document.getElementById('results').classList.contains('hidden')) {
+                calculate();
+            }
+        });
+
+        // Save values when inputs change
+        ['investment', 'buyPrice', 'sellPrice', 'fee'].forEach(function(id) {
+            document.getElementById(id).addEventListener('change', function() {
+                saveFormValues();
+            });
         });
 
         // Run on page load
         window.addEventListener('load', function() {
-            setDefaults();
+            loadFormValues();
             calculate();
         });
     </script>
