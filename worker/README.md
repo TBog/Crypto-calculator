@@ -32,7 +32,7 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
    ```toml
    name = "crypto-cache"
    main = "index.js"
-   compatibility_date = "2024-01-01"
+   compatibility_date = "2024-10-01"
    
    [env.production]
    # Add your environment variables here after deployment
