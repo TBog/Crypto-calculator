@@ -260,13 +260,12 @@
             let sellPriceValue = savedSellPrice;
             if (!sellPriceValue) {
                 sellPriceValue = await fetchBTCPrice();
-                defaults.sellPrice = sellPriceValue;
             }
 
             // Set values from cookies or defaults
             document.getElementById('investment').value = savedInvestment || defaults.investment;
             document.getElementById('buyPrice').value = savedBuyPrice || defaults.buyPrice;
-            document.getElementById('sellPrice').value = sellPriceValue;
+            document.getElementById('sellPrice').value = sellPriceValue || defaults.sellPrice;
             document.getElementById('fee').value = savedFee || defaults.fee;
             
             // Set currency: first try cookie, then detect, then default to USD
@@ -309,6 +308,11 @@
             if (resultsShown) {
                 animateElement(element);
             }
+        }
+
+        // Check if results are currently visible
+        function areResultsVisible() {
+            return !document.getElementById('results').classList.contains('hidden');
         }
 
         // Calculate profit
@@ -404,7 +408,7 @@
         document.getElementById('currency').addEventListener('change', function() {
             saveFormValues();
             // Only recalculate if results are visible
-            if (!document.getElementById('results').classList.contains('hidden')) {
+            if (areResultsVisible()) {
                 calculate();
             }
         });
@@ -415,14 +419,14 @@
             element.addEventListener('change', function() {
                 saveFormValues();
                 // Recalculate if results are visible
-                if (!document.getElementById('results').classList.contains('hidden')) {
+                if (areResultsVisible()) {
                     calculate();
                 }
             });
             // Also trigger on input event for real-time updates
             element.addEventListener('input', function() {
                 // Only recalculate if results are visible
-                if (!document.getElementById('results').classList.contains('hidden')) {
+                if (areResultsVisible()) {
                     calculate();
                 }
             });
