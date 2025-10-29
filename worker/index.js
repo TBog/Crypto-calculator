@@ -7,17 +7,20 @@
  * - CORS support for GitHub Pages
  */
 
-addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request, event));
-});
+export default {
+  async fetch(request, env, ctx) {
+    return handleRequest(request, env, ctx);
+  }
+};
 
 /**
  * Main request handler
  * @param {Request} request - Incoming request
- * @param {FetchEvent} event - Fetch event for waitUntil
+ * @param {Object} env - Environment variables
+ * @param {Object} ctx - Execution context
  * @returns {Promise<Response>} Response with CORS headers and caching
  */
-async function handleRequest(request, event) {
+async function handleRequest(request, env, ctx) {
   // CORS headers for all responses
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -48,17 +51,21 @@ async function handleRequest(request, event) {
     let response = await cache.match(request);
 
     if (response) {
-      // Cache hit - add CORS headers and return
-      response = new Response(response.body, response);
-      Object.entries(corsHeaders).forEach(([key, value]) => {
-        response.headers.set(key, value);
+      // Cache hit - clone response and add CORS headers
+      const newResponse = new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: new Headers(response.headers)
       });
-      response.headers.set('X-Cache-Status', 'HIT');
-      return response;
+      Object.entries(corsHeaders).forEach(([key, value]) => {
+        newResponse.headers.set(key, value);
+      });
+      newResponse.headers.set('X-Cache-Status', 'HIT');
+      return newResponse;
     }
 
     // Cache miss - fetch from upstream
-    const apiKey = COINGECKO_KEY; // Environment variable from Cloudflare Workers
+    const apiKey = env.COINGECKO_KEY; // Environment variable from Cloudflare Workers
     
     // Parse the request URL to get the query parameters
     const url = new URL(request.url);
@@ -99,7 +106,7 @@ async function handleRequest(request, event) {
 
     // Cache the response (clone it first as the body can only be read once)
     if (upstreamResponse.ok) {
-      event.waitUntil(cache.put(request, response.clone()));
+      ctx.waitUntil(cache.put(request, response.clone()));
     }
 
     return response;
