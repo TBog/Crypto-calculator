@@ -263,13 +263,13 @@
             }
 
             // Set values from cookies or defaults
-            document.getElementById('investment').value = savedInvestment || defaults.investment;
-            document.getElementById('buyPrice').value = savedBuyPrice || defaults.buyPrice;
-            document.getElementById('sellPrice').value = sellPriceValue || defaults.sellPrice;
-            document.getElementById('fee').value = savedFee || defaults.fee;
+            document.getElementById('investment').value = savedInvestment ?? defaults.investment;
+            document.getElementById('buyPrice').value = savedBuyPrice ?? defaults.buyPrice;
+            document.getElementById('sellPrice').value = sellPriceValue ?? defaults.sellPrice ?? 485000;
+            document.getElementById('fee').value = savedFee ?? defaults.fee;
             
             // Set currency: first try cookie, then detect, then default to USD
-            const currency = savedCurrency || detectUserCurrency();
+            const currency = savedCurrency ?? detectUserCurrency();
             document.getElementById('currency').value = currency;
         }
 
@@ -312,7 +312,8 @@
 
         // Check if results are currently visible
         function areResultsVisible() {
-            return !document.getElementById('results').classList.contains('hidden');
+            const resultsElement = document.getElementById('results');
+            return resultsElement && !resultsElement.classList.contains('hidden');
         }
 
         // Calculate profit
