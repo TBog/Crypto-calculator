@@ -230,11 +230,14 @@
         // State to track if results have been shown
         let resultsShown = false;
 
-        // Fetch current BTC price from CoinGecko API
+        // Fetch current BTC price from CoinGecko API via Cloudflare Worker proxy
         async function fetchBTCPrice(currency = 'usd') {
             try {
                 const currencyLower = currency.toLowerCase();
-                const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${currencyLower}`);
+                // TODO: Replace this URL with your deployed Cloudflare Worker URL
+                // Example: https://crypto-cache.YOUR_SUBDOMAIN.workers.dev/api/v3/simple/price?ids=bitcoin&vs_currencies=${currencyLower}
+                const workerUrl = `https://YOUR_WORKER_URL.workers.dev/api/v3/simple/price?ids=bitcoin&vs_currencies=${currencyLower}`;
+                const response = await fetch(workerUrl);
                 const data = await response.json();
                 return data.bitcoin[currencyLower];
             } catch (error) {
