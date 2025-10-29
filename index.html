@@ -223,6 +223,7 @@
             investment: 50000,
             buyPrice: 480000,
             sellPrice: null, // Will be fetched from API
+            sellPriceFallback: 485000, // Fallback only if API fails (approximate USD value)
             fee: 0.01
         };
 
@@ -238,8 +239,8 @@
                 return data.bitcoin[currencyLower];
             } catch (error) {
                 console.error('Error fetching BTC price:', error);
-                // Fallback: Return null to allow form to use existing value or user input
-                // Note: 485000 was the old USD default, but we shouldn't assume currency
+                // Return null to allow downstream code to decide fallback behavior
+                // User can still manually enter a sell price if API is unavailable
                 return null;
             }
         }
@@ -320,8 +321,8 @@
             // Set values from cookies or defaults
             document.getElementById('investment').value = savedInvestment ?? defaults.investment;
             document.getElementById('buyPrice').value = savedBuyPrice ?? defaults.buyPrice;
-            // Use fetched price, or fallback to default (485000 for USD compatibility)
-            document.getElementById('sellPrice').value = sellPriceValue ?? defaults.sellPrice ?? 485000;
+            // Use fetched price, or fallback to approximate value for initial load only
+            document.getElementById('sellPrice').value = sellPriceValue ?? defaults.sellPriceFallback;
             document.getElementById('fee').value = savedFee ?? defaults.fee;
         }
 
