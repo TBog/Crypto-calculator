@@ -211,6 +211,13 @@
     </div>
 
     <script>
+        // Animation configuration
+        const ANIMATION_CONFIG = {
+            DIGIT_FLIP_DURATION: 400, // ms - matches CSS animation duration
+            DIGIT_STAGGER_DELAY: 30,  // ms - delay between each digit
+            RESULTS_SLIDE_DURATION: 500 // ms - results container slide-down
+        };
+
         // Default values
         const defaults = {
             investment: 50000,
@@ -231,7 +238,9 @@
                 return data.bitcoin[currencyLower];
             } catch (error) {
                 console.error('Error fetching BTC price:', error);
-                return 485000; // Fallback to old default if API fails
+                // Fallback: Return null to allow form to use existing value or user input
+                // Note: 485000 was the old USD default, but we shouldn't assume currency
+                return null;
             }
         }
 
@@ -311,6 +320,7 @@
             // Set values from cookies or defaults
             document.getElementById('investment').value = savedInvestment ?? defaults.investment;
             document.getElementById('buyPrice').value = savedBuyPrice ?? defaults.buyPrice;
+            // Use fetched price, or fallback to default (485000 for USD compatibility)
             document.getElementById('sellPrice').value = sellPriceValue ?? defaults.sellPrice ?? 485000;
             document.getElementById('fee').value = savedFee ?? defaults.fee;
         }
@@ -351,13 +361,15 @@
             // Wrap each character in a span for individual animation
             const chars = newValue.split('');
             element.innerHTML = chars.map((char, index) => {
-                return `<span class="digit-flip" style="animation-delay: ${index * 0.03}s">${char}</span>`;
+                const delayMs = index * ANIMATION_CONFIG.DIGIT_STAGGER_DELAY;
+                return `<span class="digit-flip" style="animation-delay: ${delayMs}ms">${char}</span>`;
             }).join('');
 
             // Remove animation classes after animation completes
+            const totalDuration = ANIMATION_CONFIG.DIGIT_FLIP_DURATION + (chars.length * ANIMATION_CONFIG.DIGIT_STAGGER_DELAY);
             setTimeout(() => {
                 element.textContent = newValue;
-            }, 400 + (chars.length * 30));
+            }, totalDuration);
         }
 
         // Update element with animation
@@ -470,7 +482,9 @@
             // Fetch new BTC price for the selected currency
             const currency = document.getElementById('currency').value;
             const newPrice = await fetchBTCPrice(currency);
-            document.getElementById('sellPrice').value = newPrice;
+            if (newPrice !== null) {
+                document.getElementById('sellPrice').value = newPrice;
+            }
             // Only recalculate if results are visible
             if (areResultsVisible()) {
                 calculate();
@@ -481,7 +495,9 @@
         document.getElementById('refreshPrice').addEventListener('click', async function() {
             const currency = document.getElementById('currency').value;
             const newPrice = await fetchBTCPrice(currency);
-            document.getElementById('sellPrice').value = newPrice;
+            if (newPrice !== null) {
+                document.getElementById('sellPrice').value = newPrice;
+            }
             // Recalculate if results are visible
             if (areResultsVisible()) {
                 calculate();
