@@ -5,6 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Crypto Profit Calculator</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes digitChange {
+            0% {
+                opacity: 0.5;
+                transform: scale(0.95);
+            }
+            50% {
+                opacity: 0.8;
+                transform: scale(1.05);
+            }
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        .animate-digit {
+            animation: digitChange 0.3s ease-in-out;
+        }
+    </style>
 </head>
 <body class="bg-gray-100 min-h-screen py-8 px-4">
     <div class="max-w-2xl mx-auto">
@@ -99,7 +119,7 @@
                 </button>
             </form>
 
-            <div id="results" class="mt-6 hidden">
+            <div id="results" class="mt-6 hidden" style="display: none;">
                 <div class="bg-gray-50 rounded-lg p-4 space-y-3">
                     <h2 class="text-xl font-bold text-gray-800 mb-3">Results</h2>
                     
@@ -151,9 +171,24 @@
         const defaults = {
             investment: 50000,
             buyPrice: 480000,
-            sellPrice: 485000,
+            sellPrice: null, // Will be fetched from API
             fee: 0.01
         };
+
+        // State to track if results have been shown
+        let resultsShown = false;
+
+        // Fetch current BTC price from CoinGecko API
+        async function fetchBTCPrice() {
+            try {
+                const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
+                const data = await response.json();
+                return data.bitcoin.usd;
+            } catch (error) {
+                console.error('Error fetching BTC price:', error);
+                return 485000; // Fallback to old default if API fails
+            }
+        }
 
         // Cookie helper functions
         function setCookie(name, value, days = 90) {
@@ -214,17 +249,24 @@
         }
 
         // Load form values from cookies
-        function loadFormValues() {
+        async function loadFormValues() {
             const savedInvestment = getCookie('crypto_calc_investment');
             const savedBuyPrice = getCookie('crypto_calc_buyPrice');
             const savedSellPrice = getCookie('crypto_calc_sellPrice');
             const savedFee = getCookie('crypto_calc_fee');
             const savedCurrency = getCookie('crypto_calc_currency');
 
+            // Fetch current BTC price if no saved sell price
+            let sellPriceValue = savedSellPrice;
+            if (!sellPriceValue) {
+                sellPriceValue = await fetchBTCPrice();
+                defaults.sellPrice = sellPriceValue;
+            }
+
             // Set values from cookies or defaults
             document.getElementById('investment').value = savedInvestment || defaults.investment;
             document.getElementById('buyPrice').value = savedBuyPrice || defaults.buyPrice;
-            document.getElementById('sellPrice').value = savedSellPrice || defaults.sellPrice;
+            document.getElementById('sellPrice').value = sellPriceValue;
             document.getElementById('fee').value = savedFee || defaults.fee;
             
             // Set currency: first try cookie, then detect, then default to USD
@@ -250,6 +292,23 @@
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
             }).format(num);
+        }
+
+        // Animate element when value changes
+        function animateElement(element) {
+            element.classList.remove('animate-digit');
+            // Force reflow to restart animation
+            void element.offsetWidth;
+            element.classList.add('animate-digit');
+        }
+
+        // Update element with animation
+        function updateWithAnimation(elementId, value) {
+            const element = document.getElementById(elementId);
+            element.textContent = value;
+            if (resultsShown) {
+                animateElement(element);
+            }
         }
 
         // Calculate profit
@@ -307,16 +366,16 @@
             // Calculate total fees
             const totalFees = buyFee + sellFee;
 
-            // Display results
-            document.getElementById('coinsPurchased').textContent = coinsPurchased.toFixed(8);
-            document.getElementById('buyFee').textContent = formatCurrency(buyFee);
-            document.getElementById('grossSale').textContent = formatCurrency(grossSaleAmount);
-            document.getElementById('sellFee').textContent = formatCurrency(sellFee);
-            document.getElementById('netSale').textContent = formatCurrency(netSaleAmount);
-            document.getElementById('totalFees').textContent = formatCurrency(totalFees);
+            // Display results with animation
+            updateWithAnimation('coinsPurchased', coinsPurchased.toFixed(8));
+            updateWithAnimation('buyFee', formatCurrency(buyFee));
+            updateWithAnimation('grossSale', formatCurrency(grossSaleAmount));
+            updateWithAnimation('sellFee', formatCurrency(sellFee));
+            updateWithAnimation('netSale', formatCurrency(netSaleAmount));
+            updateWithAnimation('totalFees', formatCurrency(totalFees));
             
             const netProfitElement = document.getElementById('netProfit');
-            netProfitElement.textContent = formatCurrency(netProfit);
+            updateWithAnimation('netProfit', formatCurrency(netProfit));
             
             // Color code profit/loss
             if (netProfit > 0) {
@@ -328,7 +387,10 @@
             }
 
             // Show results
-            document.getElementById('results').classList.remove('hidden');
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.classList.remove('hidden');
+            resultsDiv.style.display = '';
+            resultsShown = true;
         }
 
         // Handle form submission
@@ -347,17 +409,29 @@
             }
         });
 
-        // Save values when inputs change
+        // Save values and recalculate when inputs change
         ['investment', 'buyPrice', 'sellPrice', 'fee'].forEach(function(id) {
-            document.getElementById(id).addEventListener('change', function() {
+            const element = document.getElementById(id);
+            element.addEventListener('change', function() {
                 saveFormValues();
+                // Recalculate if results are visible
+                if (!document.getElementById('results').classList.contains('hidden')) {
+                    calculate();
+                }
+            });
+            // Also trigger on input event for real-time updates
+            element.addEventListener('input', function() {
+                // Only recalculate if results are visible
+                if (!document.getElementById('results').classList.contains('hidden')) {
+                    calculate();
+                }
             });
         });
 
         // Run on page load
-        window.addEventListener('load', function() {
-            loadFormValues();
-            calculate();
+        window.addEventListener('load', async function() {
+            await loadFormValues();
+            // Do not calculate on initial load - wait for user interaction
         });
     </script>
 </body>
