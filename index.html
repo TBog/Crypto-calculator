@@ -24,6 +24,40 @@
         .animate-digit {
             animation: digitChange 0.3s ease-in-out;
         }
+
+        /* Smooth slide-down animation for results */
+        #results {
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transition: max-height 0.5s ease-out, opacity 0.3s ease-out;
+        }
+
+        #results.show {
+            max-height: 500px;
+            opacity: 1;
+        }
+
+        /* Individual digit animation */
+        @keyframes digitFlip {
+            0% {
+                transform: rotateX(0deg);
+                opacity: 1;
+            }
+            50% {
+                transform: rotateX(90deg);
+                opacity: 0.5;
+            }
+            100% {
+                transform: rotateX(0deg);
+                opacity: 1;
+            }
+        }
+
+        .digit-flip {
+            display: inline-block;
+            animation: digitFlip 0.4s ease-in-out;
+        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen py-8 px-4">
@@ -62,13 +96,23 @@
                     <label for="sellPrice" class="block text-sm font-medium text-gray-700 mb-1">
                         Sell Price
                     </label>
-                    <input 
-                        type="number" 
-                        id="sellPrice" 
-                        step="0.01"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="Enter sell price"
-                    />
+                    <div class="flex gap-2">
+                        <input 
+                            type="number" 
+                            id="sellPrice" 
+                            step="0.01"
+                            class="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Enter sell price"
+                        />
+                        <button
+                            type="button"
+                            id="refreshPrice"
+                            class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-md transition"
+                            title="Refresh current BTC price"
+                        >
+                            🔄
+                        </button>
+                    </div>
                 </div>
 
                 <div>
@@ -119,7 +163,7 @@
                 </button>
             </form>
 
-            <div id="results" class="mt-6 hidden" style="display: none;">
+            <div id="results" class="mt-6">
                 <div class="bg-gray-50 rounded-lg p-4 space-y-3">
                     <h2 class="text-xl font-bold text-gray-800 mb-3">Results</h2>
                     
@@ -179,11 +223,12 @@
         let resultsShown = false;
 
         // Fetch current BTC price from CoinGecko API
-        async function fetchBTCPrice() {
+        async function fetchBTCPrice(currency = 'usd') {
             try {
-                const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
+                const currencyLower = currency.toLowerCase();
+                const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${currencyLower}`);
                 const data = await response.json();
-                return data.bitcoin.usd;
+                return data.bitcoin[currencyLower];
             } catch (error) {
                 console.error('Error fetching BTC price:', error);
                 return 485000; // Fallback to old default if API fails
@@ -239,11 +284,11 @@
             }
         }
 
-        // Save form values to cookies
+        // Save form values to cookies (excluding sell price)
         function saveFormValues() {
             setCookie('crypto_calc_investment', document.getElementById('investment').value);
             setCookie('crypto_calc_buyPrice', document.getElementById('buyPrice').value);
-            setCookie('crypto_calc_sellPrice', document.getElementById('sellPrice').value);
+            // Sell price is not saved - always fetched from API
             setCookie('crypto_calc_fee', document.getElementById('fee').value);
             setCookie('crypto_calc_currency', document.getElementById('currency').value);
         }
@@ -252,25 +297,22 @@
         async function loadFormValues() {
             const savedInvestment = getCookie('crypto_calc_investment');
             const savedBuyPrice = getCookie('crypto_calc_buyPrice');
-            const savedSellPrice = getCookie('crypto_calc_sellPrice');
+            // Sell price is not saved in cookies - always fetch from API
             const savedFee = getCookie('crypto_calc_fee');
             const savedCurrency = getCookie('crypto_calc_currency');
 
-            // Fetch current BTC price if no saved sell price
-            let sellPriceValue = savedSellPrice;
-            if (!sellPriceValue) {
-                sellPriceValue = await fetchBTCPrice();
-            }
+            // Set currency first: try cookie, then detect, then default to USD
+            const currency = savedCurrency ?? detectUserCurrency();
+            document.getElementById('currency').value = currency;
+
+            // Fetch current BTC price for the selected currency
+            const sellPriceValue = await fetchBTCPrice(currency);
 
             // Set values from cookies or defaults
             document.getElementById('investment').value = savedInvestment ?? defaults.investment;
             document.getElementById('buyPrice').value = savedBuyPrice ?? defaults.buyPrice;
             document.getElementById('sellPrice').value = sellPriceValue ?? defaults.sellPrice ?? 485000;
             document.getElementById('fee').value = savedFee ?? defaults.fee;
-            
-            // Set currency: first try cookie, then detect, then default to USD
-            const currency = savedCurrency ?? detectUserCurrency();
-            document.getElementById('currency').value = currency;
         }
 
         // Set default values
@@ -301,19 +343,37 @@
             element.classList.add('animate-digit');
         }
 
+        // Animate individual characters/digits with staggered effect
+        function animateDigits(element, newValue) {
+            const oldValue = element.textContent;
+            if (oldValue === newValue) return;
+
+            // Wrap each character in a span for individual animation
+            const chars = newValue.split('');
+            element.innerHTML = chars.map((char, index) => {
+                return `<span class="digit-flip" style="animation-delay: ${index * 0.03}s">${char}</span>`;
+            }).join('');
+
+            // Remove animation classes after animation completes
+            setTimeout(() => {
+                element.textContent = newValue;
+            }, 400 + (chars.length * 30));
+        }
+
         // Update element with animation
         function updateWithAnimation(elementId, value) {
             const element = document.getElementById(elementId);
-            element.textContent = value;
             if (resultsShown) {
-                animateElement(element);
+                animateDigits(element, value);
+            } else {
+                element.textContent = value;
             }
         }
 
         // Check if results are currently visible
         function areResultsVisible() {
             const resultsElement = document.getElementById('results');
-            return resultsElement && !resultsElement.classList.contains('hidden');
+            return resultsElement && resultsElement.classList.contains('show');
         }
 
         // Calculate profit
@@ -391,10 +451,9 @@
                 netProfitElement.className = 'text-2xl font-bold text-gray-600';
             }
 
-            // Show results
+            // Show results with smooth animation
             const resultsDiv = document.getElementById('results');
-            resultsDiv.classList.remove('hidden');
-            resultsDiv.style.display = '';
+            resultsDiv.classList.add('show');
             resultsShown = true;
         }
 
@@ -406,9 +465,24 @@
         });
 
         // Save values when currency changes and recalculate
-        document.getElementById('currency').addEventListener('change', function() {
+        document.getElementById('currency').addEventListener('change', async function() {
             saveFormValues();
+            // Fetch new BTC price for the selected currency
+            const currency = document.getElementById('currency').value;
+            const newPrice = await fetchBTCPrice(currency);
+            document.getElementById('sellPrice').value = newPrice;
             // Only recalculate if results are visible
+            if (areResultsVisible()) {
+                calculate();
+            }
+        });
+
+        // Refresh button handler
+        document.getElementById('refreshPrice').addEventListener('click', async function() {
+            const currency = document.getElementById('currency').value;
+            const newPrice = await fetchBTCPrice(currency);
+            document.getElementById('sellPrice').value = newPrice;
+            // Recalculate if results are visible
             if (areResultsVisible()) {
                 calculate();
             }
