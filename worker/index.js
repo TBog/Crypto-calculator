@@ -48,15 +48,6 @@ async function handleRequest(request, env, ctx) {
       for (const allowedOrigin of ALLOWED_ORIGINS) {
         try {
           const allowedUrl = new URL(allowedOrigin);
-          
-          // For localhost/127.0.0.1, match protocol and hostname (allow any port)
-          if (allowedUrl.hostname === 'localhost' || allowedUrl.hostname === '127.0.0.1') {
-            if (originUrl.protocol === allowedUrl.protocol && 
-                originUrl.hostname === allowedUrl.hostname) {
-              isAllowedOrigin = true;
-              break;
-            }
-          } else {
             // For production domains, require exact match (protocol, hostname, and port)
             if (originUrl.protocol === allowedUrl.protocol &&
                 originUrl.hostname === allowedUrl.hostname &&
@@ -64,7 +55,6 @@ async function handleRequest(request, env, ctx) {
               isAllowedOrigin = true;
               break;
             }
-          }
         } catch (e) {
           // Skip invalid URL in allowed list
           continue;
