@@ -238,7 +238,7 @@
             try {
                 // TODO: Replace this URL with your deployed Cloudflare Worker URL
                 // Example: https://crypto-cache.YOUR_SUBDOMAIN.workers.dev/api/v3/simple/price?ids=bitcoin&vs_currencies=${currencyLower}
-                const workerUrl = `https://YOUR_WORKER_URL.workers.dev/api/v3/simple/price?ids=bitcoin&vs_currencies=${currencyLower}`;
+                const workerUrl = `https://crypto-cache.tbog.workers.dev/api/v3/simple/price?ids=bitcoin&vs_currencies=${currencyLower}`;
                 const response = await fetch(workerUrl);
                 
                 if (!response.ok) {
