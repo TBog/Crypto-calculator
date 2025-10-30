@@ -85,24 +85,30 @@ Then visit `http://localhost:8000` and test the price fetching functionality.
 
 ### Origin Validation
 
-The worker validates the `Origin` header of incoming requests and only allows requests from:
-- `https://tbog.github.io` (GitHub Pages)
-- `http://localhost:*` and `http://127.0.0.1:*` (local development)
+The worker uses strict origin validation to prevent unauthorized API key usage:
 
-This prevents unauthorized users from using your API key. Requests from unauthorized origins receive a `403 Forbidden` response.
+**Allowed Origins:**
+- **GitHub Pages**: Exact match for `https://tbog.github.io` only
+- **Local Development**: Any `http://localhost:*` or `http://127.0.0.1:*` (any port)
+
+**Security Features:**
+- **Exact matching** for production domain (prevents subdomain attacks like `https://tbog.github.io.evil.com`)
+- **URL parsing** for localhost to validate hostname and protocol separately
+- **403 Forbidden** response for unauthorized origins
+- **Dynamic CORS headers** that reflect the validated origin
 
 ### Modifying Allowed Origins
 
-To add or modify allowed origins, edit the `ALLOWED_ORIGINS` array in `worker/index.js`:
+To add or modify the production origin, edit the validation logic in the `handleRequest` function in `worker/index.js`:
 
 ```javascript
-const ALLOWED_ORIGINS = [
-  'https://tbog.github.io',
-  'https://your-custom-domain.com',
-  'http://localhost:3000',
-  // Add more origins as needed
-];
+// Check for exact match with GitHub Pages or your custom domain
+if (origin === 'https://tbog.github.io' || origin === 'https://your-custom-domain.com') {
+  isAllowedOrigin = true;
+}
 ```
+
+For localhost development, the worker automatically allows any port on `localhost` or `127.0.0.1` with `http://` or `https://` protocol.
 
 ## Cache Headers
 
