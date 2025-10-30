@@ -62,6 +62,11 @@ const CACHE_DURATION = 60000; // 60 seconds cache
 // Chart instance
 let priceChart = null;
 
+// Register Chart.js zoom plugin
+if (typeof Chart !== 'undefined' && typeof ChartZoom !== 'undefined') {
+    Chart.register(ChartZoom);
+}
+
 // Fetch current BTC price from CoinGecko API via Cloudflare Worker proxy with fallback
 async function fetchBTCPrice(currency = 'usd') {
     const currencyLower = currency.toLowerCase();
@@ -328,9 +333,10 @@ async function initPriceChart(currency = 'USD') {
     });
     
     // Add double-click to reset zoom
-    document.getElementById('priceChart').ondblclick = function() {
+    const chartCanvas = document.getElementById('priceChart');
+    chartCanvas.addEventListener('dblclick', function() {
         priceChart.resetZoom();
-    };
+    });
 }
 
 // Cookie helper functions
