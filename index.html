@@ -171,12 +171,21 @@
                     </select>
                 </div>
 
-                <button 
-                    type="submit" 
-                    class="w-full bg-blue-600 text-white py-3 rounded-md hover:bg-blue-700 transition font-semibold"
-                >
-                    Calculate
-                </button>
+                <div class="flex gap-2">
+                    <button 
+                        type="submit" 
+                        class="flex-1 bg-blue-600 text-white py-3 rounded-md hover:bg-blue-700 transition font-semibold"
+                    >
+                        Calculate
+                    </button>
+                    <button 
+                        type="button"
+                        id="saveTransaction"
+                        class="flex-1 bg-green-600 text-white py-3 rounded-md hover:bg-green-700 transition font-semibold"
+                    >
+                        Save Transaction
+                    </button>
+                </div>
             </form>
 
             <div id="results" class="mt-6">
@@ -220,6 +229,39 @@
                                 <span id="netProfit" class="text-2xl font-bold"></span>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Saved Transactions Section -->
+            <div id="transactionsSection" class="mt-6" style="display: none;">
+                <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                    <div class="flex justify-between items-center mb-3">
+                        <h2 class="text-xl font-bold text-gray-800 dark:text-white">Saved Transactions</h2>
+                        <button 
+                            id="clearAllTransactions"
+                            class="px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition font-semibold"
+                        >
+                            Clear All
+                        </button>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="border-b dark:border-gray-600">
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Investment</th>
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Buy Price</th>
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Coins</th>
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Current Price</th>
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Current Profit/Loss</th>
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="transactionsTableBody" class="dark:text-gray-200">
+                                <!-- Transactions will be inserted here -->
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -599,11 +641,157 @@
             });
         });
 
+        // ========== TRANSACTIONS MANAGEMENT ==========
+        
+        // Load transactions from localStorage
+        function loadTransactions() {
+            const saved = localStorage.getItem('crypto_calc_transactions');
+            return saved ? JSON.parse(saved) : [];
+        }
+
+        // Save transactions to localStorage
+        function saveTransactions(transactions) {
+            localStorage.setItem('crypto_calc_transactions', JSON.stringify(transactions));
+        }
+
+        // Calculate current profit for a transaction
+        function calculateTransactionProfit(transaction, currentPrice) {
+            const buyFee = transaction.investment * (transaction.fee / 100);
+            const amountAfterBuyFee = transaction.investment - buyFee;
+            const coinsPurchased = amountAfterBuyFee / transaction.buyPrice;
+            const grossSaleAmount = coinsPurchased * currentPrice;
+            const sellFee = grossSaleAmount * (transaction.fee / 100);
+            const netSaleAmount = grossSaleAmount - sellFee;
+            const netProfit = netSaleAmount - transaction.investment;
+            
+            return {
+                coinsPurchased,
+                netProfit
+            };
+        }
+
+        // Format currency with transaction's currency
+        function formatTransactionCurrency(num, currency) {
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: currency,
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }).format(num);
+        }
+
+        // Render transactions table
+        async function renderTransactions() {
+            const transactions = loadTransactions();
+            const tbody = document.getElementById('transactionsTableBody');
+            const section = document.getElementById('transactionsSection');
+            
+            if (transactions.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+            
+            section.style.display = 'block';
+            tbody.innerHTML = '';
+            
+            for (let i = 0; i < transactions.length; i++) {
+                const tx = transactions[i];
+                const currentPrice = await fetchBTCPrice(tx.currency);
+                const sellPrice = currentPrice !== null ? currentPrice : tx.buyPrice;
+                const { coinsPurchased, netProfit } = calculateTransactionProfit(tx, sellPrice);
+                
+                const profitClass = netProfit > 0 ? 'text-green-600 dark:text-green-400' : 
+                                   netProfit < 0 ? 'text-red-600 dark:text-red-400' : 
+                                   'text-gray-600 dark:text-gray-400';
+                
+                const row = document.createElement('tr');
+                row.className = 'border-b dark:border-gray-600';
+                row.innerHTML = `
+                    <td class="py-2 px-2">${formatTransactionCurrency(tx.investment, tx.currency)}</td>
+                    <td class="py-2 px-2">${formatTransactionCurrency(tx.buyPrice, tx.currency)}</td>
+                    <td class="py-2 px-2">${coinsPurchased.toFixed(8)}</td>
+                    <td class="py-2 px-2">${formatTransactionCurrency(sellPrice, tx.currency)}</td>
+                    <td class="py-2 px-2 font-semibold ${profitClass}">${formatTransactionCurrency(netProfit, tx.currency)}</td>
+                    <td class="py-2 px-2">
+                        <button 
+                            onclick="deleteTransaction(${i})"
+                            class="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600 transition"
+                        >
+                            Delete
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            }
+        }
+
+        // Save current transaction
+        document.getElementById('saveTransaction').addEventListener('click', function() {
+            const investment = parseFloat(document.getElementById('investment').value);
+            const buyPrice = parseFloat(document.getElementById('buyPrice').value);
+            const fee = parseFloat(document.getElementById('fee').value);
+            const currency = document.getElementById('currency').value;
+
+            // Validate inputs
+            if (isNaN(investment) || isNaN(buyPrice) || isNaN(fee)) {
+                alert('Please enter valid numbers for all fields');
+                return;
+            }
+
+            if (investment <= 0 || buyPrice <= 0) {
+                alert('Investment amount and buy price must be greater than zero');
+                return;
+            }
+
+            if (fee < 0 || fee > 100) {
+                alert('Fee percentage must be between 0 and 100');
+                return;
+            }
+
+            const transaction = {
+                investment,
+                buyPrice,
+                fee,
+                currency,
+                timestamp: Date.now()
+            };
+
+            const transactions = loadTransactions();
+            transactions.push(transaction);
+            saveTransactions(transactions);
+            renderTransactions();
+        });
+
+        // Delete a transaction
+        function deleteTransaction(index) {
+            const transactions = loadTransactions();
+            transactions.splice(index, 1);
+            saveTransactions(transactions);
+            renderTransactions();
+        }
+
+        // Clear all transactions
+        document.getElementById('clearAllTransactions').addEventListener('click', function() {
+            if (confirm('Are you sure you want to delete all saved transactions?')) {
+                saveTransactions([]);
+                renderTransactions();
+            }
+        });
+
+        // Update transactions when price is refreshed
+        const originalRefreshHandler = document.getElementById('refreshPrice').onclick;
+        document.getElementById('refreshPrice').addEventListener('click', async function() {
+            // Wait a bit for the price to update
+            await new Promise(resolve => setTimeout(resolve, 500));
+            renderTransactions();
+        });
+
         // Run on page load
         window.addEventListener('load', async function() {
             initDarkMode();
             await loadFormValues();
             // Do not calculate on initial load - wait for user interaction
+            await renderTransactions();
         });
     </script>
 </body>
