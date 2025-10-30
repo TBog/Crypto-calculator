@@ -65,6 +65,8 @@ let priceChart = null;
 // Register Chart.js zoom plugin
 if (typeof Chart !== 'undefined' && typeof ChartZoom !== 'undefined') {
     Chart.register(ChartZoom);
+} else if (typeof Chart !== 'undefined') {
+    console.warn('ChartZoom plugin not loaded - zoom functionality will not be available');
 }
 
 // Fetch current BTC price from CoinGecko API via Cloudflare Worker proxy with fallback
@@ -172,8 +174,9 @@ async function fetchBTCChartData(currency = 'usd') {
 }
 
 // Initialize or update the price chart
-async function initPriceChart(currency = 'USD') {
-    const chartData = await fetchBTCChartData(currency);
+async function initPriceChart(currency = 'usd') {
+    const currencyLower = currency.toLowerCase();
+    const chartData = await fetchBTCChartData(currencyLower);
     
     if (!chartData || !chartData.prices) {
         console.error('Failed to fetch chart data');
@@ -335,7 +338,9 @@ async function initPriceChart(currency = 'USD') {
     // Add double-click to reset zoom
     const chartCanvas = document.getElementById('priceChart');
     chartCanvas.addEventListener('dblclick', function() {
-        priceChart.resetZoom();
+        if (priceChart) {
+            priceChart.resetZoom();
+        }
     });
 }
 
