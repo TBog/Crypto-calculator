@@ -5,10 +5,10 @@
  * - Secure API key handling via environment variables
  * - Edge caching (1 hour TTL)
  * - CORS support for GitHub Pages
- * - Origin validation to prevent unauthorized API key usage
+ * - Strict origin validation to prevent unauthorized API key usage
  */
 
-// Allowed origins for accessing this worker
+// Allowed origins configuration (used for CORS fallback)
 const ALLOWED_ORIGINS = [
   'https://tbog.github.io',
   'http://localhost:3000',
@@ -36,8 +36,25 @@ async function handleRequest(request, env, ctx) {
   // Get the origin from the request
   const origin = request.headers.get('Origin');
   
-  // Validate origin - only allow requests from authorized origins
-  const isAllowedOrigin = origin && ALLOWED_ORIGINS.some(allowed => origin.startsWith(allowed));
+  // Validate origin - only allow exact matches or localhost with any port
+  let isAllowedOrigin = false;
+  if (origin) {
+    // Check for exact match with GitHub Pages
+    if (origin === 'https://tbog.github.io') {
+      isAllowedOrigin = true;
+    } else {
+      // For localhost, validate the protocol and hostname, allow any port
+      try {
+        const url = new URL(origin);
+        const isLocalhost = (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
+        const isHttpProtocol = (url.protocol === 'http:' || url.protocol === 'https:');
+        isAllowedOrigin = isLocalhost && isHttpProtocol;
+      } catch (e) {
+        // Invalid URL, not allowed
+        isAllowedOrigin = false;
+      }
+    }
+  }
   
   // CORS headers for responses
   const corsHeaders = {
