@@ -51,9 +51,20 @@ const defaults = {
 // State to track if results have been shown
 let resultsShown = false;
 
+// API cache with timestamp
+const priceCache = new Map();
+const CACHE_DURATION = 60000; // 60 seconds cache
+
 // Fetch current BTC price from CoinGecko API via Cloudflare Worker proxy with fallback
 async function fetchBTCPrice(currency = 'usd') {
     const currencyLower = currency.toLowerCase();
+    
+    // Check cache first
+    const cacheKey = currencyLower;
+    const cached = priceCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        return cached.price;
+    }
     
     // Try worker first
     try {
@@ -67,7 +78,11 @@ async function fetchBTCPrice(currency = 'usd') {
         }
         
         const data = await response.json();
-        return data.bitcoin[currencyLower];
+        const price = data.bitcoin[currencyLower];
+        
+        // Cache the result
+        priceCache.set(cacheKey, { price, timestamp: Date.now() });
+        return price;
     } catch (workerError) {
         console.warn('Worker API failed, falling back to public API:', workerError);
         
@@ -81,7 +96,11 @@ async function fetchBTCPrice(currency = 'usd') {
             }
             
             const data = await response.json();
-            return data.bitcoin[currencyLower];
+            const price = data.bitcoin[currencyLower];
+            
+            // Cache the result
+            priceCache.set(cacheKey, { price, timestamp: Date.now() });
+            return price;
         } catch (publicError) {
             console.error('Both worker and public API failed:', publicError);
             // Return null to allow downstream code to decide fallback behavior
@@ -369,9 +388,19 @@ async function renderTransactions() {
     section.style.display = 'block';
     tbody.innerHTML = '';
     
+    // Get unique currencies to minimize API calls
+    const uniqueCurrencies = [...new Set(transactions.map(tx => tx.currency))];
+    
+    // Fetch prices for all unique currencies in parallel
+    const pricePromises = uniqueCurrencies.map(currency => 
+        fetchBTCPrice(currency).then(price => ({ currency, price }))
+    );
+    const prices = await Promise.all(pricePromises);
+    const priceMap = new Map(prices.map(({ currency, price }) => [currency, price]));
+    
     for (let i = 0; i < transactions.length; i++) {
         const tx = transactions[i];
-        const currentPrice = await fetchBTCPrice(tx.currency);
+        const currentPrice = priceMap.get(tx.currency);
         const sellPrice = currentPrice !== null ? currentPrice : tx.buyPrice;
         const { coinsPurchased, netProfit } = calculateTransactionProfit(tx, sellPrice);
         
