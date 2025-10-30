@@ -6,6 +6,12 @@
     <title>Crypto Profit Calculator</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png">
+    <script>
+        // Tailwind CSS configuration - must be before loading Tailwind
+        window.tailwindConfig = {
+            darkMode: 'class'
+        }
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @keyframes digitChange {
@@ -62,40 +68,54 @@
         }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen py-8 px-4">
+<body class="bg-gray-100 dark:bg-gray-900 min-h-screen py-8 px-4 transition-colors duration-200">
     <div class="max-w-2xl mx-auto">
-        <div class="bg-white rounded-lg shadow-lg p-6 md:p-8">
-            <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">Crypto Profit Calculator</h1>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 md:p-8">
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-3xl font-bold text-gray-800 dark:text-white">Crypto Profit Calculator</h1>
+                <button 
+                    id="darkModeToggle" 
+                    class="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                    title="Toggle dark mode"
+                >
+                    <svg id="sunIcon" class="w-6 h-6 text-yellow-500 hidden" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd"></path>
+                    </svg>
+                    <svg id="moonIcon" class="w-6 h-6 text-gray-700 dark:text-gray-300" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path>
+                    </svg>
+                </button>
+            </div>
             
             <form id="calcForm" class="space-y-4">
                 <div>
-                    <label for="investment" class="block text-sm font-medium text-gray-700 mb-1">
+                    <label for="investment" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         Investment Amount
                     </label>
                     <input 
                         type="number" 
                         id="investment" 
                         step="0.01"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         placeholder="Enter investment amount"
                     />
                 </div>
 
                 <div>
-                    <label for="buyPrice" class="block text-sm font-medium text-gray-700 mb-1">
+                    <label for="buyPrice" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         Buy Price
                     </label>
                     <input 
                         type="number" 
                         id="buyPrice" 
                         step="0.01"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         placeholder="Enter buy price"
                     />
                 </div>
 
                 <div>
-                    <label for="sellPrice" class="block text-sm font-medium text-gray-700 mb-1">
+                    <label for="sellPrice" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         Sell Price
                     </label>
                     <div class="flex gap-2">
@@ -103,13 +123,13 @@
                             type="number" 
                             id="sellPrice" 
                             step="0.01"
-                            class="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                             placeholder="Enter sell price"
                         />
                         <button
                             type="button"
                             id="refreshPrice"
-                            class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-md transition"
+                            class="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-md transition"
                             title="Refresh current BTC price"
                         >
                             🔄
@@ -118,25 +138,25 @@
                 </div>
 
                 <div>
-                    <label for="fee" class="block text-sm font-medium text-gray-700 mb-1">
+                    <label for="fee" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         Fee (%)
                     </label>
                     <input 
                         type="number" 
                         id="fee" 
                         step="0.001"
-                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         placeholder="Enter fee percentage"
                     />
                 </div>
 
                 <div>
-                    <label for="currency" class="block text-sm font-medium text-gray-700 mb-1">
+                    <label for="currency" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                         Currency
                     </label>
                     <select 
                         id="currency" 
-                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     >
                         <option value="USD">USD - US Dollar</option>
                         <option value="EUR">EUR - Euro</option>
@@ -166,43 +186,43 @@
             </form>
 
             <div id="results" class="mt-6">
-                <div class="bg-gray-50 rounded-lg p-4 space-y-3">
-                    <h2 class="text-xl font-bold text-gray-800 mb-3">Results</h2>
+                <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 space-y-3">
+                    <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-3">Results</h2>
                     
                     <div class="space-y-2">
                         <div class="flex justify-between items-center">
-                            <span class="text-gray-600">Coins Purchased:</span>
-                            <span id="coinsPurchased" class="font-semibold"></span>
+                            <span class="text-gray-600 dark:text-gray-400">Coins Purchased:</span>
+                            <span id="coinsPurchased" class="font-semibold dark:text-white"></span>
                         </div>
                         
                         <div class="flex justify-between items-center">
-                            <span class="text-gray-600">Buy Fee:</span>
-                            <span id="buyFee" class="font-semibold text-red-600"></span>
+                            <span class="text-gray-600 dark:text-gray-400">Buy Fee:</span>
+                            <span id="buyFee" class="font-semibold text-red-600 dark:text-red-400"></span>
                         </div>
                         
                         <div class="flex justify-between items-center">
-                            <span class="text-gray-600">Gross Sale Amount:</span>
-                            <span id="grossSale" class="font-semibold"></span>
+                            <span class="text-gray-600 dark:text-gray-400">Gross Sale Amount:</span>
+                            <span id="grossSale" class="font-semibold dark:text-white"></span>
                         </div>
                         
                         <div class="flex justify-between items-center">
-                            <span class="text-gray-600">Sell Fee:</span>
-                            <span id="sellFee" class="font-semibold text-red-600"></span>
+                            <span class="text-gray-600 dark:text-gray-400">Sell Fee:</span>
+                            <span id="sellFee" class="font-semibold text-red-600 dark:text-red-400"></span>
                         </div>
                         
                         <div class="flex justify-between items-center">
-                            <span class="text-gray-600">Net Sale Amount:</span>
-                            <span id="netSale" class="font-semibold"></span>
+                            <span class="text-gray-600 dark:text-gray-400">Net Sale Amount:</span>
+                            <span id="netSale" class="font-semibold dark:text-white"></span>
                         </div>
                         
                         <div class="flex justify-between items-center">
-                            <span class="text-gray-600">Total Fees:</span>
-                            <span id="totalFees" class="font-semibold text-red-600"></span>
+                            <span class="text-gray-600 dark:text-gray-400">Total Fees:</span>
+                            <span id="totalFees" class="font-semibold text-red-600 dark:text-red-400"></span>
                         </div>
                         
-                        <div class="border-t pt-3 mt-3">
+                        <div class="border-t dark:border-gray-600 pt-3 mt-3">
                             <div class="flex justify-between items-center">
-                                <span class="text-lg font-bold text-gray-800">Net Profit/Loss:</span>
+                                <span class="text-lg font-bold text-gray-800 dark:text-white">Net Profit/Loss:</span>
                                 <span id="netProfit" class="text-2xl font-bold"></span>
                             </div>
                         </div>
@@ -213,6 +233,40 @@
     </div>
 
     <script>
+        // Dark mode management
+        function initDarkMode() {
+            const darkModeToggle = document.getElementById('darkModeToggle');
+            const sunIcon = document.getElementById('sunIcon');
+            const moonIcon = document.getElementById('moonIcon');
+            const html = document.documentElement;
+            
+            // Check for saved dark mode preference, default to light mode
+            const savedDarkMode = getCookie('crypto_calc_darkMode');
+            const isDarkMode = savedDarkMode === 'true';
+            
+            // Apply dark mode if saved
+            if (isDarkMode) {
+                html.classList.add('dark');
+                sunIcon.classList.remove('hidden');
+                moonIcon.classList.add('hidden');
+            }
+            
+            // Toggle dark mode
+            darkModeToggle.addEventListener('click', function() {
+                const isDark = html.classList.toggle('dark');
+                setCookie('crypto_calc_darkMode', isDark.toString(), 365);
+                
+                // Toggle icons
+                if (isDark) {
+                    sunIcon.classList.remove('hidden');
+                    moonIcon.classList.add('hidden');
+                } else {
+                    sunIcon.classList.add('hidden');
+                    moonIcon.classList.remove('hidden');
+                }
+            });
+        }
+
         // Animation configuration
         const ANIMATION_CONFIG = {
             DIGIT_FLIP_DURATION: 400, // ms - matches CSS animation duration
@@ -553,6 +607,7 @@
 
         // Run on page load
         window.addEventListener('load', async function() {
+            initDarkMode();
             await loadFormValues();
             // Do not calculate on initial load - wait for user interaction
         });
