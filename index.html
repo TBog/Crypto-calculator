@@ -7,6 +7,9 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
     <style>
         @keyframes digitChange {
             0% {
@@ -187,6 +190,28 @@
                     </button>
                 </div>
             </form>
+
+            <!-- Bitcoin Price Chart -->
+            <div id="chartSection" class="mt-6">
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold text-gray-800 dark:text-white">Bitcoin Price (Last 24 Hours)</h2>
+                        <button 
+                            id="refreshChart"
+                            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md transition font-semibold"
+                            title="Refresh chart data"
+                        >
+                            🔄 Refresh
+                        </button>
+                    </div>
+                    <div class="relative" style="height: 400px;">
+                        <canvas id="priceChart"></canvas>
+                    </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
+                        Use mouse wheel or pinch to zoom. Click and drag to pan. Double-click to reset zoom.
+                    </p>
+                </div>
+            </div>
 
             <div id="results" class="mt-6">
                 <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 space-y-3">

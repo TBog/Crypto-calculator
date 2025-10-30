@@ -17,7 +17,7 @@ function initDarkMode() {
     }
     
     // Toggle dark mode
-    darkModeToggle.addEventListener('click', function() {
+    darkModeToggle.addEventListener('click', async function() {
         const isDark = html.classList.toggle('dark');
         setCookie('crypto_calc_darkMode', isDark.toString(), 365);
         
@@ -29,6 +29,10 @@ function initDarkMode() {
             sunIcon.classList.add('hidden');
             moonIcon.classList.remove('hidden');
         }
+        
+        // Refresh chart to update colors
+        const currency = document.getElementById('currency').value;
+        await initPriceChart(currency);
     });
 }
 
@@ -54,6 +58,9 @@ let resultsShown = false;
 // API cache with timestamp
 const priceCache = new Map();
 const CACHE_DURATION = 60000; // 60 seconds cache
+
+// Chart instance
+let priceChart = null;
 
 // Fetch current BTC price from CoinGecko API via Cloudflare Worker proxy with fallback
 async function fetchBTCPrice(currency = 'usd') {
@@ -108,6 +115,222 @@ async function fetchBTCPrice(currency = 'usd') {
             return null;
         }
     }
+}
+
+// Fetch Bitcoin price chart data (last 24 hours, hourly)
+async function fetchBTCChartData(currency = 'usd') {
+    const currencyLower = currency.toLowerCase();
+    
+    // Check cache first
+    const cacheKey = `chart_${currencyLower}`;
+    const cached = priceCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+        return cached.data;
+    }
+    
+    // Try worker first
+    try {
+        const workerUrl = `https://crypto-cache.tbog.workers.dev/api/v3/coins/bitcoin/market_chart?vs_currency=${currencyLower}&days=1`;
+        const response = await fetch(workerUrl);
+        
+        if (!response.ok) {
+            throw new Error(`Worker responded with status ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Cache the result
+        priceCache.set(cacheKey, { data, timestamp: Date.now() });
+        return data;
+    } catch (workerError) {
+        console.warn('Worker API failed, falling back to public API:', workerError);
+        
+        // Fallback to public CoinGecko API
+        try {
+            const publicUrl = `https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=${currencyLower}&days=1`;
+            const response = await fetch(publicUrl);
+            
+            if (!response.ok) {
+                throw new Error(`Public API responded with status ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            // Cache the result
+            priceCache.set(cacheKey, { data, timestamp: Date.now() });
+            return data;
+        } catch (publicError) {
+            console.error('Both worker and public API failed:', publicError);
+            return null;
+        }
+    }
+}
+
+// Initialize or update the price chart
+async function initPriceChart(currency = 'USD') {
+    const chartData = await fetchBTCChartData(currency);
+    
+    if (!chartData || !chartData.prices) {
+        console.error('Failed to fetch chart data');
+        return;
+    }
+    
+    // Extract timestamps and prices
+    const timestamps = chartData.prices.map(point => new Date(point[0]));
+    const prices = chartData.prices.map(point => point[1]);
+    
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    
+    // Check if we're in dark mode
+    const isDarkMode = document.documentElement.classList.contains('dark');
+    
+    // Define colors based on theme
+    const gridColor = isDarkMode ? 'rgba(75, 85, 99, 0.3)' : 'rgba(0, 0, 0, 0.1)';
+    const textColor = isDarkMode ? 'rgba(229, 231, 235, 0.8)' : 'rgba(0, 0, 0, 0.8)';
+    const lineColor = isDarkMode ? 'rgba(59, 130, 246, 1)' : 'rgba(37, 99, 235, 1)';
+    const gradientStart = isDarkMode ? 'rgba(59, 130, 246, 0.3)' : 'rgba(37, 99, 235, 0.3)';
+    const gradientEnd = isDarkMode ? 'rgba(59, 130, 246, 0)' : 'rgba(37, 99, 235, 0)';
+    
+    // Create gradient
+    const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+    gradient.addColorStop(0, gradientStart);
+    gradient.addColorStop(1, gradientEnd);
+    
+    // Destroy existing chart if it exists
+    if (priceChart) {
+        priceChart.destroy();
+    }
+    
+    // Create new chart
+    priceChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: timestamps,
+            datasets: [{
+                label: `Bitcoin Price (${currency.toUpperCase()})`,
+                data: prices,
+                borderColor: lineColor,
+                backgroundColor: gradient,
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4,
+                pointRadius: 0,
+                pointHoverRadius: 6,
+                pointHoverBackgroundColor: lineColor,
+                pointHoverBorderColor: isDarkMode ? '#fff' : '#000',
+                pointHoverBorderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: {
+                        color: textColor,
+                        font: {
+                            size: 14,
+                            weight: 'bold'
+                        }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: isDarkMode ? 'rgba(31, 41, 55, 0.9)' : 'rgba(255, 255, 255, 0.9)',
+                    titleColor: textColor,
+                    bodyColor: textColor,
+                    borderColor: gridColor,
+                    borderWidth: 1,
+                    displayColors: false,
+                    callbacks: {
+                        title: function(context) {
+                            const date = new Date(context[0].label);
+                            return date.toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            });
+                        },
+                        label: function(context) {
+                            return new Intl.NumberFormat('en-US', {
+                                style: 'currency',
+                                currency: currency.toUpperCase(),
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2
+                            }).format(context.parsed.y);
+                        }
+                    }
+                },
+                zoom: {
+                    zoom: {
+                        wheel: {
+                            enabled: true,
+                            speed: 0.1
+                        },
+                        pinch: {
+                            enabled: true
+                        },
+                        mode: 'x'
+                    },
+                    pan: {
+                        enabled: true,
+                        mode: 'x'
+                    },
+                    limits: {
+                        x: {min: 'original', max: 'original'}
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        unit: 'hour',
+                        displayFormats: {
+                            hour: 'HH:mm'
+                        }
+                    },
+                    grid: {
+                        color: gridColor,
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: textColor,
+                        maxRotation: 0,
+                        autoSkip: true,
+                        maxTicksLimit: 12
+                    }
+                },
+                y: {
+                    grid: {
+                        color: gridColor,
+                        drawBorder: false
+                    },
+                    ticks: {
+                        color: textColor,
+                        callback: function(value) {
+                            return new Intl.NumberFormat('en-US', {
+                                style: 'currency',
+                                currency: currency.toUpperCase(),
+                                minimumFractionDigits: 0,
+                                maximumFractionDigits: 0
+                            }).format(value);
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    // Add double-click to reset zoom
+    document.getElementById('priceChart').ondblclick = function() {
+        priceChart.resetZoom();
+    };
 }
 
 // Cookie helper functions
@@ -463,6 +686,8 @@ function initEventListeners() {
         if (newPrice !== null) {
             document.getElementById('sellPrice').value = newPrice;
         }
+        // Update the chart with new currency
+        await initPriceChart(currency);
         // Only recalculate if results are visible
         if (areResultsVisible()) {
             calculate();
@@ -483,6 +708,12 @@ function initEventListeners() {
         // Wait a bit for the price to update
         await new Promise(resolve => setTimeout(resolve, 500));
         renderTransactions();
+    });
+
+    // Refresh chart button handler
+    document.getElementById('refreshChart').addEventListener('click', async function() {
+        const currency = document.getElementById('currency').value;
+        await initPriceChart(currency);
     });
 
     // Save values and recalculate when inputs change
@@ -555,6 +786,9 @@ window.addEventListener('load', async function() {
     initDarkMode();
     initEventListeners();
     await loadFormValues();
+    // Initialize the price chart with the selected currency
+    const currency = document.getElementById('currency').value;
+    await initPriceChart(currency);
     // Do not calculate on initial load - wait for user interaction
     await renderTransactions();
 });
