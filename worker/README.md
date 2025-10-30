@@ -4,10 +4,12 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
 
 ## Features
 
-- **CORS Support**: Allows requests from any origin (GitHub Pages compatible)
+- **Origin Validation**: Restricts access to authorized origins only (GitHub Pages and localhost) to prevent unauthorized API key usage
+- **CORS Support**: Provides proper CORS headers for allowed origins
 - **Edge Caching**: Caches API responses for 1 hour (3600 seconds) using Cloudflare's edge network
 - **API Key Security**: Securely handles CoinGecko API key via environment variables
 - **Error Handling**: Graceful error responses with appropriate HTTP status codes
+- **Fallback Support**: Client-side fallback to public API if worker is unavailable
 
 ## Deployment Steps
 
@@ -66,12 +68,41 @@ const workerUrl = `https://crypto-cache.YOUR_SUBDOMAIN.workers.dev/api/v3/simple
 
 ## Testing
 
-You can test the worker directly by visiting:
-```
-https://YOUR_WORKER_URL.workers.dev/api/v3/simple/price?ids=bitcoin&vs_currencies=usd
+You can test the worker from your GitHub Pages site or localhost. Direct browser access may be blocked due to origin validation.
+
+To test from localhost, serve the `index.html` file using a local web server:
+```bash
+# Using Python 3
+python3 -m http.server 8000
+
+# Using Node.js http-server
+npx http-server -p 8000
 ```
 
-You should see a JSON response with Bitcoin price data.
+Then visit `http://localhost:8000` and test the price fetching functionality.
+
+## Security
+
+### Origin Validation
+
+The worker validates the `Origin` header of incoming requests and only allows requests from:
+- `https://tbog.github.io` (GitHub Pages)
+- `http://localhost:*` and `http://127.0.0.1:*` (local development)
+
+This prevents unauthorized users from using your API key. Requests from unauthorized origins receive a `403 Forbidden` response.
+
+### Modifying Allowed Origins
+
+To add or modify allowed origins, edit the `ALLOWED_ORIGINS` array in `worker/index.js`:
+
+```javascript
+const ALLOWED_ORIGINS = [
+  'https://tbog.github.io',
+  'https://your-custom-domain.com',
+  'http://localhost:3000',
+  // Add more origins as needed
+];
+```
 
 ## Cache Headers
 

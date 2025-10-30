@@ -5,7 +5,19 @@
  * - Secure API key handling via environment variables
  * - Edge caching (1 hour TTL)
  * - CORS support for GitHub Pages
+ * - Origin validation to prevent unauthorized API key usage
  */
+
+// Allowed origins for accessing this worker
+const ALLOWED_ORIGINS = [
+  'https://tbog.github.io',
+  'http://localhost:3000',
+  'http://localhost:8000',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:8000',
+  'http://localhost:5500', // Live Server default port
+  'http://127.0.0.1:5500'
+];
 
 export default {
   async fetch(request, env, ctx) {
@@ -21,9 +33,15 @@ export default {
  * @returns {Promise<Response>} Response with CORS headers and caching
  */
 async function handleRequest(request, env, ctx) {
-  // CORS headers for all responses
+  // Get the origin from the request
+  const origin = request.headers.get('Origin');
+  
+  // Validate origin - only allow requests from authorized origins
+  const isAllowedOrigin = origin && ALLOWED_ORIGINS.some(allowed => origin.startsWith(allowed));
+  
+  // CORS headers for responses
   const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': isAllowedOrigin ? origin : ALLOWED_ORIGINS[0],
     'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400', // 24 hours
@@ -34,6 +52,20 @@ async function handleRequest(request, env, ctx) {
     return new Response(null, {
       status: 204,
       headers: corsHeaders
+    });
+  }
+
+  // Reject requests from unauthorized origins
+  if (!isAllowedOrigin) {
+    return new Response(JSON.stringify({
+      error: 'Unauthorized',
+      message: 'Origin not allowed'
+    }), {
+      status: 403,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
     });
   }
 
