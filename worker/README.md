@@ -85,30 +85,41 @@ Then visit `http://localhost:8000` and test the price fetching functionality.
 
 ### Origin Validation
 
-The worker uses strict origin validation to prevent unauthorized API key usage:
+The worker uses strict origin validation to prevent unauthorized API key usage by checking the `Origin` header against the `ALLOWED_ORIGINS` list:
+
+**Validation Logic:**
+- **Production Domains** (e.g., GitHub Pages): Exact match required for protocol, hostname, and port
+- **Localhost/127.0.0.1**: Protocol and hostname must match, any port allowed for development flexibility
 
 **Allowed Origins:**
-- **GitHub Pages**: Exact match for `https://tbog.github.io` only
-- **Local Development**: Any `http://localhost:*` or `http://127.0.0.1:*` (any port)
+- `https://tbog.github.io` (GitHub Pages - exact match)
+- `http://localhost:*` (any port on localhost with http)
+- `http://127.0.0.1:*` (any port on 127.0.0.1 with http)
 
 **Security Features:**
-- **Exact matching** for production domain (prevents subdomain attacks like `https://tbog.github.io.evil.com`)
-- **URL parsing** for localhost to validate hostname and protocol separately
+- **URL parsing** to validate protocol, hostname, and port separately
+- **Exact matching** for production domains (prevents subdomain attacks like `https://tbog.github.io.evil.com`)
+- **Flexible localhost** validation (protocol + hostname only, any port allowed)
 - **403 Forbidden** response for unauthorized origins
 - **Dynamic CORS headers** that reflect the validated origin
 
 ### Modifying Allowed Origins
 
-To add or modify the production origin, edit the validation logic in the `handleRequest` function in `worker/index.js`:
+To add or modify allowed origins, edit the `ALLOWED_ORIGINS` array in `worker/index.js`:
 
 ```javascript
-// Check for exact match with GitHub Pages or your custom domain
-if (origin === 'https://tbog.github.io' || origin === 'https://your-custom-domain.com') {
-  isAllowedOrigin = true;
-}
+const ALLOWED_ORIGINS = [
+  'https://tbog.github.io',
+  'https://your-custom-domain.com',  // Add your custom domain
+  'http://localhost:3000',            // Localhost examples (any port works)
+  'http://127.0.0.1:8080'
+];
 ```
 
-For localhost development, the worker automatically allows any port on `localhost` or `127.0.0.1` with `http://` or `https://` protocol.
+**Important:**
+- For production domains: All origins must include protocol, hostname, and port (if non-standard)
+- For localhost/127.0.0.1: Only protocol and hostname are checked; port can be anything
+- Invalid URLs in the list are safely ignored
 
 ## Cache Headers
 

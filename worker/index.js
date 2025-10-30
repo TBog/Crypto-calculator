@@ -8,7 +8,9 @@
  * - Strict origin validation to prevent unauthorized API key usage
  */
 
-// Allowed origins configuration (used for CORS fallback)
+// Allowed origins for accessing this worker
+// For localhost/127.0.0.1: protocol and hostname must match (any port allowed)
+// For production domains: protocol, hostname, and port must match exactly
 const ALLOWED_ORIGINS = [
   'https://tbog.github.io',
   'http://localhost:3000',
@@ -36,23 +38,41 @@ async function handleRequest(request, env, ctx) {
   // Get the origin from the request
   const origin = request.headers.get('Origin');
   
-  // Validate origin - only allow exact matches or localhost with any port
+  // Validate origin against allowed list
   let isAllowedOrigin = false;
   if (origin) {
-    // Check for exact match with GitHub Pages
-    if (origin === 'https://tbog.github.io') {
-      isAllowedOrigin = true;
-    } else {
-      // For localhost, validate the protocol and hostname, allow any port
-      try {
-        const url = new URL(origin);
-        const isLocalhost = (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
-        const isHttpProtocol = (url.protocol === 'http:' || url.protocol === 'https:');
-        isAllowedOrigin = isLocalhost && isHttpProtocol;
-      } catch (e) {
-        // Invalid URL, not allowed
-        isAllowedOrigin = false;
+    try {
+      const originUrl = new URL(origin);
+      
+      // Check against each allowed origin
+      for (const allowedOrigin of ALLOWED_ORIGINS) {
+        try {
+          const allowedUrl = new URL(allowedOrigin);
+          
+          // For localhost/127.0.0.1, match protocol and hostname (allow any port)
+          if (allowedUrl.hostname === 'localhost' || allowedUrl.hostname === '127.0.0.1') {
+            if (originUrl.protocol === allowedUrl.protocol && 
+                originUrl.hostname === allowedUrl.hostname) {
+              isAllowedOrigin = true;
+              break;
+            }
+          } else {
+            // For production domains, require exact match (protocol, hostname, and port)
+            if (originUrl.protocol === allowedUrl.protocol &&
+                originUrl.hostname === allowedUrl.hostname &&
+                originUrl.port === allowedUrl.port) {
+              isAllowedOrigin = true;
+              break;
+            }
+          }
+        } catch (e) {
+          // Skip invalid URL in allowed list
+          continue;
+        }
       }
+    } catch (e) {
+      // Invalid origin URL, not allowed
+      isAllowedOrigin = false;
     }
   }
   
