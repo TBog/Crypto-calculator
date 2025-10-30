@@ -152,8 +152,8 @@ async function handleRequest(request, env, ctx) {
       headers: upstreamResponse.headers
     });
 
-    // Add cache control header (1 hour = 3600 seconds)
-    response.headers.set('Cache-Control', 'public, max-age=3600');
+    // Add cache control header (10 minutes = 600 seconds)
+    response.headers.set('Cache-Control', 'public, max-age=600');
     
     // Add CORS headers
     Object.entries(corsHeaders).forEach(([key, value]) => {

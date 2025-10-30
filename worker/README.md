@@ -6,7 +6,7 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
 
 - **Origin Validation**: Restricts access to authorized origins only (GitHub Pages and localhost) to prevent unauthorized API key usage
 - **CORS Support**: Provides proper CORS headers for allowed origins
-- **Edge Caching**: Caches API responses for 1 hour (3600 seconds) using Cloudflare's edge network
+- **Edge Caching**: Caches API responses for 10 minutes (600 seconds) using Cloudflare's edge network
 - **API Key Security**: Securely handles CoinGecko API key via environment variables
 - **Error Handling**: Graceful error responses with appropriate HTTP status codes
 - **Fallback Support**: Client-side fallback to public API if worker is unavailable
@@ -124,7 +124,7 @@ const ALLOWED_ORIGINS = [
 ## Cache Headers
 
 The worker adds the following headers to responses:
-- `Cache-Control: public, max-age=3600` - Instructs browsers and CDNs to cache for 1 hour
+- `Cache-Control: public, max-age=600` - Instructs browsers and CDNs to cache for 10 minutes
 - `X-Cache-Status: HIT` or `MISS` - Indicates whether the response was served from cache
 - CORS headers for cross-origin access
 
