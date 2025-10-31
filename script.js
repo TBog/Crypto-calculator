@@ -83,6 +83,11 @@ function initConsent() {
         revokeConsent();
         hideConsentBanner();
     });
+    
+    // Cookie settings button handler - allows users to change their mind
+    document.getElementById('cookieSettings').addEventListener('click', function() {
+        showConsentBanner();
+    });
 }
 
 // Dark mode management
