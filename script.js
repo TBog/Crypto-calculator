@@ -429,7 +429,7 @@ async function loadFormValues() {
 function setDefaults() {
     document.getElementById('investment').value = defaults.investment;
     document.getElementById('buyPrice').value = defaults.buyPrice;
-    document.getElementById('sellPrice').value = defaults.sellPriceFallback;
+    document.getElementById('sellPrice').value = formatPrice(defaults.sellPriceFallback);
     document.getElementById('fee').value = defaults.fee;
 }
 
