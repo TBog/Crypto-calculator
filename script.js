@@ -421,7 +421,7 @@ async function loadFormValues() {
     document.getElementById('investment').value = savedInvestment ?? defaults.investment;
     document.getElementById('buyPrice').value = savedBuyPrice ?? defaults.buyPrice;
     // Use fetched price, or fallback to approximate value for initial load only
-    document.getElementById('sellPrice').value = sellPriceValue ?? defaults.sellPriceFallback;
+    document.getElementById('sellPrice').value = formatPrice(sellPriceValue ?? defaults.sellPriceFallback);
     document.getElementById('fee').value = savedFee ?? defaults.fee;
 }
 
@@ -443,6 +443,14 @@ function formatCurrency(num) {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
     }).format(num);
+}
+
+// Format price to 2 decimal places
+function formatPrice(price) {
+    if (price === null || price === undefined || isNaN(price)) {
+        return price;
+    }
+    return parseFloat(price.toFixed(2));
 }
 
 // Animate element when value changes
@@ -695,7 +703,7 @@ function initEventListeners() {
         const currency = document.getElementById('currency').value;
         const newPrice = await fetchBTCPrice(currency);
         if (newPrice !== null) {
-            document.getElementById('sellPrice').value = newPrice;
+            document.getElementById('sellPrice').value = formatPrice(newPrice);
         }
         // Update the chart with new currency
         await initPriceChart(currency);
@@ -710,7 +718,7 @@ function initEventListeners() {
         const currency = document.getElementById('currency').value;
         const newPrice = await fetchBTCPrice(currency);
         if (newPrice !== null) {
-            document.getElementById('sellPrice').value = newPrice;
+            document.getElementById('sellPrice').value = formatPrice(newPrice);
         }
         // Recalculate if results are visible
         if (areResultsVisible()) {
