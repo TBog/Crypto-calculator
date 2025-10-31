@@ -447,10 +447,16 @@ function formatCurrency(num) {
 
 // Format price to 2 decimal places
 function formatPrice(price) {
-    if (price === null || price === undefined || isNaN(price)) {
+    // Return as-is for null/undefined, input fields handle these gracefully
+    if (price === null || price === undefined) {
         return price;
     }
-    return parseFloat(price.toFixed(2));
+    // Convert to number and check if valid
+    const num = Number(price);
+    if (Number.isNaN(num)) {
+        return price;
+    }
+    return parseFloat(num.toFixed(2));
 }
 
 // Animate element when value changes
