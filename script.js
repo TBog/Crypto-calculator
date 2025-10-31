@@ -723,7 +723,10 @@ function calculateTransactionProfit(transaction, currentPrice) {
     // Note: This recovers the investment but doesn't account for the buy fee already paid
     // Formula: investment = coinsToSell * currentPrice * (1 - fee/100)
     // Therefore: coinsToSell = investment / (currentPrice * (1 - fee/100))
-    const coinsToSellBreakEven = transaction.investment / (currentPrice * (1 - transaction.fee / 100));
+    const feeMultiplier = 1 - transaction.fee / 100;
+    const coinsToSellBreakEven = feeMultiplier > 0 && currentPrice > 0
+        ? transaction.investment / (currentPrice * feeMultiplier)
+        : 0;
     
     return {
         coinsPurchased,
