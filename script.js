@@ -1,3 +1,90 @@
+// ========== COOKIE CONSENT MANAGEMENT ==========
+
+// Check if user has given consent
+function hasConsent() {
+    // Use a non-personal technical cookie to store consent status
+    // This is allowed under GDPR as it's strictly necessary for consent management
+    try {
+        return localStorage.getItem('crypto_calc_consent') === 'granted';
+    } catch (e) {
+        return false;
+    }
+}
+
+// Grant consent
+function grantConsent() {
+    try {
+        localStorage.setItem('crypto_calc_consent', 'granted');
+    } catch (e) {
+        console.error('Failed to save consent:', e);
+    }
+}
+
+// Revoke consent and clear all stored data
+function revokeConsent() {
+    try {
+        // Clear all cookies
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i];
+            const eqPos = cookie.indexOf('=');
+            const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+            document.cookie = name + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+        }
+        
+        // Clear all localStorage except consent status
+        const consentStatus = localStorage.getItem('crypto_calc_consent');
+        localStorage.clear();
+        localStorage.setItem('crypto_calc_consent', 'denied');
+    } catch (e) {
+        console.error('Failed to revoke consent:', e);
+    }
+}
+
+// Show cookie consent banner
+function showConsentBanner() {
+    const banner = document.getElementById('cookieConsent');
+    if (banner) {
+        // Small delay to ensure smooth animation
+        setTimeout(() => {
+            banner.classList.add('show');
+        }, 100);
+    }
+}
+
+// Hide cookie consent banner
+function hideConsentBanner() {
+    const banner = document.getElementById('cookieConsent');
+    if (banner) {
+        banner.classList.remove('show');
+    }
+}
+
+// Initialize consent banner and handlers
+function initConsent() {
+    // Check if consent decision has been made
+    const consentStatus = localStorage.getItem('crypto_calc_consent');
+    
+    if (!consentStatus) {
+        // No decision made yet, show banner
+        showConsentBanner();
+    }
+    
+    // Accept button handler
+    document.getElementById('cookieAccept').addEventListener('click', function() {
+        grantConsent();
+        hideConsentBanner();
+        // Reload to apply saved preferences
+        window.location.reload();
+    });
+    
+    // Decline button handler
+    document.getElementById('cookieDecline').addEventListener('click', function() {
+        revokeConsent();
+        hideConsentBanner();
+    });
+}
+
 // Dark mode management
 function initDarkMode() {
     const darkModeToggle = document.getElementById('darkModeToggle');
@@ -346,12 +433,18 @@ async function initPriceChart(currency = 'usd') {
 
 // Cookie helper functions
 function setCookie(name, value, days = 90) {
+    if (!hasConsent()) {
+        return; // Don't set cookie without consent
+    }
     const expires = new Date();
     expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
     document.cookie = name + '=' + encodeURIComponent(value) + ';expires=' + expires.toUTCString() + ';path=/';
 }
 
 function getCookie(name) {
+    if (!hasConsent()) {
+        return null; // Don't read cookies without consent
+    }
     const nameEQ = name + '=';
     const ca = document.cookie.split(';');
     for (let i = 0; i < ca.length; i++) {
@@ -587,13 +680,28 @@ function calculate() {
 
 // Load transactions from localStorage
 function loadTransactions() {
-    const saved = localStorage.getItem('crypto_calc_transactions');
-    return saved ? JSON.parse(saved) : [];
+    if (!hasConsent()) {
+        return []; // Don't access localStorage without consent
+    }
+    try {
+        const saved = localStorage.getItem('crypto_calc_transactions');
+        return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+        console.error('Failed to load transactions:', e);
+        return [];
+    }
 }
 
 // Save transactions to localStorage
 function saveTransactions(transactions) {
-    localStorage.setItem('crypto_calc_transactions', JSON.stringify(transactions));
+    if (!hasConsent()) {
+        return; // Don't save to localStorage without consent
+    }
+    try {
+        localStorage.setItem('crypto_calc_transactions', JSON.stringify(transactions));
+    } catch (e) {
+        console.error('Failed to save transactions:', e);
+    }
 }
 
 // Calculate current profit for a transaction
@@ -762,6 +870,13 @@ function initEventListeners() {
 
     // Save current transaction
     document.getElementById('saveTransaction').addEventListener('click', function() {
+        // Check for consent first
+        if (!hasConsent()) {
+            alert('Please accept cookie consent to save transactions. Your data will be stored locally on your device.');
+            showConsentBanner();
+            return;
+        }
+        
         const investment = parseFloat(document.getElementById('investment').value);
         const buyPrice = parseFloat(document.getElementById('buyPrice').value);
         const fee = parseFloat(document.getElementById('fee').value);
@@ -808,6 +923,9 @@ function initEventListeners() {
 
 // Run on page load
 window.addEventListener('load', async function() {
+    // Initialize consent system first (before any data storage)
+    initConsent();
+    
     initDarkMode();
     initEventListeners();
     await loadFormValues();
