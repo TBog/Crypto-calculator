@@ -46,8 +46,19 @@ const ANIMATION_CONFIG = {
 // Worker API configuration
 const WORKER_BASE_URL = 'https://crypto-cache.tbog.workers.dev';
 
-// Currency filtering configuration
+// Fiat currencies whitelist - comprehensive list of supported fiat currencies
+// Based on ExchangeRate-API and major currency exchanges
+const FIAT_CURRENCIES = [
+    'aed', 'ars', 'aud', 'bdt', 'bhd', 'bmd', 'brl', 'cad', 'chf', 'clp', 'cny',
+    'czk', 'dkk', 'eur', 'gbp', 'gel', 'hkd', 'huf', 'idr', 'ils', 'inr', 'jpy',
+    'krw', 'kwd', 'lkr', 'mmk', 'mxn', 'myr', 'ngn', 'nok', 'nzd', 'php', 'pkr',
+    'pln', 'ron', 'rub', 'sar', 'sek', 'sgd', 'thb', 'try', 'twd', 'uah', 'usd',
+    'vef', 'vnd', 'zar'
+];
+
+// Crypto currencies (for worker validation, not used in frontend selector)
 const CRYPTO_CURRENCIES = ['btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'link', 'dot', 'yfi', 'sol', 'bits', 'sats'];
+// Commodity currencies (for worker validation, not used in frontend selector)
 const COMMODITY_CURRENCIES = ['xdr', 'xag', 'xau'];
 
 // Default values
@@ -442,51 +453,35 @@ const CURRENCY_NAMES = {
     'vnd': 'Vietnamese Dong'
 };
 
-// Fetch and populate currency selector with CoinGecko supported currencies
-async function populateCurrencySelector() {
+// Populate currency selector with whitelisted fiat currencies
+function populateCurrencySelector() {
     const currencySelect = document.getElementById('currency');
     const currentValue = currencySelect.value;
     
-    try {
-        // Fetch supported currencies from worker
-        const workerUrl = `${WORKER_BASE_URL}/api/v3/simple/supported_vs_currencies`;
-        const response = await fetch(workerUrl);
-        
-        if (!response.ok) {
-            console.warn('Failed to fetch currencies from worker, using defaults');
-            return; // Keep existing options
-        }
-        
-        const currencies = await response.json();
-        
-        // Filter to only fiat currencies (exclude crypto and commodities)
-        const fiatCurrencies = currencies.filter(c => !CRYPTO_CURRENCIES.includes(c) && !COMMODITY_CURRENCIES.includes(c));
-        
-        // Sort alphabetically
-        fiatCurrencies.sort();
-        
-        // Clear existing options
-        currencySelect.innerHTML = '';
-        
-        // Add fiat currency options
-        fiatCurrencies.forEach(currency => {
-            const option = document.createElement('option');
-            const upperCurrency = currency.toUpperCase();
-            option.value = upperCurrency;
-            const currencyName = CURRENCY_NAMES[currency] || upperCurrency;
-            option.textContent = `${upperCurrency} - ${currencyName}`;
-            currencySelect.appendChild(option);
-        });
-        
-        // Restore previous selection or use default
-        if (currentValue && fiatCurrencies.map(c => c.toUpperCase()).includes(currentValue)) {
-            currencySelect.value = currentValue;
-        } else {
-            currencySelect.value = 'USD';
-        }
-    } catch (error) {
-        console.error('Error populating currency selector:', error);
-        // Keep existing options on error
+    // Use hardcoded whitelist of fiat currencies
+    const fiatCurrencies = [...FIAT_CURRENCIES];
+    
+    // Sort alphabetically
+    fiatCurrencies.sort();
+    
+    // Clear existing options
+    currencySelect.innerHTML = '';
+    
+    // Add fiat currency options
+    fiatCurrencies.forEach(currency => {
+        const option = document.createElement('option');
+        const upperCurrency = currency.toUpperCase();
+        option.value = upperCurrency;
+        const currencyName = CURRENCY_NAMES[currency] || upperCurrency;
+        option.textContent = `${upperCurrency} - ${currencyName}`;
+        currencySelect.appendChild(option);
+    });
+    
+    // Restore previous selection or use default
+    if (currentValue && fiatCurrencies.map(c => c.toUpperCase()).includes(currentValue)) {
+        currencySelect.value = currentValue;
+    } else {
+        currencySelect.value = 'USD';
     }
 }
 
@@ -893,8 +888,8 @@ function initEventListeners() {
 window.addEventListener('load', async function() {
     initDarkMode();
     initEventListeners();
-    // Populate currency selector with all supported currencies
-    await populateCurrencySelector();
+    // Populate currency selector with whitelisted fiat currencies
+    populateCurrencySelector();
     await loadFormValues();
     // Initialize the price chart with the selected currency
     const currency = document.getElementById('currency').value;
