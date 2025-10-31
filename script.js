@@ -43,6 +43,13 @@ const ANIMATION_CONFIG = {
     RESULTS_SLIDE_DURATION: 500 // ms - results container slide-down
 };
 
+// Worker API configuration
+const WORKER_BASE_URL = 'https://crypto-cache.tbog.workers.dev';
+
+// Currency filtering configuration
+const CRYPTO_CURRENCIES = ['btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'link', 'dot', 'yfi', 'sol', 'bits', 'sats'];
+const COMMODITY_CURRENCIES = ['xdr', 'xag', 'xau'];
+
 // Default values
 const defaults = {
     investment: 50000,
@@ -82,9 +89,7 @@ async function fetchBTCPrice(currency = 'usd') {
     
     // Try worker first
     try {
-        // TODO: Replace this URL with your deployed Cloudflare Worker URL
-        // Example: https://crypto-cache.YOUR_SUBDOMAIN.workers.dev/api/v3/simple/price?ids=bitcoin&vs_currencies=${currencyLower}
-        const workerUrl = `https://crypto-cache.tbog.workers.dev/api/v3/simple/price?ids=bitcoin&vs_currencies=${currencyLower}`;
+        const workerUrl = `${WORKER_BASE_URL}/api/v3/simple/price?ids=bitcoin&vs_currencies=${currencyLower}`;
         const response = await fetch(workerUrl);
         
         if (!response.ok) {
@@ -137,7 +142,7 @@ async function fetchBTCChartData(currency = 'usd') {
     
     // Try worker first
     try {
-        const workerUrl = `https://crypto-cache.tbog.workers.dev/api/v3/coins/bitcoin/market_chart?vs_currency=${currencyLower}&days=1`;
+        const workerUrl = `${WORKER_BASE_URL}/api/v3/coins/bitcoin/market_chart?vs_currency=${currencyLower}&days=1`;
         const response = await fetch(workerUrl);
         
         if (!response.ok) {
@@ -444,7 +449,7 @@ async function populateCurrencySelector() {
     
     try {
         // Fetch supported currencies from worker
-        const workerUrl = 'https://crypto-cache.tbog.workers.dev/api/v3/simple/supported_vs_currencies';
+        const workerUrl = `${WORKER_BASE_URL}/api/v3/simple/supported_vs_currencies`;
         const response = await fetch(workerUrl);
         
         if (!response.ok) {
@@ -455,9 +460,7 @@ async function populateCurrencySelector() {
         const currencies = await response.json();
         
         // Filter to only fiat currencies (exclude crypto and commodities)
-        const cryptoCurrencies = ['btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'link', 'dot', 'yfi', 'sol', 'bits', 'sats'];
-        const commodities = ['xdr', 'xag', 'xau'];
-        const fiatCurrencies = currencies.filter(c => !cryptoCurrencies.includes(c) && !commodities.includes(c));
+        const fiatCurrencies = currencies.filter(c => !CRYPTO_CURRENCIES.includes(c) && !COMMODITY_CURRENCIES.includes(c));
         
         // Sort alphabetically
         fiatCurrencies.sort();
