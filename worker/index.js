@@ -113,9 +113,14 @@ function convertSimplePriceData(data, exchangeRate, targetCurrency) {
   // Simple price endpoint returns data like: { "bitcoin": { "usd": 43000 } }
   for (const [coin, prices] of Object.entries(data)) {
     if (prices.usd !== undefined) {
+      // Copy all existing fields and add the converted currency
       converted[coin] = {
+        ...prices,  // Preserve any other existing currency fields
         [targetCurrency.toLowerCase()]: prices.usd * exchangeRate
       };
+    } else {
+      // If no USD price, just copy as-is
+      converted[coin] = prices;
     }
   }
   
@@ -286,6 +291,7 @@ async function handleRequest(request, env, ctx) {
 
     // Get the response body
     let responseData;
+    let responseBody;
     const contentType = upstreamResponse.headers.get('content-type');
     
     if (upstreamResponse.ok && contentType && contentType.includes('application/json')) {
@@ -300,19 +306,22 @@ async function handleRequest(request, env, ctx) {
           // Convert simple price data
           responseData = convertSimplePriceData(responseData, exchangeRate, originalCurrency);
         }
-        // Add a header to indicate currency conversion was performed
-        upstreamResponse.headers.set('X-Currency-Converted', `USD -> ${originalCurrency.toUpperCase()}`);
-        upstreamResponse.headers.set('X-Exchange-Rate', exchangeRate.toString());
       }
+      
+      // Convert to JSON string for response body
+      responseBody = JSON.stringify(responseData);
+    } else {
+      // For non-JSON responses, just pass through the body
+      responseBody = upstreamResponse.body;
     }
 
     // Create response with caching headers
     response = new Response(
-      responseData ? JSON.stringify(responseData) : upstreamResponse.body,
+      responseBody,
       {
         status: upstreamResponse.status,
         statusText: upstreamResponse.statusText,
-        headers: upstreamResponse.headers
+        headers: new Headers(upstreamResponse.headers)
       }
     );
 
@@ -327,8 +336,16 @@ async function handleRequest(request, env, ctx) {
     // Add cache status header
     response.headers.set('X-Cache-Status', 'MISS');
     
-    // Set proper content type
-    response.headers.set('Content-Type', 'application/json');
+    // Set proper content type only for JSON responses
+    if (responseData) {
+      response.headers.set('Content-Type', 'application/json');
+      
+      // Add headers to indicate currency conversion was performed
+      if (isUnsupportedCurrency && exchangeRate) {
+        response.headers.set('X-Currency-Converted', `USD -> ${originalCurrency.toUpperCase()}`);
+        response.headers.set('X-Exchange-Rate', exchangeRate.toString());
+      }
+    }
 
     // Cache the response (clone it first as the body can only be read once)
     if (upstreamResponse.ok) {
