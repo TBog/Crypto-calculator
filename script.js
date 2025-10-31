@@ -719,7 +719,8 @@ function calculateTransactionProfit(transaction, currentPrice) {
     const netSaleAmount = grossSaleAmount - sellFee;
     const netProfit = netSaleAmount - transaction.investment;
     
-    // Calculate coins to sell to break even (including sell fee)
+    // Calculate coins to sell to recover the initial investment amount (accounting for sell fee)
+    // Note: This recovers the investment but doesn't account for the buy fee already paid
     // Formula: investment = coinsToSell * currentPrice * (1 - fee/100)
     // Therefore: coinsToSell = investment / (currentPrice * (1 - fee/100))
     const coinsToSellBreakEven = transaction.investment / (currentPrice * (1 - transaction.fee / 100));
