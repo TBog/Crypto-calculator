@@ -719,9 +719,15 @@ function calculateTransactionProfit(transaction, currentPrice) {
     const netSaleAmount = grossSaleAmount - sellFee;
     const netProfit = netSaleAmount - transaction.investment;
     
+    // Calculate coins to sell to break even (including sell fee)
+    // Formula: investment = coinsToSell * currentPrice * (1 - fee/100)
+    // Therefore: coinsToSell = investment / (currentPrice * (1 - fee/100))
+    const coinsToSellBreakEven = transaction.investment / (currentPrice * (1 - transaction.fee / 100));
+    
     return {
         coinsPurchased,
-        netProfit
+        netProfit,
+        coinsToSellBreakEven
     };
 }
 
@@ -763,7 +769,7 @@ async function renderTransactions() {
         const tx = transactions[i];
         const currentPrice = priceMap.get(tx.currency);
         const sellPrice = currentPrice !== null ? currentPrice : tx.buyPrice;
-        const { coinsPurchased, netProfit } = calculateTransactionProfit(tx, sellPrice);
+        const { coinsPurchased, netProfit, coinsToSellBreakEven } = calculateTransactionProfit(tx, sellPrice);
         
         const profitClass = netProfit > 0 ? 'text-green-600 dark:text-green-400' : 
                            netProfit < 0 ? 'text-red-600 dark:text-red-400' : 
@@ -776,6 +782,7 @@ async function renderTransactions() {
             <td class="py-2 px-2">${formatTransactionCurrency(tx.buyPrice, tx.currency)}</td>
             <td class="py-2 px-2">${coinsPurchased.toFixed(8)}</td>
             <td class="py-2 px-2">${formatTransactionCurrency(sellPrice, tx.currency)}</td>
+            <td class="py-2 px-2">${coinsToSellBreakEven.toFixed(8)}</td>
             <td class="py-2 px-2 font-semibold ${profitClass}">${formatTransactionCurrency(netProfit, tx.currency)}</td>
             <td class="py-2 px-2">
                 <button 
