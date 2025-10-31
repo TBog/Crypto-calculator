@@ -70,6 +70,8 @@ async function fetchSupportedCurrencies(env, ctx) {
       }
     });
     
+    // Cache asynchronously using waitUntil - allows response to be sent while cache operation completes
+    // This is the recommended pattern for Cloudflare Workers to avoid blocking the response
     ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
     
     return currencies;
