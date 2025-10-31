@@ -387,6 +387,106 @@ function detectUserCurrency() {
     }
 }
 
+// Currency name mappings for common fiat currencies
+const CURRENCY_NAMES = {
+    'usd': 'US Dollar',
+    'eur': 'Euro',
+    'gbp': 'British Pound',
+    'jpy': 'Japanese Yen',
+    'cny': 'Chinese Yuan',
+    'aud': 'Australian Dollar',
+    'cad': 'Canadian Dollar',
+    'chf': 'Swiss Franc',
+    'inr': 'Indian Rupee',
+    'brl': 'Brazilian Real',
+    'rub': 'Russian Ruble',
+    'ron': 'Romanian Leu',
+    'krw': 'South Korean Won',
+    'mxn': 'Mexican Peso',
+    'sgd': 'Singapore Dollar',
+    'hkd': 'Hong Kong Dollar',
+    'nok': 'Norwegian Krone',
+    'sek': 'Swedish Krona',
+    'dkk': 'Danish Krone',
+    'pln': 'Polish Zloty',
+    'thb': 'Thai Baht',
+    'idr': 'Indonesian Rupiah',
+    'myr': 'Malaysian Ringgit',
+    'php': 'Philippine Peso',
+    'czk': 'Czech Koruna',
+    'nzd': 'New Zealand Dollar',
+    'zar': 'South African Rand',
+    'huf': 'Hungarian Forint',
+    'ils': 'Israeli Shekel',
+    'clp': 'Chilean Peso',
+    'pkr': 'Pakistani Rupee',
+    'aed': 'UAE Dirham',
+    'ars': 'Argentine Peso',
+    'bdt': 'Bangladeshi Taka',
+    'bhd': 'Bahraini Dinar',
+    'gel': 'Georgian Lari',
+    'kwd': 'Kuwaiti Dinar',
+    'lkr': 'Sri Lankan Rupee',
+    'mmk': 'Burmese Kyat',
+    'ngn': 'Nigerian Naira',
+    'sar': 'Saudi Riyal',
+    'try': 'Turkish Lira',
+    'twd': 'New Taiwan Dollar',
+    'uah': 'Ukrainian Hryvnia',
+    'vef': 'Venezuelan Bolívar',
+    'vnd': 'Vietnamese Dong'
+};
+
+// Fetch and populate currency selector with CoinGecko supported currencies
+async function populateCurrencySelector() {
+    const currencySelect = document.getElementById('currency');
+    const currentValue = currencySelect.value;
+    
+    try {
+        // Fetch supported currencies from worker
+        const workerUrl = 'https://crypto-cache.tbog.workers.dev/api/v3/simple/supported_vs_currencies';
+        const response = await fetch(workerUrl);
+        
+        if (!response.ok) {
+            console.warn('Failed to fetch currencies from worker, using defaults');
+            return; // Keep existing options
+        }
+        
+        const currencies = await response.json();
+        
+        // Filter to only fiat currencies (exclude crypto and commodities)
+        const cryptoCurrencies = ['btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'link', 'dot', 'yfi', 'sol', 'bits', 'sats'];
+        const commodities = ['xdr', 'xag', 'xau'];
+        const fiatCurrencies = currencies.filter(c => !cryptoCurrencies.includes(c) && !commodities.includes(c));
+        
+        // Sort alphabetically
+        fiatCurrencies.sort();
+        
+        // Clear existing options
+        currencySelect.innerHTML = '';
+        
+        // Add fiat currency options
+        fiatCurrencies.forEach(currency => {
+            const option = document.createElement('option');
+            const upperCurrency = currency.toUpperCase();
+            option.value = upperCurrency;
+            const currencyName = CURRENCY_NAMES[currency] || upperCurrency;
+            option.textContent = `${upperCurrency} - ${currencyName}`;
+            currencySelect.appendChild(option);
+        });
+        
+        // Restore previous selection or use default
+        if (currentValue && fiatCurrencies.map(c => c.toUpperCase()).includes(currentValue)) {
+            currencySelect.value = currentValue;
+        } else {
+            currencySelect.value = 'USD';
+        }
+    } catch (error) {
+        console.error('Error populating currency selector:', error);
+        // Keep existing options on error
+    }
+}
+
 // Save form values to cookies (excluding sell price)
 function saveFormValues() {
     setCookie('crypto_calc_investment', document.getElementById('investment').value);
@@ -790,6 +890,8 @@ function initEventListeners() {
 window.addEventListener('load', async function() {
     initDarkMode();
     initEventListeners();
+    // Populate currency selector with all supported currencies
+    await populateCurrencySelector();
     await loadFormValues();
     // Initialize the price chart with the selected currency
     const currency = document.getElementById('currency').value;
