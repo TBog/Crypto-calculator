@@ -10,6 +10,11 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
 - **API Key Security**: Securely handles CoinGecko API key via environment variables
 - **Error Handling**: Graceful error responses with appropriate HTTP status codes
 - **Fallback Support**: Client-side fallback to public API if worker is unavailable
+- **Currency Conversion Layer**: Automatic currency conversion for currencies not natively supported by CoinGecko (e.g., RON, and other fiat currencies)
+  - Fetches data in USD from CoinGecko
+  - Retrieves real-time exchange rates from ExchangeRate-API
+  - Converts prices, market caps, and volumes transparently
+  - Returns data as if CoinGecko natively supported the currency
 
 ## Deployment Steps
 
@@ -80,6 +85,37 @@ npx http-server -p 8000
 ```
 
 Then visit `http://localhost:8000` and test the price fetching functionality.
+
+## Currency Conversion for Unsupported Currencies
+
+The worker automatically handles currency conversion for currencies not natively supported by CoinGecko. When you request data with an unsupported currency (like RON, Romanian Leu), the worker:
+
+1. Detects that the currency is not in CoinGecko's supported list
+2. Fetches the data in USD from CoinGecko
+3. Retrieves the current USD to target currency exchange rate from [ExchangeRate-API](https://www.exchangerate-api.com/)
+4. Converts all price, market cap, and volume data to the target currency
+5. Returns the converted data seamlessly
+
+**Supported CoinGecko Currencies:**
+```
+btc, eth, ltc, bch, bnb, eos, xrp, xlm, link, dot, yfi, sol,
+usd, aed, ars, aud, bdt, bhd, bmd, brl, cad, chf, clp, cny,
+czk, dkk, eur, gbp, gel, hkd, huf, idr, ils, inr, jpy, krw,
+kwd, lkr, mmk, mxn, myr, ngn, nok, nzd, php, pkr, pln, rub,
+sar, sek, sgd, thb, try, twd, uah, vef, vnd, zar, xdr, xag,
+xau, bits, sats
+```
+
+**Example Usage:**
+```
+# Request with Romanian Leu (RON) - automatically converted
+https://crypto-cache.tbog.workers.dev/api/v3/coins/bitcoin/market_chart?vs_currency=ron&days=1
+
+# Request with another unsupported currency - automatically converted
+https://crypto-cache.tbog.workers.dev/api/v3/simple/price?ids=bitcoin&vs_currencies=ron
+```
+
+The conversion is transparent to the client - the response format is identical to CoinGecko's native response.
 
 ## Security
 
