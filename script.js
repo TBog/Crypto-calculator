@@ -720,7 +720,8 @@ function calculateTransactionProfit(transaction, currentPrice) {
     const netProfit = netSaleAmount - transaction.investment;
     
     // Calculate coins to sell to recover the initial investment amount (accounting for sell fee)
-    // Note: This recovers the investment but doesn't account for the buy fee already paid
+    // This gets you back the amount you originally invested, but you'll still have a net loss
+    // equal to (buy fee + sell fee) since you already paid the buy fee when purchasing
     // Formula: investment = coinsToSell * currentPrice * (1 - fee/100)
     // Therefore: coinsToSell = investment / (currentPrice * (1 - fee/100))
     const feeMultiplier = 1 - transaction.fee / 100;
