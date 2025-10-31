@@ -6,6 +6,7 @@
  * - Edge caching (1 hour TTL)
  * - CORS support for GitHub Pages
  * - Strict origin validation to prevent unauthorized API key usage
+ * - Currency conversion layer for unsupported currencies
  */
 
 // Allowed origins for accessing this worker
@@ -20,6 +21,106 @@ const ALLOWED_ORIGINS = [
   'http://localhost:5500', // Live Server default port
   'http://127.0.0.1:5500'
 ];
+
+// CoinGecko supported vs_currencies
+// This list is based on the official CoinGecko API documentation
+const SUPPORTED_CURRENCIES = [
+  'btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'link', 'dot', 'yfi', 'sol',
+  'usd', 'aed', 'ars', 'aud', 'bdt', 'bhd', 'bmd', 'brl', 'cad', 'chf', 'clp', 'cny',
+  'czk', 'dkk', 'eur', 'gbp', 'gel', 'hkd', 'huf', 'idr', 'ils', 'inr', 'jpy', 'krw',
+  'kwd', 'lkr', 'mmk', 'mxn', 'myr', 'ngn', 'nok', 'nzd', 'php', 'pkr', 'pln', 'rub',
+  'sar', 'sek', 'sgd', 'thb', 'try', 'twd', 'uah', 'vef', 'vnd', 'zar', 'xdr', 'xag',
+  'xau', 'bits', 'sats'
+];
+
+/**
+ * Fetch exchange rate from USD to target currency using ExchangeRate-API
+ * @param {string} targetCurrency - Target currency code (e.g., 'ron')
+ * @returns {Promise<number>} Exchange rate from USD to target currency
+ */
+async function fetchExchangeRate(targetCurrency) {
+  const upperCurrency = targetCurrency.toUpperCase();
+  
+  // Free tier API - no API key required for basic usage
+  const exchangeUrl = `https://api.exchangerate-api.com/v4/latest/USD`;
+  
+  try {
+    const response = await fetch(exchangeUrl);
+    if (!response.ok) {
+      throw new Error(`Exchange rate API responded with status ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const rate = data.rates[upperCurrency];
+    
+    if (!rate) {
+      throw new Error(`Exchange rate not found for currency: ${upperCurrency}`);
+    }
+    
+    return rate;
+  } catch (error) {
+    console.error('Failed to fetch exchange rate:', error);
+    throw error;
+  }
+}
+
+/**
+ * Convert market_chart data from USD to target currency
+ * @param {Object} data - CoinGecko market_chart response data
+ * @param {number} exchangeRate - Exchange rate from USD to target currency
+ * @returns {Object} Converted data
+ */
+function convertMarketChartData(data, exchangeRate) {
+  const converted = {};
+  
+  // Convert prices array [[timestamp, price], ...]
+  if (data.prices) {
+    converted.prices = data.prices.map(([timestamp, price]) => [
+      timestamp,
+      price * exchangeRate
+    ]);
+  }
+  
+  // Convert market_caps array [[timestamp, market_cap], ...]
+  if (data.market_caps) {
+    converted.market_caps = data.market_caps.map(([timestamp, marketCap]) => [
+      timestamp,
+      marketCap * exchangeRate
+    ]);
+  }
+  
+  // Convert total_volumes array [[timestamp, volume], ...]
+  if (data.total_volumes) {
+    converted.total_volumes = data.total_volumes.map(([timestamp, volume]) => [
+      timestamp,
+      volume * exchangeRate
+    ]);
+  }
+  
+  return converted;
+}
+
+/**
+ * Convert simple price data from USD to target currency
+ * @param {Object} data - CoinGecko simple/price response data
+ * @param {number} exchangeRate - Exchange rate from USD to target currency
+ * @param {string} targetCurrency - Target currency code
+ * @returns {Object} Converted data
+ */
+function convertSimplePriceData(data, exchangeRate, targetCurrency) {
+  const converted = {};
+  
+  // Simple price endpoint returns data like: { "bitcoin": { "usd": 43000 } }
+  for (const [coin, prices] of Object.entries(data)) {
+    if (prices.usd !== undefined) {
+      converted[coin] = {
+        [targetCurrency.toLowerCase()]: prices.usd * exchangeRate
+      };
+    }
+  }
+  
+  return converted;
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -105,9 +206,51 @@ async function handleRequest(request, env, ctx) {
   }
 
   try {
+    // Parse the request URL to get the query parameters
+    const url = new URL(request.url);
+    const searchParams = new URLSearchParams(url.search);
+    
+    // Check if this is a request that uses vs_currency parameter
+    const vsCurrency = searchParams.get('vs_currency') || searchParams.get('vs_currencies');
+    const isUnsupportedCurrency = vsCurrency && !SUPPORTED_CURRENCIES.includes(vsCurrency.toLowerCase());
+    
+    // If unsupported currency, we'll need to convert from USD
+    let exchangeRate = null;
+    let originalCurrency = null;
+    
+    if (isUnsupportedCurrency) {
+      originalCurrency = vsCurrency.toLowerCase();
+      
+      // Fetch exchange rate from USD to target currency
+      try {
+        exchangeRate = await fetchExchangeRate(originalCurrency);
+      } catch (exchangeError) {
+        return new Response(JSON.stringify({
+          error: 'invalid vs_currency',
+          message: `Currency '${vsCurrency}' is not supported by CoinGecko and exchange rate could not be fetched: ${exchangeError.message}`
+        }), {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json'
+          }
+        });
+      }
+      
+      // Replace the currency parameter with USD for the upstream request
+      searchParams.set(searchParams.has('vs_currency') ? 'vs_currency' : 'vs_currencies', 'usd');
+    }
+    
+    // Construct the modified search params
+    const modifiedSearch = isUnsupportedCurrency ? `?${searchParams.toString()}` : url.search;
+    
+    // Create a new request URL for caching purposes
+    const cacheUrl = new URL(request.url);
+    const cacheRequest = new Request(cacheUrl.toString(), request);
+    
     // Check cache first
     const cache = caches.default;
-    let response = await cache.match(request);
+    let response = await cache.match(cacheRequest);
 
     if (response) {
       // Cache hit - clone response and add CORS headers
@@ -126,12 +269,8 @@ async function handleRequest(request, env, ctx) {
     // Cache miss - fetch from upstream
     const apiKey = env.COINGECKO_KEY; // Environment variable from Cloudflare Workers
     
-    // Parse the request URL to get the query parameters
-    const url = new URL(request.url);
-    const pathAndQuery = url.pathname + url.search;
-    
-    // Construct upstream CoinGecko API URL
-    const upstreamUrl = `https://api.coingecko.com${pathAndQuery}`;
+    // Construct upstream CoinGecko API URL with potentially modified search params
+    const upstreamUrl = `https://api.coingecko.com${url.pathname}${modifiedSearch}`;
     
     // Add API key as header for CoinGecko API
     const upstreamHeaders = new Headers();
@@ -145,12 +284,37 @@ async function handleRequest(request, env, ctx) {
       headers: upstreamHeaders
     });
 
+    // Get the response body
+    let responseData;
+    const contentType = upstreamResponse.headers.get('content-type');
+    
+    if (upstreamResponse.ok && contentType && contentType.includes('application/json')) {
+      responseData = await upstreamResponse.json();
+      
+      // If we need to convert currency, do it now
+      if (isUnsupportedCurrency && exchangeRate) {
+        if (url.pathname.includes('/market_chart')) {
+          // Convert market_chart data
+          responseData = convertMarketChartData(responseData, exchangeRate);
+        } else if (url.pathname.includes('/simple/price')) {
+          // Convert simple price data
+          responseData = convertSimplePriceData(responseData, exchangeRate, originalCurrency);
+        }
+        // Add a header to indicate currency conversion was performed
+        upstreamResponse.headers.set('X-Currency-Converted', `USD -> ${originalCurrency.toUpperCase()}`);
+        upstreamResponse.headers.set('X-Exchange-Rate', exchangeRate.toString());
+      }
+    }
+
     // Create response with caching headers
-    response = new Response(upstreamResponse.body, {
-      status: upstreamResponse.status,
-      statusText: upstreamResponse.statusText,
-      headers: upstreamResponse.headers
-    });
+    response = new Response(
+      responseData ? JSON.stringify(responseData) : upstreamResponse.body,
+      {
+        status: upstreamResponse.status,
+        statusText: upstreamResponse.statusText,
+        headers: upstreamResponse.headers
+      }
+    );
 
     // Add cache control header (10 minutes = 600 seconds)
     response.headers.set('Cache-Control', 'public, max-age=600');
@@ -162,10 +326,13 @@ async function handleRequest(request, env, ctx) {
     
     // Add cache status header
     response.headers.set('X-Cache-Status', 'MISS');
+    
+    // Set proper content type
+    response.headers.set('Content-Type', 'application/json');
 
     // Cache the response (clone it first as the body can only be read once)
     if (upstreamResponse.ok) {
-      ctx.waitUntil(cache.put(request, response.clone()));
+      ctx.waitUntil(cache.put(cacheRequest, response.clone()));
     }
 
     return response;
