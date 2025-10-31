@@ -335,13 +335,7 @@ async function initPriceChart(currency = 'usd') {
         }
     });
     
-    // Add double-click to reset zoom
-    const chartCanvas = document.getElementById('priceChart');
-    chartCanvas.addEventListener('dblclick', function() {
-        if (priceChart) {
-            priceChart.resetZoom();
-        }
-    });
+    // Double-click event listener is now registered once in initEventListeners
 }
 
 // Cookie helper functions
