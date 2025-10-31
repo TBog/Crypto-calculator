@@ -379,6 +379,18 @@ async function handleRequest(request, env, ctx) {
         } else if (url.pathname.includes('/simple/price')) {
           // Convert simple price data
           responseData = convertSimplePriceData(responseData, exchangeRate, originalCurrency);
+        } else {
+          // For other endpoints, return an error for unsupported currency
+          return new Response(JSON.stringify({
+            error: "Currency conversion is not supported for this endpoint.",
+            message: `Currency conversion for '${originalCurrency}' is only supported for /market_chart and /simple/price endpoints.`
+          }), {
+            status: 400,
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'application/json'
+            }
+          });
         }
       }
       
