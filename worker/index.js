@@ -22,16 +22,70 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:5500'
 ];
 
-// CoinGecko supported vs_currencies
-// This list is based on the official CoinGecko API documentation
-const SUPPORTED_CURRENCIES = [
-  'btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'link', 'dot', 'yfi', 'sol',
-  'usd', 'aed', 'ars', 'aud', 'bdt', 'bhd', 'bmd', 'brl', 'cad', 'chf', 'clp', 'cny',
-  'czk', 'dkk', 'eur', 'gbp', 'gel', 'hkd', 'huf', 'idr', 'ils', 'inr', 'jpy', 'krw',
-  'kwd', 'lkr', 'mmk', 'mxn', 'myr', 'ngn', 'nok', 'nzd', 'php', 'pkr', 'pln', 'rub',
-  'sar', 'sek', 'sgd', 'thb', 'try', 'twd', 'uah', 'vef', 'vnd', 'zar', 'xdr', 'xag',
-  'xau', 'bits', 'sats'
-];
+// Cache duration for supported currencies list (1 day in seconds)
+const SUPPORTED_CURRENCIES_CACHE_TTL = 86400;
+
+/**
+ * Fetch supported vs_currencies from CoinGecko API
+ * @param {Object} env - Environment variables
+ * @param {Object} ctx - Execution context
+ * @returns {Promise<Array<string>>} Array of supported currency codes
+ */
+async function fetchSupportedCurrencies(env, ctx) {
+  const cacheKey = 'coingecko-supported-currencies';
+  const cache = caches.default;
+  
+  // Try to get from cache first
+  const cacheUrl = new URL(`https://cache-internal/${cacheKey}`);
+  const cachedResponse = await cache.match(cacheUrl);
+  
+  if (cachedResponse) {
+    const data = await cachedResponse.json();
+    return data.currencies;
+  }
+  
+  // Fetch from CoinGecko API
+  const apiKey = env.COINGECKO_KEY;
+  const headers = new Headers();
+  if (apiKey) {
+    headers.set('x-cg-demo-api-key', apiKey);
+  }
+  
+  try {
+    const response = await fetch('https://api.coingecko.com/api/v3/simple/supported_vs_currencies', {
+      headers: headers
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch supported currencies: ${response.status}`);
+    }
+    
+    const currencies = await response.json();
+    
+    // Cache the result for 1 day
+    const cacheResponse = new Response(JSON.stringify({ currencies }), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': `public, max-age=${SUPPORTED_CURRENCIES_CACHE_TTL}`
+      }
+    });
+    
+    ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
+    
+    return currencies;
+  } catch (error) {
+    console.error('Failed to fetch supported currencies, using fallback:', error);
+    // Fallback to a basic list if API fails
+    return [
+      'btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'link', 'dot', 'yfi', 'sol',
+      'usd', 'aed', 'ars', 'aud', 'bdt', 'bhd', 'bmd', 'brl', 'cad', 'chf', 'clp', 'cny',
+      'czk', 'dkk', 'eur', 'gbp', 'gel', 'hkd', 'huf', 'idr', 'ils', 'inr', 'jpy', 'krw',
+      'kwd', 'lkr', 'mmk', 'mxn', 'myr', 'ngn', 'nok', 'nzd', 'php', 'pkr', 'pln', 'rub',
+      'sar', 'sek', 'sgd', 'thb', 'try', 'twd', 'uah', 'vef', 'vnd', 'zar', 'xdr', 'xag',
+      'xau', 'bits', 'sats'
+    ];
+  }
+}
 
 /**
  * Fetch exchange rate from USD to target currency using ExchangeRate-API
@@ -213,11 +267,29 @@ async function handleRequest(request, env, ctx) {
   try {
     // Parse the request URL to get the query parameters
     const url = new URL(request.url);
+    
+    // Special endpoint to get supported currencies
+    if (url.pathname === '/api/v3/simple/supported_vs_currencies') {
+      const supportedCurrencies = await fetchSupportedCurrencies(env, ctx);
+      
+      return new Response(JSON.stringify(supportedCurrencies), {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+          'Cache-Control': `public, max-age=${SUPPORTED_CURRENCIES_CACHE_TTL}`
+        }
+      });
+    }
+    
+    // Fetch supported currencies list for validation
+    const supportedCurrencies = await fetchSupportedCurrencies(env, ctx);
+    
     const searchParams = new URLSearchParams(url.search);
     
     // Check if this is a request that uses vs_currency parameter
     const vsCurrency = searchParams.get('vs_currency') || searchParams.get('vs_currencies');
-    const isUnsupportedCurrency = vsCurrency && !SUPPORTED_CURRENCIES.includes(vsCurrency.toLowerCase());
+    const isUnsupportedCurrency = vsCurrency && !supportedCurrencies.includes(vsCurrency.toLowerCase());
     
     // If unsupported currency, we'll need to convert from USD
     let exchangeRate = null;
