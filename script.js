@@ -200,7 +200,7 @@ async function initPriceChart(currency = 'usd') {
     const gradientEnd = isDarkMode ? 'rgba(59, 130, 246, 0)' : 'rgba(37, 99, 235, 0)';
     
     // Create gradient
-    const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+    const gradient = ctx.createLinearGradient(0, 0, 0, ctx.canvas.height);
     gradient.addColorStop(0, gradientStart);
     gradient.addColorStop(1, gradientEnd);
     
