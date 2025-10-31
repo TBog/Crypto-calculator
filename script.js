@@ -46,16 +46,6 @@ const ANIMATION_CONFIG = {
 // Worker API configuration
 const WORKER_BASE_URL = 'https://crypto-cache.tbog.workers.dev';
 
-// Fiat currencies whitelist - comprehensive list of supported fiat currencies
-// Based on ExchangeRate-API and major currency exchanges
-const FIAT_CURRENCIES = [
-    'aed', 'ars', 'aud', 'bdt', 'bhd', 'bmd', 'brl', 'cad', 'chf', 'clp', 'cny',
-    'czk', 'dkk', 'eur', 'gbp', 'gel', 'hkd', 'huf', 'idr', 'ils', 'inr', 'jpy',
-    'krw', 'kwd', 'lkr', 'mmk', 'mxn', 'myr', 'ngn', 'nok', 'nzd', 'php', 'pkr',
-    'pln', 'ron', 'rub', 'sar', 'sek', 'sgd', 'thb', 'try', 'twd', 'uah', 'usd',
-    'vef', 'vnd', 'zar'
-];
-
 // Crypto currencies (for worker validation, not used in frontend selector)
 const CRYPTO_CURRENCIES = ['btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'link', 'dot', 'yfi', 'sol', 'bits', 'sats'];
 // Commodity currencies (for worker validation, not used in frontend selector)
@@ -400,88 +390,6 @@ function detectUserCurrency() {
         return detectedCurrency || 'USD';
     } catch (e) {
         return 'USD';
-    }
-}
-
-// Currency name mappings for common fiat currencies
-const CURRENCY_NAMES = {
-    'usd': 'US Dollar',
-    'eur': 'Euro',
-    'gbp': 'British Pound',
-    'jpy': 'Japanese Yen',
-    'cny': 'Chinese Yuan',
-    'aud': 'Australian Dollar',
-    'cad': 'Canadian Dollar',
-    'chf': 'Swiss Franc',
-    'inr': 'Indian Rupee',
-    'brl': 'Brazilian Real',
-    'rub': 'Russian Ruble',
-    'ron': 'Romanian Leu',
-    'krw': 'South Korean Won',
-    'mxn': 'Mexican Peso',
-    'sgd': 'Singapore Dollar',
-    'hkd': 'Hong Kong Dollar',
-    'nok': 'Norwegian Krone',
-    'sek': 'Swedish Krona',
-    'dkk': 'Danish Krone',
-    'pln': 'Polish Zloty',
-    'thb': 'Thai Baht',
-    'idr': 'Indonesian Rupiah',
-    'myr': 'Malaysian Ringgit',
-    'php': 'Philippine Peso',
-    'czk': 'Czech Koruna',
-    'nzd': 'New Zealand Dollar',
-    'zar': 'South African Rand',
-    'huf': 'Hungarian Forint',
-    'ils': 'Israeli Shekel',
-    'clp': 'Chilean Peso',
-    'pkr': 'Pakistani Rupee',
-    'aed': 'UAE Dirham',
-    'ars': 'Argentine Peso',
-    'bdt': 'Bangladeshi Taka',
-    'bhd': 'Bahraini Dinar',
-    'gel': 'Georgian Lari',
-    'kwd': 'Kuwaiti Dinar',
-    'lkr': 'Sri Lankan Rupee',
-    'mmk': 'Burmese Kyat',
-    'ngn': 'Nigerian Naira',
-    'sar': 'Saudi Riyal',
-    'try': 'Turkish Lira',
-    'twd': 'New Taiwan Dollar',
-    'uah': 'Ukrainian Hryvnia',
-    'vef': 'Venezuelan Bolívar',
-    'vnd': 'Vietnamese Dong'
-};
-
-// Populate currency selector with whitelisted fiat currencies
-function populateCurrencySelector() {
-    const currencySelect = document.getElementById('currency');
-    const currentValue = currencySelect.value;
-    
-    // Use hardcoded whitelist of fiat currencies
-    const fiatCurrencies = [...FIAT_CURRENCIES];
-    
-    // Sort alphabetically
-    fiatCurrencies.sort();
-    
-    // Clear existing options
-    currencySelect.innerHTML = '';
-    
-    // Add fiat currency options
-    fiatCurrencies.forEach(currency => {
-        const option = document.createElement('option');
-        const upperCurrency = currency.toUpperCase();
-        option.value = upperCurrency;
-        const currencyName = CURRENCY_NAMES[currency] || upperCurrency;
-        option.textContent = `${upperCurrency} - ${currencyName}`;
-        currencySelect.appendChild(option);
-    });
-    
-    // Restore previous selection or use default
-    if (currentValue && fiatCurrencies.map(c => c.toUpperCase()).includes(currentValue)) {
-        currencySelect.value = currentValue;
-    } else {
-        currencySelect.value = 'USD';
     }
 }
 
@@ -888,8 +796,6 @@ function initEventListeners() {
 window.addEventListener('load', async function() {
     initDarkMode();
     initEventListeners();
-    // Populate currency selector with whitelisted fiat currencies
-    populateCurrencySelector();
     await loadFormValues();
     // Initialize the price chart with the selected currency
     const currency = document.getElementById('currency').value;

@@ -25,6 +25,9 @@ const ALLOWED_ORIGINS = [
 // Cache duration for supported currencies list (1 day in seconds)
 const SUPPORTED_CURRENCIES_CACHE_TTL = 86400;
 
+// Cache duration for exchange rates (1 hour in seconds)
+const EXCHANGE_RATE_CACHE_TTL = 3600;
+
 /**
  * Fetch supported vs_currencies from CoinGecko API
  * @param {Object} env - Environment variables
@@ -77,25 +80,31 @@ async function fetchSupportedCurrencies(env, ctx) {
     return currencies;
   } catch (error) {
     console.error('Failed to fetch supported currencies, using fallback:', error);
-    // Fallback to a basic list if API fails
-    return [
-      'btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'link', 'dot', 'yfi', 'sol',
-      'usd', 'aed', 'ars', 'aud', 'bdt', 'bhd', 'bmd', 'brl', 'cad', 'chf', 'clp', 'cny',
-      'czk', 'dkk', 'eur', 'gbp', 'gel', 'hkd', 'huf', 'idr', 'ils', 'inr', 'jpy', 'krw',
-      'kwd', 'lkr', 'mmk', 'mxn', 'myr', 'ngn', 'nok', 'nzd', 'php', 'pkr', 'pln', 'rub',
-      'sar', 'sek', 'sgd', 'thb', 'try', 'twd', 'uah', 'vef', 'vnd', 'zar', 'xdr', 'xag',
-      'xau', 'bits', 'sats'
-    ];
+    // Fallback to minimal list if API fails - only BTC and USD as that's what we rely on
+    return ['btc', 'usd'];
   }
 }
 
 /**
  * Fetch exchange rate from USD to target currency using ExchangeRate-API
+ * Implements caching to reduce API calls
  * @param {string} targetCurrency - Target currency code (e.g., 'ron')
+ * @param {Object} ctx - Execution context
  * @returns {Promise<number>} Exchange rate from USD to target currency
  */
-async function fetchExchangeRate(targetCurrency) {
+async function fetchExchangeRate(targetCurrency, ctx) {
   const upperCurrency = targetCurrency.toUpperCase();
+  const cacheKey = `exchange-rate-usd-${upperCurrency.toLowerCase()}`;
+  const cache = caches.default;
+  
+  // Try to get from cache first
+  const cacheUrl = new URL(`https://cache-internal/${cacheKey}`);
+  const cachedResponse = await cache.match(cacheUrl);
+  
+  if (cachedResponse) {
+    const data = await cachedResponse.json();
+    return data.rate;
+  }
   
   // Free tier API - no API key required for basic usage
   const exchangeUrl = `https://api.exchangerate-api.com/v4/latest/USD`;
@@ -112,6 +121,17 @@ async function fetchExchangeRate(targetCurrency) {
     if (!rate) {
       throw new Error(`Exchange rate not found for currency: ${upperCurrency}`);
     }
+    
+    // Cache the result for 1 hour
+    const cacheResponse = new Response(JSON.stringify({ rate }), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': `public, max-age=${EXCHANGE_RATE_CACHE_TTL}`
+      }
+    });
+    
+    // Cache asynchronously using waitUntil
+    ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
     
     return rate;
   } catch (error) {
@@ -302,7 +322,7 @@ async function handleRequest(request, env, ctx) {
       
       // Fetch exchange rate from USD to target currency
       try {
-        exchangeRate = await fetchExchangeRate(originalCurrency);
+        exchangeRate = await fetchExchangeRate(originalCurrency, ctx);
       } catch (exchangeError) {
         return new Response(JSON.stringify({
           error: 'invalid vs_currency',
@@ -316,8 +336,14 @@ async function handleRequest(request, env, ctx) {
         });
       }
       
-      // Replace the currency parameter with USD for the upstream request
-      searchParams.set(searchParams.has('vs_currency') ? 'vs_currency' : 'vs_currencies', 'usd');
+      // Replace the currency parameter(s) with USD for the upstream request
+      // Handle both 'vs_currency' and 'vs_currencies' explicitly
+      if (searchParams.has('vs_currency')) {
+        searchParams.set('vs_currency', 'usd');
+      }
+      if (searchParams.has('vs_currencies')) {
+        searchParams.set('vs_currencies', 'usd');
+      }
     }
     
     // Construct the modified search params
