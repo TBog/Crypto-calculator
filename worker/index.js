@@ -107,7 +107,7 @@ async function fetchExchangeRate(targetCurrency, ctx) {
   }
   
   // Free tier API - no API key required for basic usage
-  const exchangeUrl = `https://api.exchangerate-api.com/v4/latest/USD`;
+  const exchangeUrl = `https://open.er-api.com/v6/latest/USD`;
   
   try {
     const response = await fetch(exchangeUrl);
