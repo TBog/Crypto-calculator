@@ -143,6 +143,9 @@ const CRYPTO_CURRENCIES = ['btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm
 // Commodity currencies (for worker validation, not used in frontend selector)
 const COMMODITY_CURRENCIES = ['xdr', 'xag', 'xau'];
 
+// Fallback currency list if API fetch fails
+const FALLBACK_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'AUD', 'CAD', 'CHF', 'INR', 'BRL', 'RUB', 'RON', 'KRW', 'MXN', 'SGD', 'HKD'];
+
 // Default values
 const defaults = {
     investment: 50000,
@@ -228,8 +231,8 @@ async function fetchSupportedCurrencies() {
         return supportedCurrencies;
     } catch (error) {
         console.error('Failed to fetch supported currencies:', error);
-        // Return a fallback list of common currencies
-        return ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'AUD', 'CAD', 'CHF', 'INR', 'BRL', 'RUB', 'RON', 'KRW', 'MXN', 'SGD', 'HKD'];
+        // Return fallback list of common currencies
+        return FALLBACK_CURRENCIES;
     }
 }
 
@@ -1058,7 +1061,13 @@ window.addEventListener('load', async function() {
     initEventListeners();
     
     // Populate currency selector with all supported currencies
-    await populateCurrencySelector();
+    try {
+        await populateCurrencySelector();
+    } catch (error) {
+        console.error('Failed to populate currency selector:', error);
+        // Continue with page initialization even if currency loading fails
+        // The selector will use the fallback currencies
+    }
     
     await loadFormValues();
     // Initialize the price chart with the selected currency
