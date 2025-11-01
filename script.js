@@ -162,11 +162,128 @@ const CACHE_DURATION = 60000; // 60 seconds cache
 // Chart instance
 let priceChart = null;
 
+// Currency list cache
+let supportedCurrencies = null;
+
+// Currency names mapping (common currencies)
+const CURRENCY_NAMES = {
+    'USD': 'US Dollar',
+    'EUR': 'Euro',
+    'GBP': 'British Pound',
+    'JPY': 'Japanese Yen',
+    'CNY': 'Chinese Yuan',
+    'AUD': 'Australian Dollar',
+    'CAD': 'Canadian Dollar',
+    'CHF': 'Swiss Franc',
+    'INR': 'Indian Rupee',
+    'BRL': 'Brazilian Real',
+    'RUB': 'Russian Ruble',
+    'RON': 'Romanian Leu',
+    'KRW': 'South Korean Won',
+    'MXN': 'Mexican Peso',
+    'SGD': 'Singapore Dollar',
+    'HKD': 'Hong Kong Dollar',
+    'AED': 'UAE Dirham',
+    'ARS': 'Argentine Peso',
+    'DKK': 'Danish Krone',
+    'IDR': 'Indonesian Rupiah',
+    'ILS': 'Israeli Shekel',
+    'MYR': 'Malaysian Ringgit',
+    'NOK': 'Norwegian Krone',
+    'NZD': 'New Zealand Dollar',
+    'PHP': 'Philippine Peso',
+    'PLN': 'Polish Zloty',
+    'SEK': 'Swedish Krona',
+    'THB': 'Thai Baht',
+    'TRY': 'Turkish Lira',
+    'ZAR': 'South African Rand'
+};
+
 // Register Chart.js zoom plugin
 if (typeof Chart !== 'undefined' && typeof ChartZoom !== 'undefined') {
     Chart.register(ChartZoom);
 } else if (typeof Chart !== 'undefined') {
     console.warn('ChartZoom plugin not loaded - zoom functionality will not be available');
+}
+
+/**
+ * Fetch supported currencies from ExchangeRate-API via worker
+ * @returns {Promise<Array<string>>} Array of currency codes
+ */
+async function fetchSupportedCurrencies() {
+    if (supportedCurrencies) {
+        return supportedCurrencies;
+    }
+    
+    try {
+        const workerUrl = `${WORKER_BASE_URL}/api/exchange-rates/supported-currencies`;
+        const response = await fetch(workerUrl);
+        
+        if (!response.ok) {
+            throw new Error(`Worker responded with status ${response.status}`);
+        }
+        
+        const data = await response.json();
+        supportedCurrencies = data.currencies;
+        return supportedCurrencies;
+    } catch (error) {
+        console.error('Failed to fetch supported currencies:', error);
+        // Return a fallback list of common currencies
+        return ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'AUD', 'CAD', 'CHF', 'INR', 'BRL', 'RUB', 'RON', 'KRW', 'MXN', 'SGD', 'HKD'];
+    }
+}
+
+/**
+ * Populate currency selector with all supported currencies
+ */
+async function populateCurrencySelector() {
+    const currencySelect = document.getElementById('currency');
+    const currencies = await fetchSupportedCurrencies();
+    
+    // Clear existing options
+    currencySelect.innerHTML = '';
+    
+    // Add all supported currencies
+    currencies.forEach(currency => {
+        const option = document.createElement('option');
+        option.value = currency;
+        const currencyName = CURRENCY_NAMES[currency] || currency;
+        option.textContent = `${currency} - ${currencyName}`;
+        currencySelect.appendChild(option);
+    });
+}
+
+/**
+ * Check response headers for currency conversion and display warnings
+ * @param {Response} response - Fetch API response
+ */
+function handleDataAttribution(response) {
+    const attributionDiv = document.getElementById('dataAttribution');
+    const exchangeRateAttr = document.getElementById('exchangeRateAttribution');
+    const conversionWarning = document.getElementById('conversionWarning');
+    
+    // Always show the attribution section
+    attributionDiv.style.display = 'block';
+    
+    // Check if currency conversion was performed
+    const currencyConverted = response.headers.get('X-Currency-Converted');
+    const conversionWarningText = response.headers.get('X-Conversion-Warning');
+    
+    if (currencyConverted) {
+        // Show exchange rate attribution
+        exchangeRateAttr.style.display = 'block';
+        
+        // Show conversion warning if present
+        if (conversionWarningText) {
+            conversionWarning.style.display = 'block';
+        } else {
+            conversionWarning.style.display = 'none';
+        }
+    } else {
+        // Hide exchange rate attribution and warning if no conversion
+        exchangeRateAttr.style.display = 'none';
+        conversionWarning.style.display = 'none';
+    }
 }
 
 // Fetch current BTC price from CoinGecko API via Cloudflare Worker proxy with fallback
@@ -188,6 +305,9 @@ async function fetchBTCPrice(currency = 'usd') {
         if (!response.ok) {
             throw new Error(`Worker responded with status ${response.status}`);
         }
+        
+        // Handle data attribution from response headers
+        handleDataAttribution(response);
         
         const data = await response.json();
         const price = data.bitcoin[currencyLower];
@@ -241,6 +361,9 @@ async function fetchBTCChartData(currency = 'usd') {
         if (!response.ok) {
             throw new Error(`Worker responded with status ${response.status}`);
         }
+        
+        // Handle data attribution from response headers
+        handleDataAttribution(response);
         
         const data = await response.json();
         
@@ -933,6 +1056,10 @@ window.addEventListener('load', async function() {
     
     initDarkMode();
     initEventListeners();
+    
+    // Populate currency selector with all supported currencies
+    await populateCurrencySelector();
+    
     await loadFormValues();
     // Initialize the price chart with the selected currency
     const currency = document.getElementById('currency').value;

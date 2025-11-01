@@ -248,6 +248,22 @@
                 </div>
             </div>
 
+            <!-- Data Attribution and Warnings -->
+            <div id="dataAttribution" class="mt-6" style="display: none;">
+                <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <h3 class="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-2">📊 Data Sources</h3>
+                    <p class="text-xs text-blue-700 dark:text-blue-400">
+                        Bitcoin prices provided by <a href="https://www.coingecko.com/" target="_blank" rel="noopener" class="underline">CoinGecko API</a>
+                    </p>
+                    <p id="exchangeRateAttribution" class="text-xs text-blue-700 dark:text-blue-400 mt-1" style="display: none;">
+                        Exchange rates provided by <a href="https://www.exchangerate-api.com/" target="_blank" rel="noopener" class="underline">ExchangeRate-API</a>
+                    </p>
+                    <p id="conversionWarning" class="text-xs text-amber-700 dark:text-amber-400 mt-2 font-semibold" style="display: none;">
+                        ⚠️ Exchange rates are approximate and may vary from actual values
+                    </p>
+                </div>
+            </div>
+
             <div id="results" class="mt-6">
                 <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 space-y-3">
                     <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-3">Results</h2>
