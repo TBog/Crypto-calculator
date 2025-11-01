@@ -963,6 +963,122 @@ function initEventListeners() {
             renderTransactions();
         }
     });
+
+    // Initialize searchable currency dropdown
+    initCurrencyDropdown();
+}
+
+/**
+ * Initialize searchable currency dropdown functionality
+ */
+function initCurrencyDropdown() {
+    const searchInput = document.getElementById('currencySearch');
+    const dropdown = document.getElementById('currencyDropdown');
+    const hiddenInput = document.getElementById('currency');
+    const options = dropdown.querySelectorAll('.currency-option');
+
+    // Set initial display value
+    const selectedOption = dropdown.querySelector('.currency-option.selected');
+    if (selectedOption) {
+        searchInput.value = selectedOption.textContent;
+    }
+
+    // Show dropdown when input is focused
+    searchInput.addEventListener('focus', function() {
+        dropdown.classList.add('show');
+        searchInput.select();
+    });
+
+    // Filter options based on search text
+    searchInput.addEventListener('input', function() {
+        const searchText = this.value.toLowerCase();
+        
+        options.forEach(option => {
+            const text = option.textContent.toLowerCase();
+            // Match anywhere in the text (currency code or name)
+            if (text.includes(searchText)) {
+                option.classList.remove('hidden');
+            } else {
+                option.classList.add('hidden');
+            }
+        });
+
+        dropdown.classList.add('show');
+    });
+
+    // Handle option selection
+    options.forEach(option => {
+        option.addEventListener('click', function() {
+            const value = this.getAttribute('data-value');
+            const text = this.textContent;
+
+            // Update hidden input and search field
+            hiddenInput.value = value;
+            searchInput.value = text;
+
+            // Update selected state
+            options.forEach(opt => opt.classList.remove('selected'));
+            this.classList.add('selected');
+
+            // Hide dropdown
+            dropdown.classList.remove('show');
+
+            // Trigger change event on hidden input
+            const event = new Event('change', { bubbles: true });
+            hiddenInput.dispatchEvent(event);
+        });
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+            dropdown.classList.remove('show');
+            // Restore selected value if user clicked away
+            const selectedOption = dropdown.querySelector('.currency-option.selected');
+            if (selectedOption) {
+                searchInput.value = selectedOption.textContent;
+            }
+            // Reset filter
+            options.forEach(option => option.classList.remove('hidden'));
+        }
+    });
+
+    // Handle keyboard navigation
+    searchInput.addEventListener('keydown', function(e) {
+        const visibleOptions = Array.from(options).filter(opt => !opt.classList.contains('hidden'));
+        const currentIndex = visibleOptions.findIndex(opt => opt.classList.contains('selected'));
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (!dropdown.classList.contains('show')) {
+                dropdown.classList.add('show');
+            } else if (currentIndex < visibleOptions.length - 1) {
+                options.forEach(opt => opt.classList.remove('selected'));
+                visibleOptions[currentIndex + 1].classList.add('selected');
+                visibleOptions[currentIndex + 1].scrollIntoView({ block: 'nearest' });
+            }
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (currentIndex > 0) {
+                options.forEach(opt => opt.classList.remove('selected'));
+                visibleOptions[currentIndex - 1].classList.add('selected');
+                visibleOptions[currentIndex - 1].scrollIntoView({ block: 'nearest' });
+            }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const selectedOption = dropdown.querySelector('.currency-option.selected');
+            if (selectedOption && !selectedOption.classList.contains('hidden')) {
+                selectedOption.click();
+            }
+        } else if (e.key === 'Escape') {
+            dropdown.classList.remove('show');
+            const selectedOption = dropdown.querySelector('.currency-option.selected');
+            if (selectedOption) {
+                searchInput.value = selectedOption.textContent;
+            }
+            options.forEach(option => option.classList.remove('hidden'));
+        }
+    });
 }
 
 // Run on page load
