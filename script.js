@@ -978,20 +978,47 @@ function initCurrencyDropdown() {
     const hiddenInput = document.getElementById('currency');
     const options = dropdown.querySelectorAll('.currency-option');
 
-    // Set initial display value for desktop
-    const selectedOption = dropdown.querySelector('.currency-option.selected');
-    if (selectedOption) {
-        searchInput.value = selectedOption.textContent;
+    // Function to sync desktop searchable input with current currency value
+    function syncDesktopInput() {
+        const currentValue = hiddenInput.value;
+        const matchingOption = dropdown.querySelector(`.currency-option[data-value="${currentValue}"]`);
+        if (matchingOption) {
+            searchInput.value = matchingOption.textContent;
+            // Update selected state
+            options.forEach(opt => opt.classList.remove('selected'));
+            matchingOption.classList.add('selected');
+        }
     }
+
+    // Set initial display value for desktop
+    syncDesktopInput();
 
     // Handle mobile select change
     mobileSelect.addEventListener('change', function() {
         hiddenInput.value = this.value;
         
+        // Sync desktop input when mobile select changes
+        syncDesktopInput();
+        
         // Trigger change event on hidden input
         const event = new Event('change', { bubbles: true });
         hiddenInput.dispatchEvent(event);
     });
+
+    // Sync desktop input when viewport changes (e.g., switching to desktop mode)
+    // Use matchMedia to detect when the media query changes
+    const mediaQuery = window.matchMedia('(min-width: 769px)');
+    function handleViewportChange(e) {
+        if (e.matches) {
+            // Switched to desktop view, sync the input
+            syncDesktopInput();
+        }
+    }
+    mediaQuery.addListener(handleViewportChange);
+    // Modern browsers
+    if (mediaQuery.addEventListener) {
+        mediaQuery.addEventListener('change', handleViewportChange);
+    }
 
     // Show dropdown when input is focused (desktop only)
     searchInput.addEventListener('focus', function() {
