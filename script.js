@@ -1007,6 +1007,7 @@ function initCurrencyDropdown() {
 
     // Sync desktop input when viewport changes (e.g., switching to desktop mode)
     // Use matchMedia to detect when the media query changes
+    // Using min-width: 769px to match CSS breakpoint (max-width: 768px)
     const mediaQuery = window.matchMedia('(min-width: 769px)');
     function handleViewportChange(e) {
         if (e.matches) {
@@ -1014,11 +1015,8 @@ function initCurrencyDropdown() {
             syncDesktopInput();
         }
     }
-    mediaQuery.addListener(handleViewportChange);
-    // Modern browsers
-    if (mediaQuery.addEventListener) {
-        mediaQuery.addEventListener('change', handleViewportChange);
-    }
+    // Modern browsers support addEventListener
+    mediaQuery.addEventListener('change', handleViewportChange);
 
     // Show dropdown when input is focused (desktop only)
     searchInput.addEventListener('focus', function() {
