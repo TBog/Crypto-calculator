@@ -974,22 +974,32 @@ function initEventListeners() {
 function initCurrencyDropdown() {
     const searchInput = document.getElementById('currencySearch');
     const dropdown = document.getElementById('currencyDropdown');
+    const mobileSelect = document.getElementById('currencyMobile');
     const hiddenInput = document.getElementById('currency');
     const options = dropdown.querySelectorAll('.currency-option');
 
-    // Set initial display value
+    // Set initial display value for desktop
     const selectedOption = dropdown.querySelector('.currency-option.selected');
     if (selectedOption) {
         searchInput.value = selectedOption.textContent;
     }
 
-    // Show dropdown when input is focused
+    // Handle mobile select change
+    mobileSelect.addEventListener('change', function() {
+        hiddenInput.value = this.value;
+        
+        // Trigger change event on hidden input
+        const event = new Event('change', { bubbles: true });
+        hiddenInput.dispatchEvent(event);
+    });
+
+    // Show dropdown when input is focused (desktop only)
     searchInput.addEventListener('focus', function() {
         dropdown.classList.add('show');
         searchInput.select();
     });
 
-    // Filter options based on search text
+    // Filter options based on search text (desktop only)
     searchInput.addEventListener('input', function() {
         const searchText = this.value.toLowerCase();
         
@@ -1006,7 +1016,7 @@ function initCurrencyDropdown() {
         dropdown.classList.add('show');
     });
 
-    // Handle option selection
+    // Handle option selection (desktop only)
     options.forEach(option => {
         option.addEventListener('click', function() {
             const value = this.getAttribute('data-value');
@@ -1015,6 +1025,9 @@ function initCurrencyDropdown() {
             // Update hidden input and search field
             hiddenInput.value = value;
             searchInput.value = text;
+            
+            // Sync mobile select
+            mobileSelect.value = value;
 
             // Update selected state
             options.forEach(opt => opt.classList.remove('selected'));
@@ -1029,7 +1042,7 @@ function initCurrencyDropdown() {
         });
     });
 
-    // Close dropdown when clicking outside
+    // Close dropdown when clicking outside (desktop only)
     document.addEventListener('click', function(e) {
         if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
             dropdown.classList.remove('show');
@@ -1043,7 +1056,7 @@ function initCurrencyDropdown() {
         }
     });
 
-    // Handle keyboard navigation
+    // Handle keyboard navigation (desktop only)
     searchInput.addEventListener('keydown', function(e) {
         const visibleOptions = Array.from(options).filter(opt => !opt.classList.contains('hidden'));
         const currentIndex = visibleOptions.findIndex(opt => opt.classList.contains('selected'));
@@ -1081,8 +1094,25 @@ function initCurrencyDropdown() {
     });
 }
 
+/**
+ * Detect if device is mobile and add appropriate class
+ */
+function detectMobileDevice() {
+    // Check for mobile using multiple methods
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+                     (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) ||
+                     ('ontouchstart' in window);
+    
+    if (isMobile) {
+        document.body.classList.add('is-mobile');
+    }
+}
+
 // Run on page load
 window.addEventListener('load', async function() {
+    // Detect mobile device first
+    detectMobileDevice();
+    
     // Initialize consent system first (before any data storage)
     initConsent();
     
