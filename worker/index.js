@@ -86,6 +86,53 @@ async function fetchSupportedCurrencies(env, ctx) {
 }
 
 /**
+ * Fetch all supported currencies from ExchangeRate-API
+ * @param {Object} ctx - Execution context
+ * @returns {Promise<Object>} Object with currency codes and their exchange rates
+ */
+async function fetchAllExchangeRates(ctx) {
+  const cacheKey = 'exchange-rate-all-currencies';
+  const cache = caches.default;
+  
+  // Try to get from cache first
+  const cacheUrl = new URL(`https://cache-internal/${cacheKey}`);
+  const cachedResponse = await cache.match(cacheUrl);
+  
+  if (cachedResponse) {
+    const data = await cachedResponse.json();
+    return data;
+  }
+  
+  // Free tier API - no API key required for basic usage
+  const exchangeUrl = `https://open.er-api.com/v6/latest/USD`;
+  
+  try {
+    const response = await fetch(exchangeUrl);
+    if (!response.ok) {
+      throw new Error(`Exchange rate API responded with status ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    // Cache the result for 1 hour
+    const cacheResponse = new Response(JSON.stringify(data), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': `public, max-age=${EXCHANGE_RATE_CACHE_TTL}`
+      }
+    });
+    
+    // Cache asynchronously using waitUntil
+    ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
+    
+    return data;
+  } catch (error) {
+    console.error('Failed to fetch exchange rates:', error);
+    throw error;
+  }
+}
+
+/**
  * Fetch exchange rate from USD to target currency using ExchangeRate-API
  * Implements caching to reduce API calls
  * @param {string} targetCurrency - Target currency code (e.g., 'ron')
@@ -290,7 +337,7 @@ async function handleRequest(request, env, ctx) {
     // Parse the request URL to get the query parameters
     const url = new URL(request.url);
     
-    // Special endpoint to get supported currencies
+    // Special endpoint to get supported currencies from CoinGecko
     if (url.pathname === '/api/v3/simple/supported_vs_currencies') {
       const supportedCurrencies = await fetchSupportedCurrencies(env, ctx);
       
@@ -299,7 +346,28 @@ async function handleRequest(request, env, ctx) {
         headers: {
           ...corsHeaders,
           'Content-Type': 'application/json',
-          'Cache-Control': `public, max-age=${SUPPORTED_CURRENCIES_CACHE_TTL}`
+          'Cache-Control': `public, max-age=${SUPPORTED_CURRENCIES_CACHE_TTL}`,
+          'X-Data-Source': 'CoinGecko API'
+        }
+      });
+    }
+    
+    // Special endpoint to get all supported currencies from ExchangeRate-API
+    if (url.pathname === '/api/exchange-rates/supported-currencies') {
+      const exchangeData = await fetchAllExchangeRates(ctx);
+      
+      return new Response(JSON.stringify({
+        base_code: exchangeData.base_code,
+        currencies: Object.keys(exchangeData.rates).sort(),
+        provider: exchangeData.provider,
+        documentation: exchangeData.documentation
+      }), {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+          'Cache-Control': `public, max-age=${EXCHANGE_RATE_CACHE_TTL}`,
+          'X-Data-Source': 'ExchangeRate-API'
         }
       });
     }
@@ -452,10 +520,15 @@ async function handleRequest(request, env, ctx) {
     if (responseData) {
       response.headers.set('Content-Type', 'application/json');
       
+      // Add attribution headers for data sources
+      response.headers.set('X-Data-Source-Price', 'CoinGecko API');
+      
       // Add headers to indicate currency conversion was performed
       if (isUnsupportedCurrency && exchangeRate) {
         response.headers.set('X-Currency-Converted', `USD -> ${originalCurrency.toUpperCase()}`);
         response.headers.set('X-Exchange-Rate', exchangeRate.toString());
+        response.headers.set('X-Data-Source-Exchange', 'ExchangeRate-API');
+        response.headers.set('X-Conversion-Warning', 'Exchange rates are approximate and may vary from actual values');
       }
     }
 
