@@ -1095,24 +1095,12 @@ function initCurrencyDropdown() {
 }
 
 /**
- * Detect if device is mobile and add appropriate class
+ * Mobile detection is now handled via CSS media queries in index.html
+ * This ensures proper behavior when users switch to desktop mode on mobile devices
  */
-function detectMobileDevice() {
-    // Check for mobile using multiple methods
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-                     (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) ||
-                     ('ontouchstart' in window);
-    
-    if (isMobile) {
-        document.body.classList.add('is-mobile');
-    }
-}
 
 // Run on page load
 window.addEventListener('load', async function() {
-    // Detect mobile device first
-    detectMobileDevice();
-    
     // Initialize consent system first (before any data storage)
     initConsent();
     
