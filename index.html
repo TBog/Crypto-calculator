@@ -7,6 +7,11 @@
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class'
+        }
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
@@ -86,6 +91,74 @@
         .dark #cookieConsent {
             background: rgba(31, 41, 55, 0.98);
             border-top: 1px solid #4b5563;
+        }
+
+        /* Dark mode fallback styles - ensures dark mode works even if Tailwind config fails */
+        .dark body {
+            background-color: rgb(17, 24, 39);
+            color: rgb(229, 231, 235);
+        }
+
+        .dark .bg-white {
+            background-color: rgb(31, 41, 55) !important;
+        }
+
+        .dark .bg-gray-50 {
+            background-color: rgb(55, 65, 81) !important;
+        }
+
+        .dark .bg-gray-100 {
+            background-color: rgb(17, 24, 39) !important;
+        }
+
+        .dark .bg-gray-200 {
+            background-color: rgb(55, 65, 81) !important;
+        }
+
+        .dark .bg-gray-700 {
+            background-color: rgb(55, 65, 81) !important;
+        }
+
+        .dark .text-gray-800, 
+        .dark .text-gray-700,
+        .dark .text-gray-600 {
+            color: rgb(229, 231, 235) !important;
+        }
+
+        .dark .text-gray-400,
+        .dark .text-gray-300 {
+            color: rgb(209, 213, 219) !important;
+        }
+
+        .dark h1, .dark h2, .dark h3 {
+            color: rgb(255, 255, 255) !important;
+        }
+
+        .dark input, .dark select {
+            background-color: rgb(55, 65, 81) !important;
+            border-color: rgb(75, 85, 99) !important;
+            color: rgb(255, 255, 255) !important;
+        }
+
+        .dark .border-gray-300,
+        .dark .border-gray-200 {
+            border-color: rgb(75, 85, 99) !important;
+        }
+
+        .dark .border-gray-600 {
+            border-color: rgb(75, 85, 99) !important;
+        }
+
+        .dark .border-gray-700 {
+            border-color: rgb(75, 85, 99) !important;
+        }
+
+        .dark button:not(.bg-blue-600):not(.bg-green-600):not(.bg-red-600):not(.bg-red-500) {
+            background-color: rgb(55, 65, 81) !important;
+        }
+
+        .dark button:hover:not(.bg-blue-600):not(.bg-green-600):not(.bg-red-600):not(.bg-red-500):not(:hover) {
+            background-color: rgb(75, 85, 99) !important;
         }
 
         /* Searchable dropdown styles */
