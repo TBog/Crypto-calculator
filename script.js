@@ -550,6 +550,8 @@ async function loadFormValues() {
     // Set currency first: try cookie, then detect, then default to USD
     const currency = savedCurrency ?? detectUserCurrency();
     document.getElementById('currency').value = currency;
+    // Also sync mobile select to match saved currency
+    document.getElementById('currencyMobile').value = currency;
 
     // Fetch current BTC price for the selected currency
     const sellPriceValue = await fetchBTCPrice(currency);
