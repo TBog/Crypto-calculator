@@ -91,7 +91,7 @@ async function fetchSupportedCurrencies(env, ctx) {
  * @returns {Promise<Object>} Object with currency codes and their exchange rates
  */
 async function fetchAllExchangeRates(ctx) {
-  const cacheKey = 'exchange-rate-all-currencies';
+  const cacheKey = 'exchange-rate-all-usd';
   const cache = caches.default;
   
   // Try to get from cache first
@@ -134,51 +134,22 @@ async function fetchAllExchangeRates(ctx) {
 
 /**
  * Fetch exchange rate from USD to target currency using ExchangeRate-API
- * Implements caching to reduce API calls
+ * Uses the consolidated fetchAllExchangeRates to avoid duplicate API calls
  * @param {string} targetCurrency - Target currency code (e.g., 'ron')
  * @param {Object} ctx - Execution context
  * @returns {Promise<number>} Exchange rate from USD to target currency
  */
 async function fetchExchangeRate(targetCurrency, ctx) {
   const upperCurrency = targetCurrency.toUpperCase();
-  const cacheKey = `exchange-rate-usd-${upperCurrency.toLowerCase()}`;
-  const cache = caches.default;
-  
-  // Try to get from cache first
-  const cacheUrl = new URL(`https://cache-internal/${cacheKey}`);
-  const cachedResponse = await cache.match(cacheUrl);
-  
-  if (cachedResponse) {
-    const data = await cachedResponse.json();
-    return data.rate;
-  }
-  
-  // Free tier API - no API key required for basic usage
-  const exchangeUrl = `https://open.er-api.com/v6/latest/USD`;
   
   try {
-    const response = await fetch(exchangeUrl);
-    if (!response.ok) {
-      throw new Error(`Exchange rate API responded with status ${response.status}`);
-    }
-    
-    const data = await response.json();
+    // Fetch all rates (will use cache if available)
+    const data = await fetchAllExchangeRates(ctx);
     const rate = data.rates[upperCurrency];
     
     if (!rate) {
       throw new Error(`Exchange rate not found for currency: ${upperCurrency}`);
     }
-    
-    // Cache the result for 1 hour
-    const cacheResponse = new Response(JSON.stringify({ rate }), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': `public, max-age=${EXCHANGE_RATE_CACHE_TTL}`
-      }
-    });
-    
-    // Cache asynchronously using waitUntil
-    ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
     
     return rate;
   } catch (error) {
@@ -348,26 +319,6 @@ async function handleRequest(request, env, ctx) {
           'Content-Type': 'application/json',
           'Cache-Control': `public, max-age=${SUPPORTED_CURRENCIES_CACHE_TTL}`,
           'X-Data-Source': 'CoinGecko API'
-        }
-      });
-    }
-    
-    // Special endpoint to get all supported currencies from ExchangeRate-API
-    if (url.pathname === '/api/exchange-rates/supported-currencies') {
-      const exchangeData = await fetchAllExchangeRates(ctx);
-      
-      return new Response(JSON.stringify({
-        base_code: exchangeData.base_code,
-        currencies: Object.keys(exchangeData.rates).sort(),
-        provider: exchangeData.provider,
-        documentation: exchangeData.documentation
-      }), {
-        status: 200,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-          'Cache-Control': `public, max-age=${EXCHANGE_RATE_CACHE_TTL}`,
-          'X-Data-Source': 'ExchangeRate-API'
         }
       });
     }

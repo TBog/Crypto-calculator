@@ -143,9 +143,6 @@ const CRYPTO_CURRENCIES = ['btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm
 // Commodity currencies (for worker validation, not used in frontend selector)
 const COMMODITY_CURRENCIES = ['xdr', 'xag', 'xau'];
 
-// Fallback currency list if API fetch fails
-const FALLBACK_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'AUD', 'CAD', 'CHF', 'INR', 'BRL', 'RUB', 'RON', 'KRW', 'MXN', 'SGD', 'HKD'];
-
 // Default values
 const defaults = {
     investment: 50000,
@@ -165,95 +162,11 @@ const CACHE_DURATION = 60000; // 60 seconds cache
 // Chart instance
 let priceChart = null;
 
-// Currency list cache
-let supportedCurrencies = null;
-
-// Currency names mapping (common currencies)
-const CURRENCY_NAMES = {
-    'USD': 'US Dollar',
-    'EUR': 'Euro',
-    'GBP': 'British Pound',
-    'JPY': 'Japanese Yen',
-    'CNY': 'Chinese Yuan',
-    'AUD': 'Australian Dollar',
-    'CAD': 'Canadian Dollar',
-    'CHF': 'Swiss Franc',
-    'INR': 'Indian Rupee',
-    'BRL': 'Brazilian Real',
-    'RUB': 'Russian Ruble',
-    'RON': 'Romanian Leu',
-    'KRW': 'South Korean Won',
-    'MXN': 'Mexican Peso',
-    'SGD': 'Singapore Dollar',
-    'HKD': 'Hong Kong Dollar',
-    'AED': 'UAE Dirham',
-    'ARS': 'Argentine Peso',
-    'DKK': 'Danish Krone',
-    'IDR': 'Indonesian Rupiah',
-    'ILS': 'Israeli Shekel',
-    'MYR': 'Malaysian Ringgit',
-    'NOK': 'Norwegian Krone',
-    'NZD': 'New Zealand Dollar',
-    'PHP': 'Philippine Peso',
-    'PLN': 'Polish Zloty',
-    'SEK': 'Swedish Krona',
-    'THB': 'Thai Baht',
-    'TRY': 'Turkish Lira',
-    'ZAR': 'South African Rand'
-};
-
 // Register Chart.js zoom plugin
 if (typeof Chart !== 'undefined' && typeof ChartZoom !== 'undefined') {
     Chart.register(ChartZoom);
 } else if (typeof Chart !== 'undefined') {
     console.warn('ChartZoom plugin not loaded - zoom functionality will not be available');
-}
-
-/**
- * Fetch supported currencies from ExchangeRate-API via worker
- * @returns {Promise<Array<string>>} Array of currency codes
- */
-async function fetchSupportedCurrencies() {
-    if (supportedCurrencies) {
-        return supportedCurrencies;
-    }
-    
-    try {
-        const workerUrl = `${WORKER_BASE_URL}/api/exchange-rates/supported-currencies`;
-        const response = await fetch(workerUrl);
-        
-        if (!response.ok) {
-            throw new Error(`Worker responded with status ${response.status}`);
-        }
-        
-        const data = await response.json();
-        supportedCurrencies = data.currencies;
-        return supportedCurrencies;
-    } catch (error) {
-        console.error('Failed to fetch supported currencies:', error);
-        // Return fallback list of common currencies
-        return FALLBACK_CURRENCIES;
-    }
-}
-
-/**
- * Populate currency selector with all supported currencies
- */
-async function populateCurrencySelector() {
-    const currencySelect = document.getElementById('currency');
-    const currencies = await fetchSupportedCurrencies();
-    
-    // Clear existing options
-    currencySelect.innerHTML = '';
-    
-    // Add all supported currencies
-    currencies.forEach(currency => {
-        const option = document.createElement('option');
-        option.value = currency;
-        const currencyName = CURRENCY_NAMES[currency] || currency;
-        option.textContent = `${currency} - ${currencyName}`;
-        currencySelect.appendChild(option);
-    });
 }
 
 /**
@@ -1059,16 +972,6 @@ window.addEventListener('load', async function() {
     
     initDarkMode();
     initEventListeners();
-    
-    // Populate currency selector with all supported currencies
-    try {
-        await populateCurrencySelector();
-    } catch (error) {
-        console.error('Failed to populate currency selector:', error);
-        // Continue with page initialization even if currency loading fails
-        // The selector will use the fallback currencies
-    }
-    
     await loadFormValues();
     // Initialize the price chart with the selected currency
     const currency = document.getElementById('currency').value;
