@@ -10,11 +10,14 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
 - **API Key Security**: Securely handles CoinGecko API key via environment variables
 - **Error Handling**: Graceful error responses with appropriate HTTP status codes
 - **Fallback Support**: Client-side fallback to public API if worker is unavailable
+- **Data Source Attribution**: Adds headers to identify data sources (CoinGecko and ExchangeRate-API)
+- **Conversion Warnings**: Includes warning headers when exchange rate conversion is performed
 - **Currency Conversion Layer**: Automatic currency conversion for currencies not natively supported by CoinGecko (e.g., RON, and other fiat currencies)
   - Fetches data in USD from CoinGecko
   - Retrieves real-time exchange rates from ExchangeRate-API
   - Converts prices, market caps, and volumes transparently
   - Returns data as if CoinGecko natively supported the currency
+  - Notifies frontend via response headers about the conversion
 
 ## Deployment Steps
 
@@ -117,6 +120,51 @@ https://crypto-cache.tbog.workers.dev/api/v3/simple/price?ids=bitcoin&vs_currenc
 
 The conversion is transparent to the client - the response format is identical to CoinGecko's native response.
 
+## API Endpoints
+
+### Standard CoinGecko Endpoints
+
+All CoinGecko API v3 endpoints are proxied through the worker:
+- `/api/v3/simple/price` - Get current prices
+- `/api/v3/coins/bitcoin/market_chart` - Get historical price data
+- `/api/v3/simple/supported_vs_currencies` - Get CoinGecko supported currencies
+
+### Additional Endpoints
+
+**Get All Supported Currencies from ExchangeRate-API:**
+```
+GET /api/exchange-rates/supported-currencies
+```
+
+Returns a list of all 160+ supported currencies from ExchangeRate-API, including:
+```json
+{
+  "base_code": "USD",
+  "currencies": ["AED", "AFN", "ALL", ...],
+  "provider": "https://www.exchangerate-api.com",
+  "documentation": "https://www.exchangerate-api.com/docs/free"
+}
+```
+
+## Response Headers
+
+The worker adds informative headers to help the frontend display appropriate attributions and warnings:
+
+### Standard Headers (All Responses)
+- `Cache-Control: public, max-age=600` - Instructs browsers and CDNs to cache for 10 minutes
+- `X-Cache-Status: HIT` or `MISS` - Indicates whether the response was served from cache
+- `X-Data-Source-Price: CoinGecko API` - Attribution for price data source
+- CORS headers for cross-origin access
+
+### Currency Conversion Headers (When Conversion Applied)
+When the worker performs currency conversion (for currencies not natively supported by CoinGecko):
+- `X-Currency-Converted: USD -> RON` - Indicates the conversion performed
+- `X-Exchange-Rate: 4.396202` - The exchange rate used for conversion
+- `X-Data-Source-Exchange: ExchangeRate-API` - Attribution for exchange rate data
+- `X-Conversion-Warning: Exchange rates are approximate and may vary from actual values` - Warning about approximation
+
+The frontend reads these headers and displays appropriate attribution and warnings to users.
+
 ## Security
 
 ### Origin Validation
@@ -159,10 +207,7 @@ const ALLOWED_ORIGINS = [
 
 ## Cache Headers
 
-The worker adds the following headers to responses:
-- `Cache-Control: public, max-age=600` - Instructs browsers and CDNs to cache for 10 minutes
-- `X-Cache-Status: HIT` or `MISS` - Indicates whether the response was served from cache
-- CORS headers for cross-origin access
+**Note:** The "Cache Headers" section has been merged into "Response Headers" above for better organization.
 
 ## Environment Variables
 
