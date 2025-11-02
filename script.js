@@ -167,6 +167,12 @@ const CACHE_DURATION = 60000; // 60 seconds cache
 // Chart instance
 let priceChart = null;
 
+// Auto-refresh configuration
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
+let autoRefreshTimer = null;
+let autoRefreshEnabled = false;
+let isRefreshing = false; // Flag to prevent concurrent refreshes
+
 // Register Chart.js zoom plugin
 if (typeof Chart !== 'undefined' && typeof ChartZoom !== 'undefined') {
     Chart.register(ChartZoom);
@@ -288,9 +294,31 @@ async function fetchBTCChartData(currency = 'usd') {
         
         const data = await response.json();
         
+        // Extract cache metadata from response headers
+        const cacheStatus = response.headers.get('X-Cache-Status');
+        const cacheControl = response.headers.get('Cache-Control');
+        
+        // Parse max-age from Cache-Control header if available
+        let maxAge = null;
+        if (cacheControl) {
+            const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
+            if (maxAgeMatch) {
+                maxAge = parseInt(maxAgeMatch[1], 10);
+            }
+        }
+        
+        const result = {
+            data,
+            cacheMetadata: {
+                status: cacheStatus,
+                maxAge: maxAge,
+                fetchTime: Date.now()
+            }
+        };
+        
         // Cache the result
-        priceCache.set(cacheKey, { data, timestamp: Date.now() });
-        return data;
+        priceCache.set(cacheKey, { data: result, timestamp: Date.now() });
+        return result;
     } catch (workerError) {
         console.warn('Worker API failed, falling back to public API:', workerError);
         
@@ -305,9 +333,19 @@ async function fetchBTCChartData(currency = 'usd') {
             
             const data = await response.json();
             
+            // No cache metadata for public API
+            const result = {
+                data,
+                cacheMetadata: {
+                    status: 'public-api',
+                    maxAge: null,
+                    fetchTime: Date.now()
+                }
+            };
+            
             // Cache the result
-            priceCache.set(cacheKey, { data, timestamp: Date.now() });
-            return data;
+            priceCache.set(cacheKey, { data: result, timestamp: Date.now() });
+            return result;
         } catch (publicError) {
             console.error('Both worker and public API failed:', publicError);
             return null;
@@ -376,12 +414,14 @@ function addPricePointToChart(price, timestamp = Date.now()) {
 // Initialize or update the price chart
 async function initPriceChart(currency = 'usd') {
     const currencyLower = currency.toLowerCase();
-    const chartData = await fetchBTCChartData(currencyLower);
+    const result = await fetchBTCChartData(currencyLower);
     
-    if (!chartData || !chartData.prices) {
+    if (!result || !result.data || !result.data.prices) {
         console.error('Failed to fetch chart data');
         return;
     }
+    
+    const chartData = result.data;
     
     // Extract timestamps and prices
     const timestamps = chartData.prices.map(point => new Date(point[0]));
@@ -569,6 +609,187 @@ async function initPriceChart(currency = 'usd') {
     });
     
     // Double-click event listener is now registered once in initEventListeners
+}
+
+// ========== AUTO-REFRESH MANAGEMENT ==========
+
+/**
+ * Update the last update timestamp display
+ * @param {Object} cacheMetadata - Optional cache metadata from backend
+ */
+function updateLastUpdateTime(cacheMetadata = null) {
+    const lastUpdateElement = document.getElementById('lastUpdateTime');
+    if (lastUpdateElement) {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString(undefined, { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        
+        let displayText = `Last updated: ${timeString}`;
+        
+        // Add cache information if available
+        if (cacheMetadata) {
+            const { status, maxAge, fetchTime } = cacheMetadata;
+            
+            if (status === 'HIT' && maxAge && fetchTime) {
+                // Calculate when the data was originally cached
+                // For cache HIT, the data could be anywhere from 0 to maxAge seconds old
+                // We show this as a helpful indicator
+                const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
+                const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
+                const remainingMinutes = Math.floor(remainingSeconds / 60);
+                
+                displayText += ` (cached, expires in ${remainingMinutes}m)`;
+            } else if (status === 'MISS' && maxAge) {
+                // Fresh data from backend
+                const expiresMinutes = Math.floor(maxAge / 60);
+                displayText += ` (fresh data, cache ${expiresMinutes}m)`;
+            } else if (status === 'public-api') {
+                displayText += ` (direct API)`;
+            }
+        }
+        
+        lastUpdateElement.textContent = displayText;
+    }
+}
+
+/**
+ * Refresh chart and sell price
+ * Uses chart data to get the most recent price, which is more efficient
+ * as it avoids a separate API call and ensures price/chart synchronization
+ */
+async function refreshChartAndPrice() {
+    // Prevent concurrent refreshes
+    if (isRefreshing) {
+        console.log('Refresh already in progress, skipping...');
+        return;
+    }
+    
+    isRefreshing = true;
+    
+    try {
+        const currencyElement = document.getElementById('currency');
+        const sellPriceElement = document.getElementById('sellPrice');
+        
+        if (!currencyElement || !sellPriceElement) {
+            console.warn('Required elements not found for refresh');
+            return;
+        }
+        
+        const currency = currencyElement.value;
+        
+        // Fetch chart data (includes latest price points and cache metadata)
+        const result = await fetchBTCChartData(currency);
+        
+        // Extract the most recent price from chart data
+        if (result && result.data && result.data.prices && result.data.prices.length > 0) {
+            const chartData = result.data;
+            
+            // Chart data format: [[timestamp, price], [timestamp, price], ...]
+            // Get the last price point (most recent)
+            const lastPricePoint = chartData.prices[chartData.prices.length - 1];
+            const newPrice = lastPricePoint[1]; // [timestamp, price]
+            const timestamp = lastPricePoint[0]; // timestamp
+            
+            // Update sell price field
+            sellPriceElement.value = formatPrice(newPrice);
+            
+            // Add the new price point to the chart
+            addPricePointToChart(newPrice, timestamp);
+            
+            // Update timestamp with cache metadata
+            updateLastUpdateTime(result.cacheMetadata);
+            
+            // Recalculate if results are visible
+            if (areResultsVisible()) {
+                calculate();
+            }
+            
+            // Update transactions table
+            await renderTransactions();
+        }
+    } finally {
+        isRefreshing = false;
+    }
+}
+
+/**
+ * Start auto-refresh timer
+ */
+function startAutoRefresh() {
+    // Clear any existing timer
+    stopAutoRefresh();
+    
+    // Start new timer with error handling wrapper
+    autoRefreshTimer = setInterval(async () => {
+        try {
+            await refreshChartAndPrice();
+        } catch (error) {
+            console.error('Auto-refresh failed:', error);
+            // Continue running timer even if one refresh fails
+        }
+    }, AUTO_REFRESH_INTERVAL);
+    autoRefreshEnabled = true;
+    
+    console.log('Auto-refresh started (every 5 minutes)');
+}
+
+/**
+ * Stop auto-refresh timer
+ */
+function stopAutoRefresh() {
+    if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+    autoRefreshEnabled = false;
+    
+    console.log('Auto-refresh stopped');
+}
+
+/**
+ * Toggle auto-refresh on/off
+ */
+function toggleAutoRefresh() {
+    const toggleButton = document.getElementById('autoRefreshToggle');
+    
+    if (!toggleButton) {
+        console.warn('Auto-refresh toggle button not found');
+        return;
+    }
+    
+    if (autoRefreshEnabled) {
+        stopAutoRefresh();
+        toggleButton.setAttribute('aria-checked', 'false');
+        setCookie('crypto_calc_autoRefresh', 'false', 365);
+    } else {
+        startAutoRefresh();
+        toggleButton.setAttribute('aria-checked', 'true');
+        setCookie('crypto_calc_autoRefresh', 'true', 365);
+    }
+}
+
+/**
+ * Load auto-refresh preference from cookie
+ */
+function loadAutoRefreshPreference() {
+    const savedPreference = getCookie('crypto_calc_autoRefresh');
+    const toggleButton = document.getElementById('autoRefreshToggle');
+    
+    if (!toggleButton) {
+        console.warn('Auto-refresh toggle button not found');
+        return;
+    }
+    
+    // Default to false if no preference saved
+    if (savedPreference === 'true') {
+        startAutoRefresh();
+        toggleButton.setAttribute('aria-checked', 'true');
+    } else {
+        toggleButton.setAttribute('aria-checked', 'false');
+    }
 }
 
 // Cookie helper functions
@@ -1085,6 +1306,8 @@ function initEventListeners() {
             document.getElementById('sellPrice').value = formatPrice(newPrice);
             // Add the new price point to the chart (partial update)
             addPricePointToChart(newPrice);
+            // Update timestamp
+            updateLastUpdateTime();
         }
         // Recalculate if results are visible
         if (areResultsVisible()) {
@@ -1098,7 +1321,32 @@ function initEventListeners() {
     // Refresh chart button handler
     document.getElementById('refreshChart').addEventListener('click', async function() {
         const currency = document.getElementById('currency').value;
+        const sellPriceElement = document.getElementById('sellPrice');
+        
+        // Fetch new chart data
+        const result = await fetchBTCChartData(currency);
+        
+        // Update the chart
         await initPriceChart(currency);
+        
+        // Extract and update sell price from chart data
+        if (result && result.data && result.data.prices && result.data.prices.length > 0 && sellPriceElement) {
+            const lastPricePoint = result.data.prices[result.data.prices.length - 1];
+            const newPrice = lastPricePoint[1];
+            sellPriceElement.value = formatPrice(newPrice);
+        }
+        
+        // Update timestamp with cache metadata
+        if (result && result.cacheMetadata) {
+            updateLastUpdateTime(result.cacheMetadata);
+        } else {
+            updateLastUpdateTime();
+        }
+    });
+
+    // Auto-refresh toggle handler
+    document.getElementById('autoRefreshToggle').addEventListener('click', function() {
+        toggleAutoRefresh();
     });
 
     // Save values and recalculate when inputs change
@@ -1343,6 +1591,10 @@ window.addEventListener('load', async function() {
     // Initialize the price chart with the selected currency
     const currency = document.getElementById('currency').value;
     await initPriceChart(currency);
+    // Update the last update timestamp
+    updateLastUpdateTime();
+    // Load auto-refresh preference
+    loadAutoRefreshPreference();
     // Do not calculate on initial load - wait for user interaction
     await renderTransactions();
 });

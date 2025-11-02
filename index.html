@@ -216,6 +216,19 @@
             display: none;
         }
 
+        /* Toggle switch styles */
+        #autoRefreshToggle[aria-checked="true"] {
+            background-color: #3b82f6;
+        }
+
+        .dark #autoRefreshToggle[aria-checked="true"] {
+            background-color: #2563eb;
+        }
+
+        #autoRefreshToggle[aria-checked="true"] span {
+            transform: translateX(1.25rem);
+        }
+
         /* Hide elements based on viewport width using media queries */
         /* This ensures proper behavior when switching to desktop mode on mobile */
         .mobile-only {
@@ -709,13 +722,29 @@
                 <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
                     <div class="flex justify-between items-center mb-4">
                         <h2 class="text-xl font-bold text-gray-800 dark:text-white">Bitcoin Price (Last 24 Hours)</h2>
-                        <button 
-                            id="refreshChart"
-                            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md transition font-semibold"
-                            title="Refresh chart data"
-                        >
-                            🔄 Refresh
-                        </button>
+                        <div class="flex gap-2 items-center">
+                            <div class="flex items-center gap-2">
+                                <label for="autoRefreshToggle" class="text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                                    Auto-refresh
+                                </label>
+                                <button
+                                    id="autoRefreshToggle"
+                                    class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 bg-gray-300 dark:bg-gray-600"
+                                    role="switch"
+                                    aria-checked="false"
+                                    title="Toggle auto-refresh every 5 minutes"
+                                >
+                                    <span class="translate-x-1 inline-block w-4 h-4 transform bg-white rounded-full transition-transform"></span>
+                                </button>
+                            </div>
+                            <button 
+                                id="refreshChart"
+                                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md transition font-semibold"
+                                title="Refresh chart data"
+                            >
+                                🔄 Refresh
+                            </button>
+                        </div>
                     </div>
                     <div class="relative" style="height: 400px;">
                         <canvas id="priceChart"></canvas>
@@ -723,6 +752,7 @@
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
                         Use mouse wheel or pinch to zoom. Click and drag to pan. Double-click to reset zoom.
                         <span class="md:hidden"><br>Values shown in K (thousands), M (millions), or B (billions) for readability.</span>
+                        <span id="lastUpdateTime" class="block md:inline md:ml-4 text-gray-400 dark:text-gray-500"></span>
                     </p>
                 </div>
             </div>
