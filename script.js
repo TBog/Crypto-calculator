@@ -346,21 +346,6 @@ async function initPriceChart(currency = 'usd') {
         priceChart.destroy();
     }
     
-    // Pre-create formatters for better performance
-    const fullFormatter = new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency.toUpperCase(),
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0
-    });
-    
-    const compactFormatter = new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency.toUpperCase(),
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 1
-    });
-    
     // Create new chart
     priceChart = new Chart(ctx, {
         type: 'line',
@@ -498,12 +483,20 @@ async function initPriceChart(currency = 'usd') {
                                     suffix = 'K';
                                 }
                                 
-                                // Use pre-created formatters
-                                const formatter = suffix ? compactFormatter : fullFormatter;
-                                return formatter.format(displayValue) + suffix;
+                                // Use conditional formatting to omit multi-char currency codes
+                                const minDecimals = suffix ? 0 : 0;
+                                const maxDecimals = suffix ? 1 : 0;
+                                const formatted = formatCurrencyConditionally(
+                                    displayValue, 
+                                    'en-US', 
+                                    currency.toUpperCase(),
+                                    minDecimals,
+                                    maxDecimals
+                                );
+                                return formatted + suffix;
                             } else {
-                                // For desktop, show full number
-                                return fullFormatter.format(value);
+                                // For desktop, show full number with conditional formatting
+                                return formatCurrencyConditionally(value, 'en-US', currency.toUpperCase(), 0, 0);
                             }
                         }
                     }
@@ -618,15 +611,17 @@ function setDefaults() {
  * @param {number} value - The number to format.
  * @param {string} locale - The target locale (e.g., 'en-US', 'ro-RO').
  * @param {string} currencyCode - The 3-letter currency code (e.g., 'USD', 'RON').
+ * @param {number} minFractionDigits - Minimum fraction digits (default: 2).
+ * @param {number} maxFractionDigits - Maximum fraction digits (default: 2).
  * @returns {string} The formatted string.
  */
-function formatCurrencyConditionally(value, locale, currencyCode) {
+function formatCurrencyConditionally(value, locale, currencyCode, minFractionDigits = 2, maxFractionDigits = 2) {
     const formatter = new Intl.NumberFormat(locale, {
         style: 'currency',
         currency: currencyCode,
         currencyDisplay: 'symbol',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
+        minimumFractionDigits: minFractionDigits,
+        maximumFractionDigits: maxFractionDigits
     });
 
     // 1. Get the parts of the formatted string for the symbol check
@@ -642,8 +637,8 @@ function formatCurrencyConditionally(value, locale, currencyCode) {
     if (currencyPart && currencyPart.value.length > 1) {
         // Fallback: Return only the number formatted according to the locale
         const numberFormatter = new Intl.NumberFormat(locale, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
+            minimumFractionDigits: minFractionDigits,
+            maximumFractionDigits: maxFractionDigits
         });
         return numberFormatter.format(value);
     } else {
@@ -656,7 +651,12 @@ function formatCurrencyConditionally(value, locale, currencyCode) {
 function formatCurrency(num) {
     const currency = document.getElementById('currency').value || 'USD';
     // Use 'en-US' locale for consistent formatting across all users
-    return formatCurrencyConditionally(num, 'en-US', currency);
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(num);
 }
 
 // Format price to 2 decimal places
@@ -843,7 +843,12 @@ function calculateTransactionProfit(transaction, currentPrice) {
 
 // Format currency with transaction's currency
 function formatTransactionCurrency(num, currency) {
-    return formatCurrencyConditionally(num, 'en-US', currency);
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(num);
 }
 
 // Render transactions table
