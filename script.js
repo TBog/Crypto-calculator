@@ -598,14 +598,22 @@ function updateLastUpdateTime() {
  * Refresh chart and sell price
  */
 async function refreshChartAndPrice() {
-    const currency = document.getElementById('currency').value;
+    const currencyElement = document.getElementById('currency');
+    const sellPriceElement = document.getElementById('sellPrice');
+    
+    if (!currencyElement || !sellPriceElement) {
+        console.warn('Required elements not found for refresh');
+        return;
+    }
+    
+    const currency = currencyElement.value;
     
     // Fetch new price
     const newPrice = await fetchBTCPrice(currency);
     
     // Update sell price field if we got a valid price
     if (newPrice !== null) {
-        document.getElementById('sellPrice').value = formatPrice(newPrice);
+        sellPriceElement.value = formatPrice(newPrice);
         
         // Add the new price point to the chart
         addPricePointToChart(newPrice);
@@ -656,6 +664,11 @@ function stopAutoRefresh() {
 function toggleAutoRefresh() {
     const toggleButton = document.getElementById('autoRefreshToggle');
     
+    if (!toggleButton) {
+        console.warn('Auto-refresh toggle button not found');
+        return;
+    }
+    
     if (autoRefreshEnabled) {
         stopAutoRefresh();
         toggleButton.setAttribute('aria-checked', 'false');
@@ -673,6 +686,11 @@ function toggleAutoRefresh() {
 function loadAutoRefreshPreference() {
     const savedPreference = getCookie('crypto_calc_autoRefresh');
     const toggleButton = document.getElementById('autoRefreshToggle');
+    
+    if (!toggleButton) {
+        console.warn('Auto-refresh toggle button not found');
+        return;
+    }
     
     // Default to false if no preference saved
     if (savedPreference === 'true') {
