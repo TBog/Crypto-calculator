@@ -346,6 +346,31 @@ async function initPriceChart(currency = 'usd') {
         priceChart.destroy();
     }
     
+    // Check if we're on mobile (cache for performance)
+    const isMobile = window.innerWidth <= 768;
+    
+    // Pre-create formatters for better performance
+    const fullFormatter = new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: currency.toUpperCase(),
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+    });
+    
+    const compactFormatter = new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: currency.toUpperCase(),
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 1
+    });
+    
+    const noDecimalFormatter = new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: currency.toUpperCase(),
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+    });
+    
     // Create new chart
     priceChart = new Chart(ctx, {
         type: 'line',
@@ -464,8 +489,6 @@ async function initPriceChart(currency = 'usd') {
                         color: textColor,
                         callback: function(value) {
                             // Format numbers with K/M/B suffixes for mobile screens
-                            const isMobile = window.innerWidth <= 768;
-                            
                             if (isMobile) {
                                 // For mobile, use compact notation with K/M/B suffixes
                                 let suffix = '';
@@ -482,24 +505,13 @@ async function initPriceChart(currency = 'usd') {
                                     suffix = 'K';
                                 }
                                 
-                                // Get currency symbol only (no currency code)
-                                const formatter = new Intl.NumberFormat('en-US', {
-                                    style: 'currency',
-                                    currency: currency.toUpperCase(),
-                                    minimumFractionDigits: 0,
-                                    maximumFractionDigits: suffix ? 1 : 0
-                                });
-                                
+                                // Use pre-created formatters
+                                const formatter = suffix ? compactFormatter : noDecimalFormatter;
                                 const formatted = formatter.format(displayValue);
                                 return suffix ? formatted + suffix : formatted;
                             } else {
                                 // For desktop, show full number
-                                return new Intl.NumberFormat('en-US', {
-                                    style: 'currency',
-                                    currency: currency.toUpperCase(),
-                                    minimumFractionDigits: 0,
-                                    maximumFractionDigits: 0
-                                }).format(value);
+                                return fullFormatter.format(value);
                             }
                         }
                     }
