@@ -171,6 +171,7 @@ let priceChart = null;
 const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
 let autoRefreshTimer = null;
 let autoRefreshEnabled = false;
+let isRefreshing = false; // Flag to prevent concurrent refreshes
 
 // Register Chart.js zoom plugin
 if (typeof Chart !== 'undefined' && typeof ChartZoom !== 'undefined') {
@@ -598,36 +599,48 @@ function updateLastUpdateTime() {
  * Refresh chart and sell price
  */
 async function refreshChartAndPrice() {
-    const currencyElement = document.getElementById('currency');
-    const sellPriceElement = document.getElementById('sellPrice');
-    
-    if (!currencyElement || !sellPriceElement) {
-        console.warn('Required elements not found for refresh');
+    // Prevent concurrent refreshes
+    if (isRefreshing) {
+        console.log('Refresh already in progress, skipping...');
         return;
     }
     
-    const currency = currencyElement.value;
+    isRefreshing = true;
     
-    // Fetch new price
-    const newPrice = await fetchBTCPrice(currency);
-    
-    // Update sell price field if we got a valid price
-    if (newPrice !== null) {
-        sellPriceElement.value = formatPrice(newPrice);
+    try {
+        const currencyElement = document.getElementById('currency');
+        const sellPriceElement = document.getElementById('sellPrice');
         
-        // Add the new price point to the chart
-        addPricePointToChart(newPrice);
-        
-        // Update timestamp
-        updateLastUpdateTime();
-        
-        // Recalculate if results are visible
-        if (areResultsVisible()) {
-            calculate();
+        if (!currencyElement || !sellPriceElement) {
+            console.warn('Required elements not found for refresh');
+            return;
         }
         
-        // Update transactions table
-        await renderTransactions();
+        const currency = currencyElement.value;
+        
+        // Fetch new price
+        const newPrice = await fetchBTCPrice(currency);
+        
+        // Update sell price field if we got a valid price
+        if (newPrice !== null) {
+            sellPriceElement.value = formatPrice(newPrice);
+            
+            // Add the new price point to the chart
+            addPricePointToChart(newPrice);
+            
+            // Update timestamp
+            updateLastUpdateTime();
+            
+            // Recalculate if results are visible
+            if (areResultsVisible()) {
+                calculate();
+            }
+            
+            // Update transactions table
+            await renderTransactions();
+        }
+    } finally {
+        isRefreshing = false;
     }
 }
 
