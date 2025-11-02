@@ -463,12 +463,44 @@ async function initPriceChart(currency = 'usd') {
                     ticks: {
                         color: textColor,
                         callback: function(value) {
-                            return new Intl.NumberFormat('en-US', {
-                                style: 'currency',
-                                currency: currency.toUpperCase(),
-                                minimumFractionDigits: 0,
-                                maximumFractionDigits: 0
-                            }).format(value);
+                            // Format numbers with K/M/B suffixes for mobile screens
+                            const isMobile = window.innerWidth <= 768;
+                            
+                            if (isMobile) {
+                                // For mobile, use compact notation with K/M/B suffixes
+                                let suffix = '';
+                                let displayValue = value;
+                                
+                                if (Math.abs(value) >= 1000000000) {
+                                    displayValue = value / 1000000000;
+                                    suffix = 'B';
+                                } else if (Math.abs(value) >= 1000000) {
+                                    displayValue = value / 1000000;
+                                    suffix = 'M';
+                                } else if (Math.abs(value) >= 1000) {
+                                    displayValue = value / 1000;
+                                    suffix = 'K';
+                                }
+                                
+                                // Get currency symbol only (no currency code)
+                                const formatter = new Intl.NumberFormat('en-US', {
+                                    style: 'currency',
+                                    currency: currency.toUpperCase(),
+                                    minimumFractionDigits: 0,
+                                    maximumFractionDigits: suffix ? 1 : 0
+                                });
+                                
+                                const formatted = formatter.format(displayValue);
+                                return suffix ? formatted + suffix : formatted;
+                            } else {
+                                // For desktop, show full number
+                                return new Intl.NumberFormat('en-US', {
+                                    style: 'currency',
+                                    currency: currency.toUpperCase(),
+                                    minimumFractionDigits: 0,
+                                    maximumFractionDigits: 0
+                                }).format(value);
+                            }
                         }
                     }
                 }
