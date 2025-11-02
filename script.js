@@ -214,14 +214,16 @@ function handleDataAttribution(response) {
 }
 
 // Fetch current BTC price from CoinGecko API via Cloudflare Worker proxy with fallback
-async function fetchBTCPrice(currency = 'usd') {
+async function fetchBTCPrice(currency = 'usd', bypassCache = false) {
     const currencyLower = currency.toLowerCase();
     
-    // Check cache first
+    // Check cache first (unless bypassing)
     const cacheKey = currencyLower;
-    const cached = priceCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-        return cached.price;
+    if (!bypassCache) {
+        const cached = priceCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+            return cached.price;
+        }
     }
     
     // Try worker first
@@ -270,14 +272,16 @@ async function fetchBTCPrice(currency = 'usd') {
 }
 
 // Fetch Bitcoin price chart data (last 24 hours, hourly)
-async function fetchBTCChartData(currency = 'usd') {
+async function fetchBTCChartData(currency = 'usd', bypassCache = false) {
     const currencyLower = currency.toLowerCase();
     
-    // Check cache first
+    // Check cache first (unless bypassing)
     const cacheKey = `chart_${currencyLower}`;
-    const cached = priceCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-        return cached.data;
+    if (!bypassCache) {
+        const cached = priceCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+            return cached.data;
+        }
     }
     
     // Try worker first
@@ -412,9 +416,9 @@ function addPricePointToChart(price, timestamp = Date.now()) {
 }
 
 // Initialize or update the price chart
-async function initPriceChart(currency = 'usd') {
+async function initPriceChart(currency = 'usd', bypassCache = false) {
     const currencyLower = currency.toLowerCase();
-    const result = await fetchBTCChartData(currencyLower);
+    const result = await fetchBTCChartData(currencyLower, bypassCache);
     
     if (!result || !result.data || !result.data.prices) {
         console.error('Failed to fetch chart data');
@@ -680,8 +684,8 @@ async function refreshChartAndPrice() {
         
         const currency = currencyElement.value;
         
-        // Fetch chart data (includes latest price points and cache metadata)
-        const result = await fetchBTCChartData(currency);
+        // Fetch chart data (bypass cache to get fresh data, includes latest price points and cache metadata)
+        const result = await fetchBTCChartData(currency, true);
         
         // Extract the most recent price from chart data
         if (result && result.data && result.data.prices && result.data.prices.length > 0) {
@@ -1284,14 +1288,14 @@ function initEventListeners() {
     // Save values when currency changes and recalculate
     document.getElementById('currency').addEventListener('change', async function() {
         saveFormValues();
-        // Fetch new BTC price for the selected currency
+        // Fetch new BTC price for the selected currency (bypass cache for fresh data)
         const currency = document.getElementById('currency').value;
-        const newPrice = await fetchBTCPrice(currency);
+        const newPrice = await fetchBTCPrice(currency, true);
         if (newPrice !== null) {
             document.getElementById('sellPrice').value = formatPrice(newPrice);
         }
-        // Update the chart with new currency
-        await initPriceChart(currency);
+        // Update the chart with new currency (bypass cache for fresh data)
+        await initPriceChart(currency, true);
         // Only recalculate if results are visible
         if (areResultsVisible()) {
             calculate();
@@ -1301,7 +1305,7 @@ function initEventListeners() {
     // Refresh button handler
     document.getElementById('refreshPrice').addEventListener('click', async function() {
         const currency = document.getElementById('currency').value;
-        const newPrice = await fetchBTCPrice(currency);
+        const newPrice = await fetchBTCPrice(currency, true); // Bypass cache on explicit refresh
         if (newPrice !== null) {
             document.getElementById('sellPrice').value = formatPrice(newPrice);
             // Add the new price point to the chart (partial update)
@@ -1323,11 +1327,11 @@ function initEventListeners() {
         const currency = document.getElementById('currency').value;
         const sellPriceElement = document.getElementById('sellPrice');
         
-        // Fetch new chart data
-        const result = await fetchBTCChartData(currency);
+        // Fetch new chart data (bypass cache on explicit refresh)
+        const result = await fetchBTCChartData(currency, true);
         
-        // Update the chart
-        await initPriceChart(currency);
+        // Update the chart (bypass cache on explicit refresh)
+        await initPriceChart(currency, true);
         
         // Extract and update sell price from chart data
         if (result && result.data && result.data.prices && result.data.prices.length > 0 && sellPriceElement) {
