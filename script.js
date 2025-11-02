@@ -783,13 +783,21 @@ async function renderTransactions() {
                            netProfit < 0 ? 'text-red-600 dark:text-red-400' : 
                            'text-gray-600 dark:text-gray-400';
         
+        // Check if break even amount is greater than coins purchased
+        const isBreakEvenExceedingCoins = coinsToSellBreakEven > coinsPurchased;
+        const breakEvenClass = isBreakEvenExceedingCoins ? 'text-orange-600 dark:text-orange-400' : '';
+        
+        // Calculate remaining coins after break even sell
+        const remainingCoins = coinsPurchased - coinsToSellBreakEven;
+        const breakEvenTooltip = `Remaining after sell: ${remainingCoins.toFixed(8)} coins`;
+        
         const row = document.createElement('tr');
         row.className = 'border-b dark:border-gray-600';
         row.innerHTML = `
             <td class="py-2 px-2">${formatTransactionCurrency(tx.investment, tx.currency)}</td>
             <td class="py-2 px-2">${formatTransactionCurrency(tx.buyPrice, tx.currency)}</td>
             <td class="py-2 px-2">${coinsPurchased.toFixed(8)}</td>
-            <td class="py-2 px-2">${coinsToSellBreakEven.toFixed(8)}</td>
+            <td class="py-2 px-2 ${breakEvenClass}" title="${breakEvenTooltip}">${coinsToSellBreakEven.toFixed(8)}</td>
             <td class="py-2 px-2">${coinsToSellForProfit.toFixed(8)}</td>
             <td class="py-2 px-2 font-semibold ${profitClass}">${formatTransactionCurrency(netProfit, tx.currency)}</td>
             <td class="py-2 px-2">
