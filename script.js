@@ -319,7 +319,7 @@ async function fetchBTCChartData(currency = 'usd') {
  * Add a single price point to the existing chart
  * Only adds if the price point is unique (based on timestamp) and newer than existing data
  * @param {number} price - The price to add
- * @param {number} timestamp - The timestamp for the price point (optional, defaults to now)
+ * @param {number} timestamp - The timestamp for the price point (defaults to current time if not provided)
  */
 function addPricePointToChart(price, timestamp = Date.now()) {
     // Validate price parameter
