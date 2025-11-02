@@ -294,9 +294,31 @@ async function fetchBTCChartData(currency = 'usd') {
         
         const data = await response.json();
         
+        // Extract cache metadata from response headers
+        const cacheStatus = response.headers.get('X-Cache-Status');
+        const cacheControl = response.headers.get('Cache-Control');
+        
+        // Parse max-age from Cache-Control header if available
+        let maxAge = null;
+        if (cacheControl) {
+            const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
+            if (maxAgeMatch) {
+                maxAge = parseInt(maxAgeMatch[1], 10);
+            }
+        }
+        
+        const result = {
+            data,
+            cacheMetadata: {
+                status: cacheStatus,
+                maxAge: maxAge,
+                fetchTime: Date.now()
+            }
+        };
+        
         // Cache the result
-        priceCache.set(cacheKey, { data, timestamp: Date.now() });
-        return data;
+        priceCache.set(cacheKey, { data: result, timestamp: Date.now() });
+        return result;
     } catch (workerError) {
         console.warn('Worker API failed, falling back to public API:', workerError);
         
@@ -311,9 +333,19 @@ async function fetchBTCChartData(currency = 'usd') {
             
             const data = await response.json();
             
+            // No cache metadata for public API
+            const result = {
+                data,
+                cacheMetadata: {
+                    status: 'public-api',
+                    maxAge: null,
+                    fetchTime: Date.now()
+                }
+            };
+            
             // Cache the result
-            priceCache.set(cacheKey, { data, timestamp: Date.now() });
-            return data;
+            priceCache.set(cacheKey, { data: result, timestamp: Date.now() });
+            return result;
         } catch (publicError) {
             console.error('Both worker and public API failed:', publicError);
             return null;
@@ -382,12 +414,14 @@ function addPricePointToChart(price, timestamp = Date.now()) {
 // Initialize or update the price chart
 async function initPriceChart(currency = 'usd') {
     const currencyLower = currency.toLowerCase();
-    const chartData = await fetchBTCChartData(currencyLower);
+    const result = await fetchBTCChartData(currencyLower);
     
-    if (!chartData || !chartData.prices) {
+    if (!result || !result.data || !result.data.prices) {
         console.error('Failed to fetch chart data');
         return;
     }
+    
+    const chartData = result.data;
     
     // Extract timestamps and prices
     const timestamps = chartData.prices.map(point => new Date(point[0]));
@@ -581,8 +615,9 @@ async function initPriceChart(currency = 'usd') {
 
 /**
  * Update the last update timestamp display
+ * @param {Object} cacheMetadata - Optional cache metadata from backend
  */
-function updateLastUpdateTime() {
+function updateLastUpdateTime(cacheMetadata = null) {
     const lastUpdateElement = document.getElementById('lastUpdateTime');
     if (lastUpdateElement) {
         const now = new Date();
@@ -591,7 +626,32 @@ function updateLastUpdateTime() {
             minute: '2-digit',
             second: '2-digit'
         });
-        lastUpdateElement.textContent = `Last updated: ${timeString}`;
+        
+        let displayText = `Last updated: ${timeString}`;
+        
+        // Add cache information if available
+        if (cacheMetadata) {
+            const { status, maxAge, fetchTime } = cacheMetadata;
+            
+            if (status === 'HIT' && maxAge && fetchTime) {
+                // Calculate when the data was originally cached
+                // For cache HIT, the data could be anywhere from 0 to maxAge seconds old
+                // We show this as a helpful indicator
+                const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
+                const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
+                const remainingMinutes = Math.floor(remainingSeconds / 60);
+                
+                displayText += ` (cached, expires in ${remainingMinutes}m)`;
+            } else if (status === 'MISS' && maxAge) {
+                // Fresh data from backend
+                const expiresMinutes = Math.floor(maxAge / 60);
+                displayText += ` (fresh data, cache ${expiresMinutes}m)`;
+            } else if (status === 'public-api') {
+                displayText += ` (direct API)`;
+            }
+        }
+        
+        lastUpdateElement.textContent = displayText;
     }
 }
 
@@ -620,11 +680,13 @@ async function refreshChartAndPrice() {
         
         const currency = currencyElement.value;
         
-        // Fetch chart data (includes latest price points)
-        const chartData = await fetchBTCChartData(currency);
+        // Fetch chart data (includes latest price points and cache metadata)
+        const result = await fetchBTCChartData(currency);
         
         // Extract the most recent price from chart data
-        if (chartData && chartData.prices && chartData.prices.length > 0) {
+        if (result && result.data && result.data.prices && result.data.prices.length > 0) {
+            const chartData = result.data;
+            
             // Chart data format: [[timestamp, price], [timestamp, price], ...]
             // Get the last price point (most recent)
             const lastPricePoint = chartData.prices[chartData.prices.length - 1];
@@ -637,8 +699,8 @@ async function refreshChartAndPrice() {
             // Add the new price point to the chart
             addPricePointToChart(newPrice, timestamp);
             
-            // Update timestamp
-            updateLastUpdateTime();
+            // Update timestamp with cache metadata
+            updateLastUpdateTime(result.cacheMetadata);
             
             // Recalculate if results are visible
             if (areResultsVisible()) {
@@ -1262,20 +1324,24 @@ function initEventListeners() {
         const sellPriceElement = document.getElementById('sellPrice');
         
         // Fetch new chart data
-        const chartData = await fetchBTCChartData(currency);
+        const result = await fetchBTCChartData(currency);
         
         // Update the chart
         await initPriceChart(currency);
         
         // Extract and update sell price from chart data
-        if (chartData && chartData.prices && chartData.prices.length > 0 && sellPriceElement) {
-            const lastPricePoint = chartData.prices[chartData.prices.length - 1];
+        if (result && result.data && result.data.prices && result.data.prices.length > 0 && sellPriceElement) {
+            const lastPricePoint = result.data.prices[result.data.prices.length - 1];
             const newPrice = lastPricePoint[1];
             sellPriceElement.value = formatPrice(newPrice);
         }
         
-        // Update timestamp
-        updateLastUpdateTime();
+        // Update timestamp with cache metadata
+        if (result && result.cacheMetadata) {
+            updateLastUpdateTime(result.cacheMetadata);
+        } else {
+            updateLastUpdateTime();
+        }
     });
 
     // Auto-refresh toggle handler
