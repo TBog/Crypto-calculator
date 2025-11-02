@@ -612,16 +612,50 @@ function setDefaults() {
     document.getElementById('fee').value = defaults.fee;
 }
 
+/**
+ * Formats a number as currency, falling back to a plain number 
+ * if the currency symbol is not a single character.
+ * @param {number} value - The number to format.
+ * @param {string} locale - The target locale (e.g., 'en-US', 'ro-RO').
+ * @param {string} currencyCode - The 3-letter currency code (e.g., 'USD', 'RON').
+ * @returns {string} The formatted string.
+ */
+function formatCurrencyConditionally(value, locale, currencyCode) {
+    const formatter = new Intl.NumberFormat(locale, {
+        style: 'currency',
+        currency: currencyCode,
+        currencyDisplay: 'symbol',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+
+    // 1. Get the parts of the formatted string for the symbol check
+    const parts = formatter.formatToParts(0); 
+    
+    // 2. Find the currency part
+    const currencyPart = parts.find(part => part.type === 'currency');
+
+    // 3. Check the length of the symbol
+    // Check is > 1 to exclude single symbols like $, €, £. 
+    // This catches 'RON', 'AUD', 'CAD', 'USD', etc.
+    if (currencyPart && currencyPart.value.length > 1) {
+        // Fallback: Return only the number formatted according to the locale
+        const numberFormatter = new Intl.NumberFormat(locale, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+        return numberFormatter.format(value);
+    } else {
+        // Use standard currency formatting (includes the single-character symbol)
+        return formatter.format(value);
+    }
+}
+
 // Format number as currency
 function formatCurrency(num) {
     const currency = document.getElementById('currency').value || 'USD';
     // Use 'en-US' locale for consistent formatting across all users
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    }).format(num);
+    return formatCurrencyConditionally(num, 'en-US', currency);
 }
 
 // Format price to 2 decimal places
@@ -808,12 +842,7 @@ function calculateTransactionProfit(transaction, currentPrice) {
 
 // Format currency with transaction's currency
 function formatTransactionCurrency(num, currency) {
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    }).format(num);
+    return formatCurrencyConditionally(num, 'en-US', currency);
 }
 
 // Render transactions table
