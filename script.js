@@ -167,6 +167,11 @@ const CACHE_DURATION = 60000; // 60 seconds cache
 // Chart instance
 let priceChart = null;
 
+// Auto-refresh configuration
+const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
+let autoRefreshTimer = null;
+let autoRefreshEnabled = false;
+
 // Register Chart.js zoom plugin
 if (typeof Chart !== 'undefined' && typeof ChartZoom !== 'undefined') {
     Chart.register(ChartZoom);
@@ -569,6 +574,113 @@ async function initPriceChart(currency = 'usd') {
     });
     
     // Double-click event listener is now registered once in initEventListeners
+}
+
+// ========== AUTO-REFRESH MANAGEMENT ==========
+
+/**
+ * Update the last update timestamp display
+ */
+function updateLastUpdateTime() {
+    const lastUpdateElement = document.getElementById('lastUpdateTime');
+    if (lastUpdateElement) {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString(undefined, { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        lastUpdateElement.textContent = `Last updated: ${timeString}`;
+    }
+}
+
+/**
+ * Refresh chart and sell price
+ */
+async function refreshChartAndPrice() {
+    const currency = document.getElementById('currency').value;
+    
+    // Fetch new price
+    const newPrice = await fetchBTCPrice(currency);
+    
+    // Update sell price field if we got a valid price
+    if (newPrice !== null) {
+        document.getElementById('sellPrice').value = formatPrice(newPrice);
+        
+        // Add the new price point to the chart
+        addPricePointToChart(newPrice);
+        
+        // Update timestamp
+        updateLastUpdateTime();
+        
+        // Recalculate if results are visible
+        if (areResultsVisible()) {
+            calculate();
+        }
+        
+        // Update transactions table
+        await renderTransactions();
+    }
+}
+
+/**
+ * Start auto-refresh timer
+ */
+function startAutoRefresh() {
+    // Clear any existing timer
+    stopAutoRefresh();
+    
+    // Start new timer
+    autoRefreshTimer = setInterval(refreshChartAndPrice, AUTO_REFRESH_INTERVAL);
+    autoRefreshEnabled = true;
+    
+    console.log('Auto-refresh started (every 5 minutes)');
+}
+
+/**
+ * Stop auto-refresh timer
+ */
+function stopAutoRefresh() {
+    if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+    autoRefreshEnabled = false;
+    
+    console.log('Auto-refresh stopped');
+}
+
+/**
+ * Toggle auto-refresh on/off
+ */
+function toggleAutoRefresh() {
+    const toggleButton = document.getElementById('autoRefreshToggle');
+    
+    if (autoRefreshEnabled) {
+        stopAutoRefresh();
+        toggleButton.setAttribute('aria-checked', 'false');
+        setCookie('crypto_calc_autoRefresh', 'false', 365);
+    } else {
+        startAutoRefresh();
+        toggleButton.setAttribute('aria-checked', 'true');
+        setCookie('crypto_calc_autoRefresh', 'true', 365);
+    }
+}
+
+/**
+ * Load auto-refresh preference from cookie
+ */
+function loadAutoRefreshPreference() {
+    const savedPreference = getCookie('crypto_calc_autoRefresh');
+    const toggleButton = document.getElementById('autoRefreshToggle');
+    
+    // Default to false if no preference saved
+    if (savedPreference === 'true') {
+        startAutoRefresh();
+        toggleButton.setAttribute('aria-checked', 'true');
+    } else {
+        toggleButton.setAttribute('aria-checked', 'false');
+    }
 }
 
 // Cookie helper functions
@@ -1085,6 +1197,8 @@ function initEventListeners() {
             document.getElementById('sellPrice').value = formatPrice(newPrice);
             // Add the new price point to the chart (partial update)
             addPricePointToChart(newPrice);
+            // Update timestamp
+            updateLastUpdateTime();
         }
         // Recalculate if results are visible
         if (areResultsVisible()) {
@@ -1099,6 +1213,13 @@ function initEventListeners() {
     document.getElementById('refreshChart').addEventListener('click', async function() {
         const currency = document.getElementById('currency').value;
         await initPriceChart(currency);
+        // Update timestamp
+        updateLastUpdateTime();
+    });
+
+    // Auto-refresh toggle handler
+    document.getElementById('autoRefreshToggle').addEventListener('click', function() {
+        toggleAutoRefresh();
     });
 
     // Save values and recalculate when inputs change
@@ -1343,6 +1464,10 @@ window.addEventListener('load', async function() {
     // Initialize the price chart with the selected currency
     const currency = document.getElementById('currency').value;
     await initPriceChart(currency);
+    // Update the last update timestamp
+    updateLastUpdateTime();
+    // Load auto-refresh preference
+    loadAutoRefreshPreference();
     // Do not calculate on initial load - wait for user interaction
     await renderTransactions();
 });
