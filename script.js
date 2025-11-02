@@ -135,6 +135,11 @@ const ANIMATION_CONFIG = {
     RESULTS_SLIDE_DURATION: 500 // ms - results container slide-down
 };
 
+// Chart configuration
+const CHART_CONFIG = {
+    DUPLICATE_TIMESTAMP_TOLERANCE: 60000 // ms - 1 minute tolerance for duplicate detection
+};
+
 // Worker API configuration
 const WORKER_BASE_URL = 'https://crypto-cache.tbog.workers.dev';
 
@@ -308,6 +313,64 @@ async function fetchBTCChartData(currency = 'usd') {
             return null;
         }
     }
+}
+
+/**
+ * Add a single price point to the existing chart
+ * Only adds if the price point is unique (based on timestamp) and newer than existing data
+ * @param {number} price - The price to add
+ * @param {number} timestamp - The timestamp for the price point (defaults to current time if not provided)
+ */
+function addPricePointToChart(price, timestamp = Date.now()) {
+    // Validate price parameter
+    if (typeof price !== 'number' || isNaN(price) || price <= 0) {
+        console.warn('Invalid price value, cannot add to chart:', price);
+        return;
+    }
+    
+    if (!priceChart || !priceChart.data || !priceChart.data.datasets || !priceChart.data.datasets[0]) {
+        console.warn('Chart not initialized, cannot add price point');
+        return;
+    }
+
+    const dataset = priceChart.data.datasets[0];
+    const labels = priceChart.data.labels;
+    
+    // Convert timestamp to Date object for consistency
+    const newDate = new Date(timestamp);
+    const newTime = newDate.getTime();
+    
+    // Check if this timestamp already exists (avoid duplicates)
+    // Compare timestamps by converting to time value (milliseconds since epoch)
+    const existingIndex = labels.findIndex(label => {
+        const labelTime = new Date(label).getTime();
+        // Consider timestamps within tolerance as duplicates
+        return Math.abs(labelTime - newTime) < CHART_CONFIG.DUPLICATE_TIMESTAMP_TOLERANCE;
+    });
+    
+    if (existingIndex !== -1) {
+        // Timestamp already exists, update the existing value instead of adding
+        dataset.data[existingIndex] = price;
+        console.log('Updated existing price point at index', existingIndex);
+    } else {
+        // Check if new timestamp is newer than the last data point
+        if (labels.length > 0) {
+            const lastTimestamp = new Date(labels[labels.length - 1]).getTime();
+            
+            if (newTime <= lastTimestamp) {
+                console.warn('New price point is not newer than existing data, skipping');
+                return;
+            }
+        }
+        
+        // Add the new data point at the end
+        labels.push(newDate);
+        dataset.data.push(price);
+        console.log('Added new price point to chart:', { timestamp: newDate, price });
+    }
+    
+    // Update the chart
+    priceChart.update('none'); // 'none' mode disables animations for smoother updates
 }
 
 // Initialize or update the price chart
@@ -1020,6 +1083,8 @@ function initEventListeners() {
         const newPrice = await fetchBTCPrice(currency);
         if (newPrice !== null) {
             document.getElementById('sellPrice').value = formatPrice(newPrice);
+            // Add the new price point to the chart (partial update)
+            addPricePointToChart(newPrice);
         }
         // Recalculate if results are visible
         if (areResultsVisible()) {
