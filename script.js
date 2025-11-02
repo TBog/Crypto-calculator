@@ -393,8 +393,11 @@ async function initPriceChart(currency = 'usd') {
                     displayColors: false,
                     callbacks: {
                         title: function(context) {
-                            const date = new Date(context[0].label);
-                            return date.toLocaleString('en-US', {
+                            // Use context[0].parsed.x which contains the raw timestamp value
+                            // This ensures proper date formatting regardless of the label format
+                            const date = new Date(context[0].parsed.x);
+                            // Use user's locale for date formatting
+                            return date.toLocaleString(undefined, {
                                 month: 'short',
                                 day: 'numeric',
                                 hour: '2-digit',
