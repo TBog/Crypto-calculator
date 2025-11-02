@@ -638,8 +638,15 @@ function startAutoRefresh() {
     // Clear any existing timer
     stopAutoRefresh();
     
-    // Start new timer
-    autoRefreshTimer = setInterval(refreshChartAndPrice, AUTO_REFRESH_INTERVAL);
+    // Start new timer with error handling wrapper
+    autoRefreshTimer = setInterval(async () => {
+        try {
+            await refreshChartAndPrice();
+        } catch (error) {
+            console.error('Auto-refresh failed:', error);
+            // Continue running timer even if one refresh fails
+        }
+    }, AUTO_REFRESH_INTERVAL);
     autoRefreshEnabled = true;
     
     console.log('Auto-refresh started (every 5 minutes)');
