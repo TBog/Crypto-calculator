@@ -605,6 +605,39 @@ function setDefaults() {
     document.getElementById('fee').value = defaults.fee;
 }
 
+// Cache for currency formatters to improve performance
+const formatterCache = new Map();
+
+/**
+ * Get or create a cached formatter
+ * @param {string} locale - The target locale
+ * @param {string} currencyCode - The 3-letter currency code
+ * @param {number} minFractionDigits - Minimum fraction digits
+ * @param {number} maxFractionDigits - Maximum fraction digits
+ * @param {boolean} isCurrency - Whether to create a currency formatter or number formatter
+ * @returns {Intl.NumberFormat} The cached or new formatter
+ */
+function getOrCreateFormatter(locale, currencyCode, minFractionDigits, maxFractionDigits, isCurrency) {
+    const key = `${locale}|${currencyCode}|${minFractionDigits}|${maxFractionDigits}|${isCurrency}`;
+    
+    if (!formatterCache.has(key)) {
+        const options = {
+            minimumFractionDigits: minFractionDigits,
+            maximumFractionDigits: maxFractionDigits
+        };
+        
+        if (isCurrency) {
+            options.style = 'currency';
+            options.currency = currencyCode;
+            options.currencyDisplay = 'symbol';
+        }
+        
+        formatterCache.set(key, new Intl.NumberFormat(locale, options));
+    }
+    
+    return formatterCache.get(key);
+}
+
 /**
  * Formats a number as currency, falling back to a plain number 
  * if the currency symbol is not a single character.
@@ -616,13 +649,7 @@ function setDefaults() {
  * @returns {string} The formatted string.
  */
 function formatCurrencyConditionally(value, locale, currencyCode, minFractionDigits = 2, maxFractionDigits = 2) {
-    const formatter = new Intl.NumberFormat(locale, {
-        style: 'currency',
-        currency: currencyCode,
-        currencyDisplay: 'symbol',
-        minimumFractionDigits: minFractionDigits,
-        maximumFractionDigits: maxFractionDigits
-    });
+    const formatter = getOrCreateFormatter(locale, currencyCode, minFractionDigits, maxFractionDigits, true);
 
     // 1. Get the parts of the formatted string for the symbol check
     // Using a non-zero value for more reliable symbol detection
@@ -636,10 +663,7 @@ function formatCurrencyConditionally(value, locale, currencyCode, minFractionDig
     // This catches multi-character codes like 'RON', 'AUD', 'CAD', etc.
     if (currencyPart && currencyPart.value.length > 1) {
         // Fallback: Return only the number formatted according to the locale
-        const numberFormatter = new Intl.NumberFormat(locale, {
-            minimumFractionDigits: minFractionDigits,
-            maximumFractionDigits: maxFractionDigits
-        });
+        const numberFormatter = getOrCreateFormatter(locale, currencyCode, minFractionDigits, maxFractionDigits, false);
         return numberFormatter.format(value);
     } else {
         // Use standard currency formatting (includes the single-character symbol)
