@@ -607,6 +607,8 @@ function setDefaults() {
 
 // Cache for currency formatters to improve performance
 const formatterCache = new Map();
+// Cache for currency symbol length check results
+const symbolLengthCache = new Map();
 
 /**
  * Get or create a cached formatter
@@ -639,6 +641,33 @@ function getOrCreateFormatter(locale, currencyCode, minFractionDigits, maxFracti
 }
 
 /**
+ * Check if currency symbol is multi-character (cached)
+ * @param {string} locale - The target locale
+ * @param {string} currencyCode - The 3-letter currency code
+ * @returns {boolean} True if symbol is multi-character, false otherwise
+ */
+function isMultiCharSymbol(locale, currencyCode) {
+    const key = `${locale}|${currencyCode}`;
+    
+    if (!symbolLengthCache.has(key)) {
+        // Create a temporary formatter to check symbol length once
+        const formatter = new Intl.NumberFormat(locale, {
+            style: 'currency',
+            currency: currencyCode,
+            currencyDisplay: 'symbol'
+        });
+        
+        const parts = formatter.formatToParts(100);
+        const currencyPart = parts.find(part => part.type === 'currency');
+        const isMultiChar = currencyPart && currencyPart.value.length > 1;
+        
+        symbolLengthCache.set(key, isMultiChar);
+    }
+    
+    return symbolLengthCache.get(key);
+}
+
+/**
  * Formats a number as currency, falling back to a plain number 
  * if the currency symbol is not a single character.
  * @param {number} value - The number to format.
@@ -649,24 +678,14 @@ function getOrCreateFormatter(locale, currencyCode, minFractionDigits, maxFracti
  * @returns {string} The formatted string.
  */
 function formatCurrencyConditionally(value, locale, currencyCode, minFractionDigits = 2, maxFractionDigits = 2) {
-    const formatter = getOrCreateFormatter(locale, currencyCode, minFractionDigits, maxFractionDigits, true);
-
-    // 1. Get the parts of the formatted string for the symbol check
-    // Using a non-zero value for more reliable symbol detection
-    const parts = formatter.formatToParts(100); 
-    
-    // 2. Find the currency part
-    const currencyPart = parts.find(part => part.type === 'currency');
-
-    // 3. Check the length of the symbol
-    // Check is > 1 to exclude single symbols like $, €, £. 
-    // This catches multi-character codes like 'RON', 'AUD', 'CAD', etc.
-    if (currencyPart && currencyPart.value.length > 1) {
+    // Check if symbol is multi-character (cached result)
+    if (isMultiCharSymbol(locale, currencyCode)) {
         // Fallback: Return only the number formatted according to the locale
         const numberFormatter = getOrCreateFormatter(locale, currencyCode, minFractionDigits, maxFractionDigits, false);
         return numberFormatter.format(value);
     } else {
         // Use standard currency formatting (includes the single-character symbol)
+        const formatter = getOrCreateFormatter(locale, currencyCode, minFractionDigits, maxFractionDigits, true);
         return formatter.format(value);
     }
 }
