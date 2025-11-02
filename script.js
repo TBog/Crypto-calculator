@@ -597,6 +597,8 @@ function updateLastUpdateTime() {
 
 /**
  * Refresh chart and sell price
+ * Uses chart data to get the most recent price, which is more efficient
+ * as it avoids a separate API call and ensures price/chart synchronization
  */
 async function refreshChartAndPrice() {
     // Prevent concurrent refreshes
@@ -618,15 +620,22 @@ async function refreshChartAndPrice() {
         
         const currency = currencyElement.value;
         
-        // Fetch new price
-        const newPrice = await fetchBTCPrice(currency);
+        // Fetch chart data (includes latest price points)
+        const chartData = await fetchBTCChartData(currency);
         
-        // Update sell price field if we got a valid price
-        if (newPrice !== null) {
+        // Extract the most recent price from chart data
+        if (chartData && chartData.prices && chartData.prices.length > 0) {
+            // Chart data format: [[timestamp, price], [timestamp, price], ...]
+            // Get the last price point (most recent)
+            const lastPricePoint = chartData.prices[chartData.prices.length - 1];
+            const newPrice = lastPricePoint[1]; // [timestamp, price]
+            const timestamp = lastPricePoint[0]; // timestamp
+            
+            // Update sell price field
             sellPriceElement.value = formatPrice(newPrice);
             
             // Add the new price point to the chart
-            addPricePointToChart(newPrice);
+            addPricePointToChart(newPrice, timestamp);
             
             // Update timestamp
             updateLastUpdateTime();
@@ -1250,7 +1259,21 @@ function initEventListeners() {
     // Refresh chart button handler
     document.getElementById('refreshChart').addEventListener('click', async function() {
         const currency = document.getElementById('currency').value;
+        const sellPriceElement = document.getElementById('sellPrice');
+        
+        // Fetch new chart data
+        const chartData = await fetchBTCChartData(currency);
+        
+        // Update the chart
         await initPriceChart(currency);
+        
+        // Extract and update sell price from chart data
+        if (chartData && chartData.prices && chartData.prices.length > 0 && sellPriceElement) {
+            const lastPricePoint = chartData.prices[chartData.prices.length - 1];
+            const newPrice = lastPricePoint[1];
+            sellPriceElement.value = formatPrice(newPrice);
+        }
+        
         // Update timestamp
         updateLastUpdateTime();
     });
