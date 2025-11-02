@@ -135,6 +135,11 @@ const ANIMATION_CONFIG = {
     RESULTS_SLIDE_DURATION: 500 // ms - results container slide-down
 };
 
+// Chart configuration
+const CHART_CONFIG = {
+    DUPLICATE_TIMESTAMP_TOLERANCE: 60000 // ms - 1 minute tolerance for duplicate detection
+};
+
 // Worker API configuration
 const WORKER_BASE_URL = 'https://crypto-cache.tbog.workers.dev';
 
@@ -317,6 +322,12 @@ async function fetchBTCChartData(currency = 'usd') {
  * @param {number} timestamp - The timestamp for the price point (optional, defaults to now)
  */
 function addPricePointToChart(price, timestamp = Date.now()) {
+    // Validate price parameter
+    if (typeof price !== 'number' || isNaN(price) || price <= 0) {
+        console.warn('Invalid price value, cannot add to chart:', price);
+        return;
+    }
+    
     if (!priceChart || !priceChart.data || !priceChart.data.datasets || !priceChart.data.datasets[0]) {
         console.warn('Chart not initialized, cannot add price point');
         return;
@@ -327,14 +338,14 @@ function addPricePointToChart(price, timestamp = Date.now()) {
     
     // Convert timestamp to Date object for consistency
     const newDate = new Date(timestamp);
+    const newTime = newDate.getTime();
     
     // Check if this timestamp already exists (avoid duplicates)
     // Compare timestamps by converting to time value (milliseconds since epoch)
     const existingIndex = labels.findIndex(label => {
         const labelTime = new Date(label).getTime();
-        const newTime = newDate.getTime();
-        // Consider timestamps within 1 minute as duplicates
-        return Math.abs(labelTime - newTime) < 60000;
+        // Consider timestamps within tolerance as duplicates
+        return Math.abs(labelTime - newTime) < CHART_CONFIG.DUPLICATE_TIMESTAMP_TOLERANCE;
     });
     
     if (existingIndex !== -1) {
@@ -345,9 +356,8 @@ function addPricePointToChart(price, timestamp = Date.now()) {
         // Check if new timestamp is newer than the last data point
         if (labels.length > 0) {
             const lastTimestamp = new Date(labels[labels.length - 1]).getTime();
-            const newTimestamp = newDate.getTime();
             
-            if (newTimestamp <= lastTimestamp) {
+            if (newTime <= lastTimestamp) {
                 console.warn('New price point is not newer than existing data, skipping');
                 return;
             }
