@@ -630,14 +630,15 @@ function formatCurrencyConditionally(value, locale, currencyCode) {
     });
 
     // 1. Get the parts of the formatted string for the symbol check
-    const parts = formatter.formatToParts(0); 
+    // Using a non-zero value for more reliable symbol detection
+    const parts = formatter.formatToParts(100); 
     
     // 2. Find the currency part
     const currencyPart = parts.find(part => part.type === 'currency');
 
     // 3. Check the length of the symbol
     // Check is > 1 to exclude single symbols like $, €, £. 
-    // This catches 'RON', 'AUD', 'CAD', 'USD', etc.
+    // This catches multi-character codes like 'RON', 'AUD', 'CAD', etc.
     if (currencyPart && currencyPart.value.length > 1) {
         // Fallback: Return only the number formatted according to the locale
         const numberFormatter = new Intl.NumberFormat(locale, {
