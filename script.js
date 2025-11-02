@@ -727,10 +727,15 @@ function calculateTransactionProfit(transaction, currentPrice) {
         ? transaction.investment / (currentPrice * feeMultiplier)
         : 0;
     
+    // Calculate effective coins to sell accounting for sell fee
+    // This represents the coins minus the portion that goes to fees
+    const coinsToSellForProfit = coinsPurchased * feeMultiplier;
+    
     return {
         coinsPurchased,
         netProfit,
-        coinsToSellBreakEven
+        coinsToSellBreakEven,
+        coinsToSellForProfit
     };
 }
 
@@ -772,7 +777,7 @@ async function renderTransactions() {
         const tx = transactions[i];
         const currentPrice = priceMap.get(tx.currency);
         const sellPrice = currentPrice !== null ? currentPrice : tx.buyPrice;
-        const { coinsPurchased, netProfit, coinsToSellBreakEven } = calculateTransactionProfit(tx, sellPrice);
+        const { coinsPurchased, netProfit, coinsToSellBreakEven, coinsToSellForProfit } = calculateTransactionProfit(tx, sellPrice);
         
         const profitClass = netProfit > 0 ? 'text-green-600 dark:text-green-400' : 
                            netProfit < 0 ? 'text-red-600 dark:text-red-400' : 
@@ -785,6 +790,7 @@ async function renderTransactions() {
             <td class="py-2 px-2">${formatTransactionCurrency(tx.buyPrice, tx.currency)}</td>
             <td class="py-2 px-2">${coinsPurchased.toFixed(8)}</td>
             <td class="py-2 px-2">${coinsToSellBreakEven.toFixed(8)}</td>
+            <td class="py-2 px-2">${coinsToSellForProfit.toFixed(8)}</td>
             <td class="py-2 px-2 font-semibold ${profitClass}">${formatTransactionCurrency(netProfit, tx.currency)}</td>
             <td class="py-2 px-2">
                 <button 
