@@ -396,12 +396,13 @@ async function initPriceChart(currency = 'usd') {
                             // Use context[0].parsed.x which contains the raw timestamp value
                             // This ensures proper date formatting regardless of the label format
                             const date = new Date(context[0].parsed.x);
-                            // Use user's locale for date formatting
+                            // Use user's locale and timezone for date formatting
                             return date.toLocaleString(undefined, {
                                 month: 'short',
                                 day: 'numeric',
                                 hour: '2-digit',
-                                minute: '2-digit'
+                                minute: '2-digit',
+                                timeZoneName: 'short'
                             });
                         },
                         label: function(context) {
