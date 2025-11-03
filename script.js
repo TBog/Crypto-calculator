@@ -88,6 +88,16 @@ function initConsent() {
     document.getElementById('cookieSettings').addEventListener('click', function() {
         showConsentBanner();
     });
+    
+    // Export data button handler
+    document.getElementById('exportData').addEventListener('click', function() {
+        handleExport();
+    });
+    
+    // Import data button handler
+    document.getElementById('importData').addEventListener('click', function() {
+        handleImport();
+    });
 }
 
 // Dark mode management
@@ -814,6 +824,212 @@ function getCookie(name) {
         if (c.indexOf(nameEQ) === 0) return decodeURIComponent(c.substring(nameEQ.length, c.length));
     }
     return null;
+}
+
+// ========== EXPORT/IMPORT FUNCTIONALITY ==========
+
+/**
+ * Export all stored data (cookies and localStorage) as a base64-encoded string
+ * @returns {string} Base64-encoded JSON string containing all data
+ */
+function exportData() {
+    try {
+        const data = {
+            version: 1, // For future compatibility
+            timestamp: new Date().toISOString(),
+            cookies: {},
+            localStorage: {}
+        };
+        
+        // Export cookies (all crypto_calc_* cookies except consent)
+        const cookieNames = ['darkMode', 'autoRefresh', 'investment', 'buyPrice', 'fee', 'currency'];
+        cookieNames.forEach(name => {
+            const fullName = `crypto_calc_${name}`;
+            const value = getCookie(fullName);
+            if (value !== null) {
+                data.cookies[name] = value;
+            }
+        });
+        
+        // Export localStorage (consent and transactions)
+        try {
+            const consent = localStorage.getItem('crypto_calc_consent');
+            if (consent) {
+                data.localStorage.consent = consent;
+            }
+            
+            const transactions = localStorage.getItem('crypto_calc_transactions');
+            if (transactions) {
+                data.localStorage.transactions = transactions;
+            }
+        } catch (e) {
+            console.warn('Could not access localStorage for export:', e);
+        }
+        
+        // Convert to JSON and then to base64
+        const jsonString = JSON.stringify(data);
+        const base64String = btoa(unescape(encodeURIComponent(jsonString)));
+        
+        return base64String;
+    } catch (e) {
+        console.error('Failed to export data:', e);
+        throw new Error('Failed to export data. Please try again.');
+    }
+}
+
+/**
+ * Import data from a base64-encoded string
+ * @param {string} base64String - Base64-encoded JSON string containing data to import
+ * @returns {boolean} True if import was successful
+ */
+function importData(base64String) {
+    try {
+        // Validate input
+        if (!base64String || typeof base64String !== 'string') {
+            throw new Error('Invalid import data');
+        }
+        
+        // Decode base64 and parse JSON
+        const jsonString = decodeURIComponent(escape(atob(base64String.trim())));
+        const data = JSON.parse(jsonString);
+        
+        // Validate data structure
+        if (!data.version || !data.cookies || !data.localStorage) {
+            throw new Error('Invalid data format');
+        }
+        
+        // Import cookies
+        Object.keys(data.cookies).forEach(name => {
+            const fullName = `crypto_calc_${name}`;
+            setCookie(fullName, data.cookies[name], 365);
+        });
+        
+        // Import localStorage
+        try {
+            if (data.localStorage.consent) {
+                localStorage.setItem('crypto_calc_consent', data.localStorage.consent);
+            }
+            
+            if (data.localStorage.transactions) {
+                localStorage.setItem('crypto_calc_transactions', data.localStorage.transactions);
+            }
+        } catch (e) {
+            console.warn('Could not access localStorage for import:', e);
+        }
+        
+        return true;
+    } catch (e) {
+        console.error('Failed to import data:', e);
+        throw new Error('Failed to import data. Please check the format and try again.');
+    }
+}
+
+/**
+ * Copy text to clipboard
+ * @param {string} text - Text to copy
+ * @returns {Promise<boolean>} True if copy was successful
+ */
+async function copyToClipboard(text) {
+    try {
+        // Modern clipboard API
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+        
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        
+        return successful;
+    } catch (e) {
+        console.error('Failed to copy to clipboard:', e);
+        return false;
+    }
+}
+
+/**
+ * Share text using Web Share API (mobile)
+ * @param {string} text - Text to share
+ * @returns {Promise<boolean>} True if share was successful
+ */
+async function shareText(text) {
+    try {
+        if (navigator.share) {
+            await navigator.share({
+                title: 'Crypto Calculator Data',
+                text: text
+            });
+            return true;
+        }
+        return false;
+    } catch (e) {
+        // User cancelled or share failed
+        console.log('Share cancelled or failed:', e);
+        return false;
+    }
+}
+
+/**
+ * Handle export button click
+ */
+async function handleExport() {
+    try {
+        const exportedData = exportData();
+        
+        // Try to share on mobile, fallback to copy on desktop
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        
+        if (isMobile && navigator.share) {
+            const shared = await shareText(exportedData);
+            if (shared) {
+                alert('Data exported and ready to share!');
+                return;
+            }
+        }
+        
+        // Fallback to copy to clipboard
+        const copied = await copyToClipboard(exportedData);
+        if (copied) {
+            alert('Data exported and copied to clipboard!\n\nYou can now paste it to save or share.');
+        } else {
+            // Last resort: show in a dialog for manual copy
+            const message = 'Copy this data to save or share:\n\n' + exportedData;
+            prompt(message, exportedData);
+        }
+    } catch (e) {
+        alert(e.message || 'Failed to export data');
+    }
+}
+
+/**
+ * Handle import button click
+ */
+function handleImport() {
+    const data = prompt('Paste your exported data here:');
+    
+    if (!data) {
+        return; // User cancelled
+    }
+    
+    try {
+        const success = importData(data);
+        if (success) {
+            alert('Data imported successfully! The page will now reload to apply the changes.');
+            window.location.reload();
+        }
+    } catch (e) {
+        alert(e.message || 'Failed to import data');
+    }
 }
 
 // Detect user's currency based on locale
