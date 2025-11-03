@@ -21,6 +21,40 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
 
 ## Deployment Steps
 
+### Option 1: GitHub Integration (Recommended for Auto-Deployment)
+
+With `wrangler.toml` in the repository root, you can use Cloudflare's GitHub integration for automatic deployments:
+
+1. **Install the Cloudflare Pages GitHub App**:
+   - Go to your [Cloudflare Dashboard](https://dash.cloudflare.com/)
+   - Navigate to Workers & Pages
+   - Click "Create Application" → "Pages" → "Connect to Git"
+   - Select your repository and authorize the GitHub app
+
+2. **Configure Build Settings**:
+   - Framework preset: None
+   - Build command: (leave empty)
+   - Build output directory: (leave empty)
+   - The `wrangler.toml` at the root will be automatically detected
+
+3. **Set Environment Variables**:
+   - In the Cloudflare dashboard, go to your Worker settings
+   - Add `COINGECKO_KEY` as an environment variable (encrypted)
+   - This will be available to your worker via `env.COINGECKO_KEY`
+
+4. **Automatic Deployments**:
+   - **Production**: Pushes to your default branch (e.g., `main`) automatically deploy to production
+   - **Preview**: Pull requests automatically create preview deployments with unique URLs
+   - Each PR gets a preview URL like: `https://<commit-hash>.crypto-cache.pages.dev`
+
+**Benefits:**
+- No manual deployment needed
+- PR previews for testing changes before merging
+- Automatic rollback capabilities
+- Built-in CI/CD pipeline
+
+### Option 2: Manual Deployment with Wrangler CLI
+
 ### Prerequisites
 
 1. A [Cloudflare account](https://dash.cloudflare.com/sign-up)
