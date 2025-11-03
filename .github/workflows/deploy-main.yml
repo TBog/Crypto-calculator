@@ -4,7 +4,7 @@
 
 name: Deploy Main to GitHub Pages
 
-on:
+'on':
   push:
     branches:
       - main
@@ -27,4 +27,3 @@ jobs:
           publish_branch: gh-pages
           keep_files: true
           exclude_assets: '.github'
-
