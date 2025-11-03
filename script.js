@@ -89,6 +89,11 @@ function initConsent() {
         showConsentBanner();
     });
     
+    // Close banner button handler - allows users to dismiss without action
+    document.getElementById('closeBanner').addEventListener('click', function() {
+        hideConsentBanner();
+    });
+    
     // Export data button handler
     document.getElementById('exportData').addEventListener('click', function() {
         handleExport();
