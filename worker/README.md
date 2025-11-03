@@ -38,29 +38,20 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
    wrangler login
    ```
 
-3. **Create a wrangler.toml file** in the worker directory:
-   ```toml
-   name = "crypto-cache"
-   main = "index.js"
-   compatibility_date = "2024-10-01"
-   
-   [env.production]
-   # Add your environment variables here after deployment
-   ```
-
-4. **Deploy the worker**:
+3. **Deploy the worker** from the repository root:
    ```bash
-   cd worker
    wrangler deploy
    ```
+   
+   Note: The `wrangler.toml` file is located in the repository root to support Cloudflare's GitHub integration for auto-deployment.
 
-5. **Set the API Key** (optional, but recommended):
+4. **Set the API Key** (optional, but recommended):
    ```bash
    wrangler secret put COINGECKO_KEY
    ```
    When prompted, enter your CoinGecko API key.
 
-6. **Note your Worker URL**: After deployment, Wrangler will display your worker URL (e.g., `https://crypto-cache.YOUR_SUBDOMAIN.workers.dev`)
+5. **Note your Worker URL**: After deployment, Wrangler will display your worker URL (e.g., `https://crypto-cache.YOUR_SUBDOMAIN.workers.dev`)
 
 ### Update the Frontend
 
