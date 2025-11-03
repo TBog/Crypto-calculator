@@ -65,6 +65,18 @@ To run this project locally:
 git clone https://github.com/TBog/Crypto-calculator.git
 cd Crypto-calculator
 
+# Install dependencies
+npm install
+
+# Build the CSS (production - minified)
+npm run build:css
+
+# Or build for development (unminified, easier to debug)
+npm run dev:css
+
+# Or watch for changes and rebuild automatically
+npm run watch:css
+
 # Serve the files using any local server
 # Option 1: Python
 python3 -m http.server 8000
@@ -78,12 +90,14 @@ npx http-server -p 8000
 
 ## 🔧 Technical Details
 
-- **Frontend**: Pure HTML, CSS (Tailwind CSS via CDN), and JavaScript
+- **Frontend**: Pure HTML, CSS (Tailwind CSS), and JavaScript
+- **Styling**: Tailwind CSS v3 with PostCSS and Autoprefixer
+- **Build Tool**: Tailwind CLI for CSS generation
 - **Price Data**: CoinGecko API for real-time Bitcoin prices
 - **Exchange Rates**: ExchangeRate-API for currency conversions
 - **Caching**: Cloudflare Workers for API proxy and edge caching
 - **Hosting**: GitHub Pages (static hosting)
-- **No Build Process**: Runs directly in the browser, no compilation needed
+- **Build Process**: Automated CSS building via GitHub Actions
 
 ### Data Sources & Attribution
 
