@@ -829,7 +829,48 @@ function getCookie(name) {
 // ========== EXPORT/IMPORT FUNCTIONALITY ==========
 
 /**
+ * Get current values from DOM elements
+ * @returns {object} Object with current form values
+ */
+function getValuesFromDOM() {
+    const values = {};
+    
+    // Get form values from DOM
+    const investmentEl = document.getElementById('investment');
+    const buyPriceEl = document.getElementById('buyPrice');
+    const feeEl = document.getElementById('fee');
+    const currencyEl = document.getElementById('currency');
+    
+    if (investmentEl && investmentEl.value) {
+        values.investment = investmentEl.value;
+    }
+    if (buyPriceEl && buyPriceEl.value) {
+        values.buyPrice = buyPriceEl.value;
+    }
+    if (feeEl && feeEl.value) {
+        values.fee = feeEl.value;
+    }
+    if (currencyEl && currencyEl.value) {
+        values.currency = currencyEl.value;
+    }
+    
+    // Get dark mode state from DOM (check if 'dark' class is present on html element)
+    const isDarkMode = document.documentElement.classList.contains('dark');
+    values.darkMode = isDarkMode.toString();
+    
+    // Get auto-refresh state from toggle button
+    const autoRefreshToggle = document.getElementById('autoRefreshToggle');
+    if (autoRefreshToggle) {
+        const isEnabled = autoRefreshToggle.getAttribute('aria-checked') === 'true';
+        values.autoRefresh = isEnabled.toString();
+    }
+    
+    return values;
+}
+
+/**
  * Export all stored data (cookies and localStorage) as a base64-encoded string
+ * If consent is not granted, reads current values from DOM instead
  * @returns {string} Base64-encoded JSON string containing all data
  */
 function exportData() {
@@ -841,29 +882,40 @@ function exportData() {
             localStorage: {}
         };
         
-        // Export cookies (all crypto_calc_* cookies except consent)
-        const cookieNames = ['darkMode', 'autoRefresh', 'investment', 'buyPrice', 'fee', 'currency'];
-        cookieNames.forEach(name => {
-            const fullName = `crypto_calc_${name}`;
-            const value = getCookie(fullName);
-            if (value !== null) {
-                data.cookies[name] = value;
-            }
-        });
+        const consentGranted = hasConsent();
         
-        // Export localStorage (consent and transactions)
-        try {
-            const consent = localStorage.getItem('crypto_calc_consent');
-            if (consent) {
-                data.localStorage.consent = consent;
-            }
+        if (consentGranted) {
+            // Export cookies (all crypto_calc_* cookies except consent)
+            const cookieNames = ['darkMode', 'autoRefresh', 'investment', 'buyPrice', 'fee', 'currency'];
+            cookieNames.forEach(name => {
+                const fullName = `crypto_calc_${name}`;
+                const value = getCookie(fullName);
+                if (value !== null) {
+                    data.cookies[name] = value;
+                }
+            });
             
-            const transactions = localStorage.getItem('crypto_calc_transactions');
-            if (transactions) {
-                data.localStorage.transactions = transactions;
+            // Export localStorage (consent and transactions)
+            try {
+                const consent = localStorage.getItem('crypto_calc_consent');
+                if (consent) {
+                    data.localStorage.consent = consent;
+                }
+                
+                const transactions = localStorage.getItem('crypto_calc_transactions');
+                if (transactions) {
+                    data.localStorage.transactions = transactions;
+                }
+            } catch (e) {
+                console.warn('Could not access localStorage for export:', e);
             }
-        } catch (e) {
-            console.warn('Could not access localStorage for export:', e);
+        } else {
+            // If consent not granted, read current values from DOM
+            const domValues = getValuesFromDOM();
+            Object.assign(data.cookies, domValues);
+            
+            // Note: transactions won't be available without consent
+            // as they require localStorage
         }
         
         // Convert to JSON and then to base64
@@ -988,12 +1040,6 @@ async function shareText(text) {
  * Handle export button click
  */
 async function handleExport() {
-    // Check for consent first
-    if (!hasConsent()) {
-        alert('Please accept cookie consent first to export your data.');
-        return;
-    }
-    
     try {
         const exportedData = exportData();
         
