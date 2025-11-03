@@ -108,6 +108,21 @@ When currency conversion is performed, the calculator displays:
 
 This project includes a Cloudflare Worker for API caching and CORS handling. See the [worker/README.md](worker/README.md) for detailed deployment instructions.
 
+## 🔍 PR Preview Deployments
+
+This repository supports automatic preview deployments for pull requests! When you open a PR, a preview of your changes will be automatically deployed and accessible at:
+
+```
+https://tbog.github.io/Crypto-calculator/pr-preview/pr-<number>/
+```
+
+Where `<number>` is your PR number. The preview will be:
+- **Automatically created** when you open a PR
+- **Updated** whenever you push new commits
+- **Removed** when the PR is closed or merged
+
+This allows reviewers to test your changes in a live environment before merging.
+
 ## 📝 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
