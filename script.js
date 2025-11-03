@@ -997,21 +997,22 @@ async function handleExport() {
     try {
         const exportedData = exportData();
         
-        // Check if we have any data to export
-        if (!exportedData || exportedData.length === 0) {
-            alert('No data to export. Please accept consent and use the calculator first.');
-            return;
-        }
+        // Export always returns a valid base64 string
+        // No need to check length as it will always have at least the structure
         
         // Try to share using Web Share API first (works on mobile and some desktop browsers)
         if (navigator.share) {
             try {
-                await shareText(exportedData);
-                alert('Data exported and ready to share!');
-                return;
+                const shared = await shareText(exportedData);
+                if (shared) {
+                    alert('Data exported and ready to share!');
+                    return;
+                }
+                // If shareText returns false, fall through to clipboard
+                console.log('Share not supported, trying clipboard');
             } catch (e) {
-                // User cancelled or share not supported, fall through to clipboard
-                console.log('Share cancelled or not supported, trying clipboard');
+                // User cancelled or error occurred, fall through to clipboard
+                console.log('Share cancelled or failed, trying clipboard:', e.message);
             }
         }
         
