@@ -47,6 +47,36 @@ With `wrangler.toml` in the repository root, you can use Cloudflare's GitHub int
    - **Preview**: Pull requests automatically create preview deployments with unique URLs
    - Each PR gets a preview URL like: `https://<commit-hash>.crypto-cache.pages.dev`
 
+5. **Using PR Preview URLs in Frontend**:
+   
+   Since the frontend (`script.js`) has a hardcoded `WORKER_BASE_URL`, you have two options for testing with PR preview URLs:
+   
+   **Option A: Environment-based Configuration (Recommended)**
+   
+   Modify `script.js` to auto-detect the environment:
+   ```javascript
+   // Auto-detect worker URL based on environment
+   const WORKER_BASE_URL = (() => {
+       // Check if we're in a Cloudflare Pages preview deployment
+       if (window.location.hostname.includes('.pages.dev')) {
+           // Use same domain for worker in preview
+           return `https://${window.location.hostname}`;
+       }
+       // Production worker URL
+       return 'https://crypto-cache.tbog.workers.dev';
+   })();
+   ```
+   
+   **Option B: Manual Testing**
+   
+   For each PR that modifies the worker:
+   1. Note the preview URL from the Cloudflare Pages deployment comment on the PR
+   2. Temporarily modify `WORKER_BASE_URL` in `script.js` to use the preview URL
+   3. Test the changes
+   4. Revert the temporary change before merging
+   
+   **Note**: Option A is recommended as it automatically uses the correct URL based on the deployment environment, making PR testing seamless.
+
 **Benefits:**
 - No manual deployment needed
 - PR previews for testing changes before merging
