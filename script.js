@@ -983,17 +983,30 @@ async function shareText(text) {
  * Handle export button click
  */
 async function handleExport() {
+    // Check for consent first
+    if (!hasConsent()) {
+        alert('Please accept cookie consent first to export your data.');
+        return;
+    }
+    
     try {
         const exportedData = exportData();
         
-        // Try to share on mobile, fallback to copy on desktop
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        // Check if we have any data to export
+        if (!exportedData || exportedData.length === 0) {
+            alert('No data to export. Please accept consent and use the calculator first.');
+            return;
+        }
         
-        if (isMobile && navigator.share) {
-            const shared = await shareText(exportedData);
-            if (shared) {
+        // Try to share using Web Share API first (works on mobile and some desktop browsers)
+        if (navigator.share) {
+            try {
+                await shareText(exportedData);
                 alert('Data exported and ready to share!');
                 return;
+            } catch (e) {
+                // User cancelled or share not supported, fall through to clipboard
+                console.log('Share cancelled or not supported, trying clipboard');
             }
         }
         
@@ -1015,6 +1028,12 @@ async function handleExport() {
  * Handle import button click
  */
 function handleImport() {
+    // Check for consent first
+    if (!hasConsent()) {
+        alert('Please accept cookie consent first before importing data.');
+        return;
+    }
+    
     const data = prompt('Paste your exported data here:');
     
     if (!data) {
