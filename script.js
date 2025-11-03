@@ -1430,12 +1430,14 @@ function loadTransactions() {
 // Save transactions to localStorage
 function saveTransactions(transactions) {
     if (!hasConsent()) {
-        return; // Don't save to localStorage without consent
+        return false; // Don't save to localStorage without consent
     }
     try {
         localStorage.setItem('crypto_calc_transactions', JSON.stringify(transactions));
+        return true;
     } catch (e) {
         console.error('Failed to save transactions:', e);
+        return false;
     }
 }
 
@@ -1695,15 +1697,26 @@ function initEventListeners() {
 
         const transactions = loadTransactions();
         transactions.push(transaction);
-        saveTransactions(transactions);
-        renderTransactions();
+        const saved = saveTransactions(transactions);
+        
+        if (saved) {
+            alert('Transaction saved successfully!');
+            renderTransactions();
+        } else {
+            alert('Failed to save transaction. Your browser may have localStorage disabled or full. Please check your browser settings.');
+        }
     });
 
     // Clear all transactions
     document.getElementById('clearAllTransactions').addEventListener('click', function() {
         if (confirm('Are you sure you want to delete all saved transactions?')) {
-            saveTransactions([]);
-            renderTransactions();
+            const cleared = saveTransactions([]);
+            if (cleared) {
+                alert('All transactions cleared successfully!');
+                renderTransactions();
+            } else {
+                alert('Failed to clear transactions. Your browser may have localStorage disabled. Please check your browser settings.');
+            }
         }
     });
 
