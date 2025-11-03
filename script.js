@@ -141,16 +141,8 @@ const CHART_CONFIG = {
 };
 
 // Worker API configuration
-// Auto-detect worker URL based on environment
-const WORKER_BASE_URL = (() => {
-    // Check if we're in a Cloudflare Pages preview deployment
-    if (window.location.hostname.includes('.pages.dev')) {
-        // Use same domain for worker in preview
-        return `https://${window.location.hostname}`;
-    }
-    // Production worker URL
-    return 'https://crypto-cache.tbog.workers.dev';
-})();
+// This URL will be replaced during GitHub Pages deployment with the appropriate worker URL
+const WORKER_BASE_URL = 'https://crypto-cache.tbog.workers.dev';
 
 // Crypto currencies (for worker validation, not used in frontend selector)
 const CRYPTO_CURRENCIES = ['btc', 'eth', 'ltc', 'bch', 'bnb', 'eos', 'xrp', 'xlm', 'link', 'dot', 'yfi', 'sol', 'bits', 'sats'];

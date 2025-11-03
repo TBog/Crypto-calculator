@@ -47,39 +47,18 @@ With `wrangler.toml` in the repository root, you can use Cloudflare's GitHub int
    - **Preview**: Pull requests automatically create preview deployments with unique URLs
    - Each PR gets a preview URL like: `https://<commit-hash>.crypto-cache.pages.dev`
 
-5. **Using PR Preview URLs in Frontend**:
+5. **Frontend Integration with Worker Previews**:
    
-   Since the frontend (`script.js`) has a hardcoded `WORKER_BASE_URL`, you have two options for testing with PR preview URLs:
+   The GitHub Pages deployment workflow (`.github/workflows/deploy-pages.yml`) automatically updates the `WORKER_BASE_URL` in `script.js` during deployment:
    
-   **Option A: Environment-based Configuration (Recommended)**
+   - **Production deployments** (main branch): Uses `https://crypto-cache.tbog.workers.dev`
+   - **PR preview deployments**: Uses `https://<commit-hash>.crypto-cache.pages.dev`
    
-   Modify `script.js` to auto-detect the environment:
-   ```javascript
-   // Auto-detect worker URL based on environment
-   const WORKER_BASE_URL = (() => {
-       // Check if we're in a Cloudflare Pages preview deployment
-       if (window.location.hostname.includes('.pages.dev')) {
-           // Use same domain for worker in preview
-           return `https://${window.location.hostname}`;
-       }
-       // Production worker URL
-       return 'https://crypto-cache.tbog.workers.dev';
-   })();
-   ```
-   
-   **Option B: Manual Testing**
-   
-   For each PR that modifies the worker:
-   1. Note the preview URL from the Cloudflare Pages deployment comment on the PR
-   2. Temporarily modify `WORKER_BASE_URL` in `script.js` to use the preview URL
-   3. Test the changes
-   4. Revert the temporary change before merging
-   
-   **Note**: Option A is recommended as it automatically uses the correct URL based on the deployment environment, making PR testing seamless.
+   This ensures that each PR preview automatically uses its corresponding Cloudflare Worker preview URL without requiring manual configuration or runtime detection.
 
 **Benefits:**
 - No manual deployment needed
-- PR previews for testing changes before merging
+- PR previews automatically use the correct worker URL
 - Automatic rollback capabilities
 - Built-in CI/CD pipeline
 
