@@ -868,7 +868,10 @@ function exportData() {
         
         // Convert to JSON and then to base64
         const jsonString = JSON.stringify(data);
-        const base64String = btoa(unescape(encodeURIComponent(jsonString)));
+        // Use modern approach for UTF-8 encoding before base64
+        const utf8Bytes = new TextEncoder().encode(jsonString);
+        const binaryString = Array.from(utf8Bytes, byte => String.fromCharCode(byte)).join('');
+        const base64String = btoa(binaryString);
         
         return base64String;
     } catch (e) {
@@ -889,8 +892,10 @@ function importData(base64String) {
             throw new Error('Invalid import data');
         }
         
-        // Decode base64 and parse JSON
-        const jsonString = decodeURIComponent(escape(atob(base64String.trim())));
+        // Decode base64 and parse JSON using modern approach
+        const binaryString = atob(base64String.trim());
+        const utf8Bytes = Uint8Array.from(binaryString, char => char.charCodeAt(0));
+        const jsonString = new TextDecoder().decode(utf8Bytes);
         const data = JSON.parse(jsonString);
         
         // Validate data structure
