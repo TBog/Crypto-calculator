@@ -5,6 +5,7 @@
   "main": "script.js",
   "scripts": {
     "build:css": "tailwindcss -i src/input.css -o dist/output.css --minify",
+    "dev:css": "tailwindcss -i src/input.css -o dist/output.css",
     "watch:css": "tailwindcss -i src/input.css -o dist/output.css --watch",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
