@@ -94,9 +94,14 @@ function initConsent() {
         hideConsentBanner();
     });
     
-    // Export data button handler
-    document.getElementById('exportData').addEventListener('click', function() {
-        handleExport();
+    // Share data button handler
+    document.getElementById('shareData').addEventListener('click', function() {
+        handleShare();
+    });
+    
+    // Download data button handler
+    document.getElementById('downloadData').addEventListener('click', function() {
+        handleDownload();
     });
     
     // Import data button handler
@@ -1042,7 +1047,110 @@ async function shareText(text) {
 }
 
 /**
- * Handle export button click
+ * Download data as a file
+ * @param {string} data - Data to download
+ * @param {string} filename - Name of the file
+ */
+function downloadFile(data, filename) {
+    try {
+        // Create a blob from the data
+        const blob = new Blob([data], { type: 'text/plain' });
+        
+        // Create a temporary URL for the blob
+        const url = URL.createObjectURL(blob);
+        
+        // Create a temporary anchor element
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        
+        // Append to document, click, and remove
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        // Release the URL
+        URL.revokeObjectURL(url);
+        
+        return true;
+    } catch (e) {
+        console.error('Failed to download file:', e);
+        return false;
+    }
+}
+
+/**
+ * Handle share button click - shares data via clipboard or Web Share API
+ */
+async function handleShare() {
+    try {
+        const exportedData = exportData();
+        
+        // Try to share using Web Share API first (works on mobile and some desktop browsers)
+        if (navigator.share) {
+            try {
+                const shared = await shareText(exportedData);
+                if (shared) {
+                    alert('Data ready to share!');
+                    return;
+                }
+                // If shareText returns false, fall through to clipboard
+                console.log('Share not supported, trying clipboard');
+            } catch (e) {
+                // User cancelled or error occurred, fall through to clipboard
+                console.log('Share cancelled or failed, trying clipboard:', e.message);
+            }
+        }
+        
+        // Fallback to copy to clipboard
+        const copied = await copyToClipboard(exportedData);
+        if (copied) {
+            alert('Data copied to clipboard!\n\nYou can now paste it to save or share.');
+        } else {
+            // Last resort: show in a dialog for manual copy
+            const message = 'Copy this data to save or share:\n\n' + exportedData;
+            prompt(message, exportedData);
+        }
+    } catch (e) {
+        alert(e.message || 'Failed to share data');
+    }
+}
+
+/**
+ * Handle download button click - downloads data as a file
+ */
+async function handleDownload() {
+    try {
+        const exportedData = exportData();
+        
+        // Generate filename with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        const filename = `crypto-calculator-data-${timestamp}.txt`;
+        
+        // Try to download the file
+        const downloaded = downloadFile(exportedData, filename);
+        
+        if (downloaded) {
+            alert('Data downloaded successfully!\n\nFile: ' + filename);
+        } else {
+            // Fallback: try to copy to clipboard instead
+            const copied = await copyToClipboard(exportedData);
+            if (copied) {
+                alert('Download not supported by your browser.\n\nData copied to clipboard instead!');
+            } else {
+                // Last resort: show in a dialog for manual copy
+                const message = 'Copy this data to save:\n\n' + exportedData;
+                prompt(message, exportedData);
+            }
+        }
+    } catch (e) {
+        alert(e.message || 'Failed to download data');
+    }
+}
+
+/**
+ * Handle export button click (legacy - kept for compatibility)
  */
 async function handleExport() {
     try {
