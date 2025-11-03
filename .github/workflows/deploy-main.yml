@@ -1,0 +1,28 @@
+# This workflow deploys the main branch to the root of GitHub Pages
+# Main site URL: https://tbog.github.io/Crypto-calculator/
+# Preserves PR previews in pr-preview/ directory
+
+name: Deploy Main to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  deploy-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages
+          keep_files: true
