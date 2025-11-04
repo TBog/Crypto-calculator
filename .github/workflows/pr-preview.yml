@@ -37,6 +37,9 @@ jobs:
       - name: Build Tailwind CSS
         run: npm run build:css
 
+      - name: Copy static files to `dist/`
+        run: rsync -av --delete --exclude 'node_modules/' --exclude '.git/' --exclude '.github/' --exclude 'dist/' ./ dist/
+
       - name: Deploy preview
         uses: rossjrw/pr-preview-action@v1
         with:
