@@ -40,6 +40,9 @@ jobs:
       - name: Copy static files to `dist/`
         run: rsync -av --delete --exclude 'node_modules/' --exclude '.git/' --exclude '.github/' --exclude 'dist/' ./ dist/
 
+      - name: List all files for debug purposes
+        run: ls -RF ./
+
       - name: Deploy preview
         uses: rossjrw/pr-preview-action@v1
         with:
