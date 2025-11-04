@@ -3,6 +3,7 @@ node_modules/
 
 # Tailwind CSS output
 dist/
+output.css
 
 # Build artifacts
 *.log

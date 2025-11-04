@@ -1266,9 +1266,8 @@ async function loadFormValues() {
 
     // Set currency first: try cookie, then detect, then default to USD
     const currency = savedCurrency ?? detectUserCurrency();
-    document.getElementById('currency').value = currency;
-    // Also sync mobile select to match saved currency
-    document.getElementById('currencyMobile').value = currency;
+    // Use setCurrency to synchronize all three currency elements
+    setCurrency(currency, false);
 
     // Fetch current BTC price for the selected currency
     const sellPriceValue = await fetchBTCPrice(currency);
@@ -1838,6 +1837,51 @@ function initEventListeners() {
 }
 
 /**
+ * Set currency value and synchronize all currency-related DOM elements
+ * This function ensures that currencySearch, currencyMobile, and currency (hidden input)
+ * are all properly synchronized
+ * @param {string} currencyCode - The 3-letter currency code (e.g., 'USD', 'EUR')
+ * @param {boolean} triggerChange - Whether to trigger change event on hidden input (default: false)
+ */
+function setCurrency(currencyCode, triggerChange = false) {
+    const searchInput = document.getElementById('currencySearch');
+    const mobileSelect = document.getElementById('currencyMobile');
+    const hiddenInput = document.getElementById('currency');
+    const dropdown = document.getElementById('currencyDropdown');
+    
+    if (!hiddenInput) {
+        console.warn('Currency hidden input not found');
+        return;
+    }
+    
+    // Update hidden input (the source of truth)
+    hiddenInput.value = currencyCode;
+    
+    // Update mobile select
+    if (mobileSelect) {
+        mobileSelect.value = currencyCode;
+    }
+    
+    // Update desktop search input and selected state
+    if (searchInput && dropdown) {
+        const options = dropdown.querySelectorAll('.currency-option');
+        const matchingOption = dropdown.querySelector(`.currency-option[data-value="${currencyCode}"]`);
+        if (matchingOption) {
+            searchInput.value = matchingOption.textContent;
+            // Update selected state
+            options.forEach(opt => opt.classList.remove('selected'));
+            matchingOption.classList.add('selected');
+        }
+    }
+    
+    // Trigger change event if requested
+    if (triggerChange) {
+        const event = new Event('change', { bubbles: true });
+        hiddenInput.dispatchEvent(event);
+    }
+}
+
+/**
  * Initialize searchable currency dropdown functionality
  */
 function initCurrencyDropdown() {
@@ -1850,13 +1894,8 @@ function initCurrencyDropdown() {
     // Function to sync desktop searchable input with current currency value
     function syncDesktopInput() {
         const currentValue = hiddenInput.value;
-        const matchingOption = dropdown.querySelector(`.currency-option[data-value="${currentValue}"]`);
-        if (matchingOption) {
-            searchInput.value = matchingOption.textContent;
-            // Update selected state
-            options.forEach(opt => opt.classList.remove('selected'));
-            matchingOption.classList.add('selected');
-        }
+        // Use setCurrency without triggering change event (sync only)
+        setCurrency(currentValue, false);
     }
 
     // Set initial display value for desktop
@@ -1864,14 +1903,8 @@ function initCurrencyDropdown() {
 
     // Handle mobile select change
     mobileSelect.addEventListener('change', function() {
-        hiddenInput.value = this.value;
-        
-        // Sync desktop input when mobile select changes
-        syncDesktopInput();
-        
-        // Trigger change event on hidden input
-        const event = new Event('change', { bubbles: true });
-        hiddenInput.dispatchEvent(event);
+        // Use setCurrency to synchronize all elements and trigger change event
+        setCurrency(this.value, true);
     });
 
     // Sync desktop input when viewport changes (e.g., switching to desktop mode)
@@ -1914,25 +1947,12 @@ function initCurrencyDropdown() {
     options.forEach(option => {
         option.addEventListener('click', function() {
             const value = this.getAttribute('data-value');
-            const text = this.textContent;
 
-            // Update hidden input and search field
-            hiddenInput.value = value;
-            searchInput.value = text;
-            
-            // Sync mobile select
-            mobileSelect.value = value;
-
-            // Update selected state
-            options.forEach(opt => opt.classList.remove('selected'));
-            this.classList.add('selected');
+            // Use setCurrency to synchronize all elements and trigger change event
+            setCurrency(value, true);
 
             // Hide dropdown
             dropdown.classList.remove('show');
-
-            // Trigger change event on hidden input
-            const event = new Event('change', { bubbles: true });
-            hiddenInput.dispatchEvent(event);
         });
     });
 
