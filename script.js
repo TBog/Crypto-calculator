@@ -1865,7 +1865,7 @@ function setCurrency(currencyCode, triggerChange = false) {
     // Update desktop search input and selected state
     if (searchInput && dropdown) {
         const options = dropdown.querySelectorAll('.currency-option');
-        // Find matching option by iterating to avoid CSS injection
+        // Find matching option by iterating to avoid attribute injection
         const matchingOption = Array.from(options).find(opt => opt.getAttribute('data-value') === currencyCode);
         if (matchingOption) {
             searchInput.value = matchingOption.textContent;
