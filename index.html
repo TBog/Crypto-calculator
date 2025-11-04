@@ -851,7 +851,17 @@
 
     <!-- Cookie Consent Banner -->
     <div id="cookieConsent" class="py-4 px-4">
-        <div class="max-w-4xl mx-auto">
+        <div class="max-w-4xl mx-auto relative">
+            <button 
+                id="closeBanner" 
+                class="absolute top-0 right-0 p-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition"
+                title="Close banner"
+                aria-label="Close consent banner"
+            >
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
             <div class="flex flex-col md:flex-row items-center justify-between gap-4">
                 <div class="flex-1">
                     <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-1">Cookie & Storage Consent</h3>
@@ -859,20 +869,48 @@
                         We use cookies and local storage to save your preferences (dark mode, form values) and transaction history. 
                         By clicking "Accept", you consent to the storage of this data on your device in accordance with GDPR.
                     </p>
+                    <p class="text-sm text-gray-600 dark:text-gray-300 mt-2">
+                        You can export your data as a shareable code and import it later to restore your settings and transactions.
+                    </p>
                 </div>
-                <div class="flex gap-2 flex-shrink-0">
-                    <button 
-                        id="cookieDecline" 
-                        class="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition font-semibold"
-                    >
-                        Decline
-                    </button>
-                    <button 
-                        id="cookieAccept" 
-                        class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition font-semibold"
-                    >
-                        Accept
-                    </button>
+                <div class="flex flex-col gap-2 flex-shrink-0">
+                    <div class="flex gap-2">
+                        <button 
+                            id="cookieDecline" 
+                            class="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition font-semibold"
+                        >
+                            Decline
+                        </button>
+                        <button 
+                            id="cookieAccept" 
+                            class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition font-semibold"
+                        >
+                            Accept
+                        </button>
+                    </div>
+                    <div class="flex gap-2">
+                        <button 
+                            id="shareData" 
+                            class="flex-1 px-4 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition font-semibold"
+                            title="Share your data as a code"
+                        >
+                            🔗 Share
+                        </button>
+                        <button 
+                            id="downloadData" 
+                            class="flex-1 px-4 py-2 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600 transition font-semibold"
+                            title="Download your data as a file"
+                        >
+                            💾 Download
+                        </button>
+                        <button 
+                            id="importData" 
+                            class="flex-1 px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 transition font-semibold"
+                            title="Import data from a code"
+                        >
+                            📥 Import Data
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

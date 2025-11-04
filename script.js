@@ -88,6 +88,26 @@ function initConsent() {
     document.getElementById('cookieSettings').addEventListener('click', function() {
         showConsentBanner();
     });
+    
+    // Close banner button handler - allows users to dismiss without action
+    document.getElementById('closeBanner').addEventListener('click', function() {
+        hideConsentBanner();
+    });
+    
+    // Share data button handler
+    document.getElementById('shareData').addEventListener('click', function() {
+        handleShare();
+    });
+    
+    // Download data button handler
+    document.getElementById('downloadData').addEventListener('click', function() {
+        handleDownload();
+    });
+    
+    // Import data button handler
+    document.getElementById('importData').addEventListener('click', function() {
+        handleImport();
+    });
 }
 
 // Dark mode management
@@ -816,6 +836,386 @@ function getCookie(name) {
     return null;
 }
 
+// ========== EXPORT/IMPORT FUNCTIONALITY ==========
+
+/**
+ * Get current values from DOM elements
+ * @returns {object} Object with current form values
+ */
+function getValuesFromDOM() {
+    const values = {};
+    
+    // Get form values from DOM
+    const investmentEl = document.getElementById('investment');
+    const buyPriceEl = document.getElementById('buyPrice');
+    const feeEl = document.getElementById('fee');
+    const currencyEl = document.getElementById('currency');
+    
+    if (investmentEl && investmentEl.value) {
+        values.investment = investmentEl.value;
+    }
+    if (buyPriceEl && buyPriceEl.value) {
+        values.buyPrice = buyPriceEl.value;
+    }
+    if (feeEl && feeEl.value) {
+        values.fee = feeEl.value;
+    }
+    if (currencyEl && currencyEl.value) {
+        values.currency = currencyEl.value;
+    }
+    
+    // Get dark mode state from DOM (check if 'dark' class is present on html element)
+    const isDarkMode = document.documentElement.classList.contains('dark');
+    values.darkMode = isDarkMode.toString();
+    
+    // Get auto-refresh state from toggle button
+    const autoRefreshToggle = document.getElementById('autoRefreshToggle');
+    if (autoRefreshToggle) {
+        const isEnabled = autoRefreshToggle.getAttribute('aria-checked') === 'true';
+        values.autoRefresh = isEnabled.toString();
+    }
+    
+    return values;
+}
+
+/**
+ * Export all stored data (cookies and localStorage) as a base64-encoded string
+ * If consent is not granted, reads current values from DOM instead
+ * @returns {string} Base64-encoded JSON string containing all data
+ */
+function exportData() {
+    try {
+        const data = {
+            version: 1, // For future compatibility
+            timestamp: new Date().toISOString(),
+            cookies: {},
+            localStorage: {}
+        };
+        
+        const consentGranted = hasConsent();
+        
+        if (consentGranted) {
+            // Export cookies (all crypto_calc_* cookies except consent)
+            const cookieNames = ['darkMode', 'autoRefresh', 'investment', 'buyPrice', 'fee', 'currency'];
+            cookieNames.forEach(name => {
+                const fullName = `crypto_calc_${name}`;
+                const value = getCookie(fullName);
+                if (value !== null) {
+                    data.cookies[name] = value;
+                }
+            });
+            
+            // Export localStorage (consent and transactions)
+            try {
+                const consent = localStorage.getItem('crypto_calc_consent');
+                if (consent) {
+                    data.localStorage.consent = consent;
+                }
+                
+                const transactions = localStorage.getItem('crypto_calc_transactions');
+                if (transactions) {
+                    data.localStorage.transactions = transactions;
+                }
+            } catch (e) {
+                console.warn('Could not access localStorage for export:', e);
+            }
+        } else {
+            // If consent not granted, read current values from DOM
+            const domValues = getValuesFromDOM();
+            Object.assign(data.cookies, domValues);
+            
+            // Note: transactions won't be available without consent
+            // as they require localStorage
+        }
+        
+        // Convert to JSON and then to base64
+        const jsonString = JSON.stringify(data);
+        // Use modern approach for UTF-8 encoding before base64
+        const utf8Bytes = new TextEncoder().encode(jsonString);
+        const binaryString = Array.from(utf8Bytes, byte => String.fromCharCode(byte)).join('');
+        const base64String = btoa(binaryString);
+        
+        return base64String;
+    } catch (e) {
+        console.error('Failed to export data:', e);
+        throw new Error('Failed to export data. Please try again.');
+    }
+}
+
+/**
+ * Import data from a base64-encoded string
+ * @param {string} base64String - Base64-encoded JSON string containing data to import
+ * @returns {boolean} True if import was successful
+ */
+function importData(base64String) {
+    try {
+        // Validate input
+        if (!base64String || typeof base64String !== 'string') {
+            throw new Error('Invalid import data');
+        }
+        
+        // Decode base64 and parse JSON using modern approach
+        const binaryString = atob(base64String.trim());
+        const utf8Bytes = Uint8Array.from(binaryString, char => char.charCodeAt(0));
+        const jsonString = new TextDecoder().decode(utf8Bytes);
+        const data = JSON.parse(jsonString);
+        
+        // Validate data structure
+        if (!data.version || !data.cookies || !data.localStorage) {
+            throw new Error('Invalid data format');
+        }
+        
+        // Import cookies
+        Object.keys(data.cookies).forEach(name => {
+            const fullName = `crypto_calc_${name}`;
+            setCookie(fullName, data.cookies[name], 365);
+        });
+        
+        // Import localStorage
+        try {
+            if (data.localStorage.consent) {
+                localStorage.setItem('crypto_calc_consent', data.localStorage.consent);
+            }
+            
+            if (data.localStorage.transactions) {
+                localStorage.setItem('crypto_calc_transactions', data.localStorage.transactions);
+            }
+        } catch (e) {
+            console.warn('Could not access localStorage for import:', e);
+        }
+        
+        return true;
+    } catch (e) {
+        console.error('Failed to import data:', e);
+        throw new Error('Failed to import data. Please check the format and try again.');
+    }
+}
+
+/**
+ * Copy text to clipboard
+ * @param {string} text - Text to copy
+ * @returns {Promise<boolean>} True if copy was successful
+ */
+async function copyToClipboard(text) {
+    try {
+        // Modern clipboard API
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+        
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        
+        return successful;
+    } catch (e) {
+        console.error('Failed to copy to clipboard:', e);
+        return false;
+    }
+}
+
+/**
+ * Share text using Web Share API (mobile)
+ * @param {string} text - Text to share
+ * @returns {Promise<boolean>} True if share was successful
+ */
+async function shareText(text) {
+    try {
+        if (navigator.share) {
+            await navigator.share({
+                title: 'Crypto Calculator Data',
+                text: text
+            });
+            return true;
+        }
+        return false;
+    } catch (e) {
+        // User cancelled or share failed
+        console.log('Share cancelled or failed:', e);
+        return false;
+    }
+}
+
+/**
+ * Download data as a file
+ * @param {string} data - Data to download
+ * @param {string} filename - Name of the file
+ */
+function downloadFile(data, filename) {
+    try {
+        // Create a blob from the data
+        const blob = new Blob([data], { type: 'text/plain' });
+        
+        // Create a temporary URL for the blob
+        const url = URL.createObjectURL(blob);
+        
+        // Create a temporary anchor element
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        
+        // Append to document, click, and remove
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        // Release the URL
+        URL.revokeObjectURL(url);
+        
+        return true;
+    } catch (e) {
+        console.error('Failed to download file:', e);
+        return false;
+    }
+}
+
+/**
+ * Handle share button click - shares data via clipboard or Web Share API
+ */
+async function handleShare() {
+    try {
+        const exportedData = exportData();
+        
+        // Try to share using Web Share API first (works on mobile and some desktop browsers)
+        if (navigator.share) {
+            try {
+                const shared = await shareText(exportedData);
+                if (shared) {
+                    alert('Data ready to share!');
+                    return;
+                }
+                // If shareText returns false, fall through to clipboard
+                console.log('Share not supported, trying clipboard');
+            } catch (e) {
+                // User cancelled or error occurred, fall through to clipboard
+                console.log('Share cancelled or failed, trying clipboard:', e.message);
+            }
+        }
+        
+        // Fallback to copy to clipboard
+        const copied = await copyToClipboard(exportedData);
+        if (copied) {
+            alert('Data copied to clipboard!\n\nYou can now paste it to save or share.');
+        } else {
+            // Last resort: show in a dialog for manual copy
+            const message = 'Copy this data to save or share:\n\n' + exportedData;
+            prompt(message, exportedData);
+        }
+    } catch (e) {
+        alert(e.message || 'Failed to share data');
+    }
+}
+
+/**
+ * Handle download button click - downloads data as a file
+ */
+async function handleDownload() {
+    try {
+        const exportedData = exportData();
+        
+        // Generate filename with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+        const filename = `crypto-calculator-data-${timestamp}.txt`;
+        
+        // Try to download the file
+        const downloaded = downloadFile(exportedData, filename);
+        
+        if (downloaded) {
+            alert('Data downloaded successfully!\n\nFile: ' + filename);
+        } else {
+            // Fallback: try to copy to clipboard instead
+            const copied = await copyToClipboard(exportedData);
+            if (copied) {
+                alert('Download not supported by your browser.\n\nData copied to clipboard instead!');
+            } else {
+                // Last resort: show in a dialog for manual copy
+                const message = 'Copy this data to save:\n\n' + exportedData;
+                prompt(message, exportedData);
+            }
+        }
+    } catch (e) {
+        alert(e.message || 'Failed to download data');
+    }
+}
+
+/**
+ * Handle export button click (legacy - kept for compatibility)
+ */
+async function handleExport() {
+    try {
+        const exportedData = exportData();
+        
+        // Export always returns a valid base64 string
+        // No need to check length as it will always have at least the structure
+        
+        // Try to share using Web Share API first (works on mobile and some desktop browsers)
+        if (navigator.share) {
+            try {
+                const shared = await shareText(exportedData);
+                if (shared) {
+                    alert('Data exported and ready to share!');
+                    return;
+                }
+                // If shareText returns false, fall through to clipboard
+                console.log('Share not supported, trying clipboard');
+            } catch (e) {
+                // User cancelled or error occurred, fall through to clipboard
+                console.log('Share cancelled or failed, trying clipboard:', e.message);
+            }
+        }
+        
+        // Fallback to copy to clipboard
+        const copied = await copyToClipboard(exportedData);
+        if (copied) {
+            alert('Data exported and copied to clipboard!\n\nYou can now paste it to save or share.');
+        } else {
+            // Last resort: show in a dialog for manual copy
+            const message = 'Copy this data to save or share:\n\n' + exportedData;
+            prompt(message, exportedData);
+        }
+    } catch (e) {
+        alert(e.message || 'Failed to export data');
+    }
+}
+
+/**
+ * Handle import button click
+ */
+function handleImport() {
+    // Check for consent first
+    if (!hasConsent()) {
+        alert('Please accept cookie consent first before importing data.');
+        return;
+    }
+    
+    const data = prompt('Paste your exported data here:');
+    
+    if (!data) {
+        return; // User cancelled
+    }
+    
+    try {
+        const success = importData(data);
+        if (success) {
+            alert('Data imported successfully! The page will now reload to apply the changes.');
+            window.location.reload();
+        }
+    } catch (e) {
+        alert(e.message || 'Failed to import data');
+    }
+}
+
 // Detect user's currency based on locale
 function detectUserCurrency() {
     try {
@@ -1143,12 +1543,14 @@ function loadTransactions() {
 // Save transactions to localStorage
 function saveTransactions(transactions) {
     if (!hasConsent()) {
-        return; // Don't save to localStorage without consent
+        return false; // Don't save to localStorage without consent
     }
     try {
         localStorage.setItem('crypto_calc_transactions', JSON.stringify(transactions));
+        return true;
     } catch (e) {
         console.error('Failed to save transactions:', e);
+        return false;
     }
 }
 
@@ -1408,15 +1810,26 @@ function initEventListeners() {
 
         const transactions = loadTransactions();
         transactions.push(transaction);
-        saveTransactions(transactions);
-        renderTransactions();
+        const saved = saveTransactions(transactions);
+        
+        if (saved) {
+            alert('Transaction saved successfully!');
+            renderTransactions();
+        } else {
+            alert('Failed to save transaction. Your browser may have localStorage disabled or full. Please check your browser settings.');
+        }
     });
 
     // Clear all transactions
     document.getElementById('clearAllTransactions').addEventListener('click', function() {
         if (confirm('Are you sure you want to delete all saved transactions?')) {
-            saveTransactions([]);
-            renderTransactions();
+            const cleared = saveTransactions([]);
+            if (cleared) {
+                alert('All transactions cleared successfully!');
+                renderTransactions();
+            } else {
+                alert('Failed to clear transactions. Your browser may have localStorage disabled. Please check your browser settings.');
+            }
         }
     });
 
