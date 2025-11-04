@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Tailwind CSS output
+dist/
+
 # Build artifacts
 *.log
 npm-debug.log*
