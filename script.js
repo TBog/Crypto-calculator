@@ -161,6 +161,7 @@ const CHART_CONFIG = {
 };
 
 // Worker API configuration
+// This URL will be replaced during GitHub Pages deployment with the appropriate worker URL
 const WORKER_BASE_URL = 'https://crypto-cache.tbog.workers.dev';
 
 // Crypto currencies (for worker validation, not used in frontend selector)

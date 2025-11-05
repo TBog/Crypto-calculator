@@ -1,5 +1,5 @@
 name = "crypto-cache"
-main = "index.js"
+main = "worker/index.js"
 compatibility_date = "2024-10-01"
 
 # Environment bindings

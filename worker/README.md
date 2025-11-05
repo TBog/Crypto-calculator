@@ -21,6 +21,58 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
 
 ## Deployment Steps
 
+The `wrangler.toml` file is located at the repository root to enable Cloudflare's automatic deployment features.
+
+### Option 1: Cloudflare Dashboard Integration (Recommended)
+
+Cloudflare's built-in GitHub integration automatically detects `wrangler.toml` at the repository root and deploys your worker:
+
+1. **Connect Repository to Cloudflare**:
+   - Go to your [Cloudflare Dashboard](https://dash.cloudflare.com/)
+   - Navigate to Workers & Pages
+   - Click "Create Application" → "Pages" → "Connect to Git"
+   - Select this repository and authorize the GitHub app
+
+2. **Configure Build Settings**:
+   - Framework preset: None
+   - Build command: (leave empty for Workers)
+   - Build output directory: (leave empty)
+   - Cloudflare automatically detects `wrangler.toml` at the root and uses it to deploy
+
+3. **Set Environment Variables**:
+   - In the Cloudflare dashboard, go to your Worker settings
+   - Add `COINGECKO_KEY` as an environment variable (encrypted)
+   - This will be available to your worker via `env.COINGECKO_KEY`
+
+4. **Automatic Deployments**:
+   - **Production**: Pushes to `main` branch automatically deploy the worker to production
+   - **Preview**: Pull requests automatically create preview deployments with unique URLs
+   - Each PR gets a preview URL like: `https://<commit-hash>.crypto-cache.pages.dev`
+
+**How it works**: Cloudflare reads `wrangler.toml` from the repository root, finds `main = "worker/index.js"`, and deploys the worker code automatically on every push.
+
+### Option 2: GitHub Actions Deployment
+
+Use the `.github/workflows/deploy-worker.yml` workflow to deploy via GitHub Actions:
+
+1. **Set GitHub Secrets**:
+   - `CLOUDFLARE_API_TOKEN`: Your Cloudflare API token ([Get one here](https://dash.cloudflare.com/profile/api-tokens))
+   - `CLOUDFLARE_ACCOUNT_ID`: Your Cloudflare account ID
+
+2. **Automatic Deployment**:
+   - Workflow runs on push to `main` when worker files change
+   - Uses `wrangler.toml` at the root to deploy the worker
+   - Can also be triggered manually via workflow_dispatch
+
+3. **Set Worker Secrets** (one-time setup):
+   ```bash
+   wrangler secret put COINGECKO_KEY
+   ```
+
+**How it works**: GitHub Actions uses the official `cloudflare/wrangler-action` which reads `wrangler.toml` from the root and runs `wrangler deploy`.
+
+### Option 3: Manual Deployment with Wrangler CLI
+
 ### Prerequisites
 
 1. A [Cloudflare account](https://dash.cloudflare.com/sign-up)
@@ -38,41 +90,34 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
    wrangler login
    ```
 
-3. **Create a wrangler.toml file** in the worker directory:
-   ```toml
-   name = "crypto-cache"
-   main = "index.js"
-   compatibility_date = "2024-10-01"
-   
-   [env.production]
-   # Add your environment variables here after deployment
-   ```
-
-4. **Deploy the worker**:
+3. **Deploy the worker** from the repository root:
    ```bash
-   cd worker
    wrangler deploy
    ```
+   
+   Wrangler reads `wrangler.toml` from the root, which specifies `main = "worker/index.js"` to deploy the worker code.
 
-5. **Set the API Key** (optional, but recommended):
+4. **Set the API Key** (optional, but recommended):
    ```bash
    wrangler secret put COINGECKO_KEY
    ```
    When prompted, enter your CoinGecko API key.
 
-6. **Note your Worker URL**: After deployment, Wrangler will display your worker URL (e.g., `https://crypto-cache.YOUR_SUBDOMAIN.workers.dev`)
+5. **Note your Worker URL**: After deployment, Wrangler will display your worker URL (e.g., `https://crypto-cache.YOUR_SUBDOMAIN.workers.dev`)
 
-### Update the Frontend
+## Frontend Deployment
 
-After deploying the worker, update the `index.html` file:
+The frontend (HTML/JS) is deployed separately to GitHub Pages via `.github/workflows/deploy-pages.yml`. This workflow:
 
-1. Find the `fetchBTCPrice` function
-2. Replace `YOUR_WORKER_URL.workers.dev` with your actual worker URL from deployment
+1. **Determines the correct Worker URL** based on the deployment type:
+   - Production (main branch): `https://crypto-cache.tbog.workers.dev`
+   - PR previews: `https://<commit-hash>.crypto-cache.pages.dev` (assuming Cloudflare Pages preview is set up)
 
-Example:
-```javascript
-const workerUrl = `https://crypto-cache.YOUR_SUBDOMAIN.workers.dev/api/v3/simple/price?ids=bitcoin&vs_currencies=${currencyLower}`;
-```
+2. **Replaces WORKER_BASE_URL** in `script.js` at build time with the appropriate URL
+
+3. **Deploys to GitHub Pages** so the frontend can call the worker API
+
+This separation allows the worker and frontend to be deployed independently while ensuring they work together correctly.
 
 ## Testing
 
