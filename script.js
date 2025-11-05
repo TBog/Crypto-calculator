@@ -1638,12 +1638,12 @@ async function renderTransactions() {
         const row = document.createElement('tr');
         row.className = 'border-b dark:border-gray-600';
         row.innerHTML = `
-            <td class="py-2 px-2">${formatTransactionCurrency(tx.investment, tx.currency)}</td>
-            <td class="py-2 px-2">${formatTransactionCurrency(tx.buyPrice, tx.currency)}</td>
-            <td class="py-2 px-2">${coinsPurchased.toFixed(8)}</td>
-            <td class="py-2 px-2 ${breakEvenClass}" title="${breakEvenTooltip}">${coinsToSellBreakEven.toFixed(8)}</td>
-            <td class="py-2 px-2">${coinsToSellForProfit.toFixed(8)}</td>
-            <td class="py-2 px-2 font-semibold ${profitClass}">${formatTransactionCurrency(netProfit, tx.currency)}</td>
+            <td class="py-2 px-2 whitespace-nowrap">${formatTransactionCurrency(tx.investment, tx.currency)}</td>
+            <td class="py-2 px-2 whitespace-nowrap">${formatTransactionCurrency(tx.buyPrice, tx.currency)}</td>
+            <td class="py-2 px-2 whitespace-nowrap">${coinsPurchased.toFixed(8)}</td>
+            <td class="py-2 px-2 whitespace-nowrap ${breakEvenClass}" title="${breakEvenTooltip}">${coinsToSellBreakEven.toFixed(8)}</td>
+            <td class="py-2 px-2 whitespace-nowrap">${coinsToSellForProfit.toFixed(8)}</td>
+            <td class="py-2 px-2 whitespace-nowrap font-semibold ${profitClass}">${formatTransactionCurrency(netProfit, tx.currency)}</td>
             <td class="py-2 px-2">
                 <button 
                     data-index="${i}"
