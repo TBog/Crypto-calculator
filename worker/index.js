@@ -250,13 +250,14 @@ function convertSimplePriceData(data, exchangeRate, targetCurrency) {
  * Uses cache to avoid repeated API calls
  * @param {Object} env - Environment variables
  * @param {Object} ctx - Execution context
+ * @param {number} days - Number of days of history (1, 7, 30, or 90)
  * @returns {Promise<{data: Object, cacheStatus: string}>} Price history data with cache status
  */
-async function fetchPriceHistory(env, ctx) {
+async function fetchPriceHistory(env, ctx, days = 1) {
   try {
     return await fetchFromCoinGecko(
-      '/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=1',
-      'price-history-usd-24h',
+      `/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${days}`,
+      `price-history-usd-${days}d`,
       PRICE_HISTORY_CACHE_TTL,
       env,
       ctx
@@ -270,9 +271,10 @@ async function fetchPriceHistory(env, ctx) {
 /**
  * Convert price history data to human-readable text for LLM
  * @param {Object} priceData - Price history data from CoinGecko
+ * @param {string} periodLabel - Period label (e.g., "Last 24 Hours", "Last 7 Days")
  * @returns {string} Human-readable text description
  */
-function convertPriceHistoryToText(priceData) {
+function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
   if (!priceData || !priceData.prices || priceData.prices.length === 0) {
     return "No price data available.";
   }
@@ -307,7 +309,7 @@ function convertPriceHistoryToText(priceData) {
   const lowTimeFormatted = new Date(lowTime).toISOString();
   
   // Create hourly summary (sample every few hours for brevity)
-  let hourlySummary = "Hourly price points:\n";
+  let hourlySummary = "Price points:\n";
   const sampleInterval = Math.max(1, Math.floor(prices.length / 12)); // Sample ~12 points
   for (let i = 0; i < prices.length; i += sampleInterval) {
     const [timestamp, price] = prices[i];
@@ -315,7 +317,7 @@ function convertPriceHistoryToText(priceData) {
     hourlySummary += `- ${time}: $${price.toFixed(2)}\n`;
   }
   
-  const text = `Bitcoin (BTC) Price Analysis for the Last 24 Hours (in USD):
+  const text = `Bitcoin (BTC) Price Analysis for the ${periodLabel} (in USD):
 
 Period: ${startTime} to ${endTime}
 
@@ -323,8 +325,8 @@ Summary Statistics:
 - Starting Price: $${startPrice.toFixed(2)}
 - Ending Price: $${endPrice.toFixed(2)}
 - Price Change: $${priceChange.toFixed(2)} (${priceChangePercent}%)
-- 24h High: $${highPrice.toFixed(2)} at ${highTimeFormatted}
-- 24h Low: $${lowPrice.toFixed(2)} at ${lowTimeFormatted}
+- Period High: $${highPrice.toFixed(2)} at ${highTimeFormatted}
+- Period Low: $${lowPrice.toFixed(2)} at ${lowTimeFormatted}
 - Volatility Range: $${(highPrice - lowPrice).toFixed(2)}
 
 ${hourlySummary}
@@ -338,10 +340,20 @@ Total data points: ${prices.length}`;
  * Generate LLM summary of Bitcoin price trends
  * @param {Object} env - Environment variables (includes AI binding)
  * @param {Object} ctx - Execution context
+ * @param {string} period - Time period ('24h', '7d', '30d', '90d')
  * @returns {Promise<{summary: Object, cacheStatus: string}>} Summary response with cache status
  */
-async function generatePriceSummary(env, ctx) {
-  const cacheKey = 'btc-price-summary';
+async function generatePriceSummary(env, ctx, period = '24h') {
+  // Map period to days and labels
+  const periodConfig = {
+    '24h': { days: 1, label: 'Last 24 Hours' },
+    '7d': { days: 7, label: 'Last 7 Days' },
+    '30d': { days: 30, label: 'Last 30 Days' },
+    '90d': { days: 90, label: 'Last 3 Months' }
+  };
+  
+  const config = periodConfig[period] || periodConfig['24h'];
+  const cacheKey = `btc-price-summary-${period}`;
   const cache = caches.default;
   
   // Try to get from cache first
@@ -354,11 +366,11 @@ async function generatePriceSummary(env, ctx) {
   }
   
   // Fetch price history (will use cache if available)
-  const priceResult = await fetchPriceHistory(env, ctx);
+  const priceResult = await fetchPriceHistory(env, ctx, config.days);
   const priceData = priceResult.data;
   
   // Convert to human-readable text
-  const priceText = convertPriceHistoryToText(priceData);
+  const priceText = convertPriceHistoryToText(priceData, config.label);
   
   // Generate summary using Cloudflare Workers AI
   try {
@@ -378,6 +390,7 @@ async function generatePriceSummary(env, ctx) {
     const summary = {
       summary: response.response || response,
       timestamp: Date.now(),
+      period: period,
       priceData: {
         startPrice: priceData.prices[0][1],
         endPrice: priceData.prices[priceData.prices.length - 1][1],
@@ -508,7 +521,25 @@ async function handleRequest(request, env, ctx) {
     // Special endpoint for LLM-powered Bitcoin price trend summary
     if (url.pathname === '/api/summary') {
       try {
-        const result = await generatePriceSummary(env, ctx);
+        // Get period parameter (default to 24h)
+        const period = searchParams.get('period') || '24h';
+        
+        // Validate period
+        const validPeriods = ['24h', '7d', '30d', '90d'];
+        if (!validPeriods.includes(period)) {
+          return new Response(JSON.stringify({
+            error: 'Invalid period parameter',
+            message: `Period must be one of: ${validPeriods.join(', ')}`
+          }), {
+            status: 400,
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'application/json'
+            }
+          });
+        }
+        
+        const result = await generatePriceSummary(env, ctx, period);
         
         return new Response(JSON.stringify(result.summary), {
           status: 200,
@@ -518,7 +549,8 @@ async function handleRequest(request, env, ctx) {
             'Cache-Control': `public, max-age=${SUMMARY_CACHE_TTL}`,
             'X-Cache-Status': result.cacheStatus,
             'X-Data-Source': 'CoinGecko API + Cloudflare Workers AI',
-            'X-Summary-Currency': 'USD'
+            'X-Summary-Currency': 'USD',
+            'X-Summary-Period': period
           }
         });
       } catch (error) {

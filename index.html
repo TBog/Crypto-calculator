@@ -809,6 +809,37 @@
                         <h3 class="text-lg font-bold text-gray-800 dark:text-white">🤖 AI Market Analysis</h3>
                     </div>
                     
+                    <!-- Period Selection -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Time Period</label>
+                        <div class="grid grid-cols-4 gap-2">
+                            <button 
+                                class="period-btn px-3 py-2 text-xs font-semibold rounded-md transition border-2 bg-purple-600 text-white border-purple-600"
+                                data-period="24h"
+                            >
+                                24 Hours
+                            </button>
+                            <button 
+                                class="period-btn px-3 py-2 text-xs font-semibold rounded-md transition border-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-purple-400"
+                                data-period="7d"
+                            >
+                                7 Days
+                            </button>
+                            <button 
+                                class="period-btn px-3 py-2 text-xs font-semibold rounded-md transition border-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-purple-400"
+                                data-period="30d"
+                            >
+                                30 Days
+                            </button>
+                            <button 
+                                class="period-btn px-3 py-2 text-xs font-semibold rounded-md transition border-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-purple-400"
+                                data-period="90d"
+                            >
+                                3 Months
+                            </button>
+                        </div>
+                    </div>
+                    
                     <!-- Request Summary Button (shown initially) -->
                     <div id="summaryRequestContainer">
                         <button 
@@ -819,7 +850,7 @@
                             ✨ Get AI Summary
                         </button>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
-                            Click to analyze 24-hour Bitcoin price trends using AI
+                            Click to analyze Bitcoin price trends using AI
                         </p>
                     </div>
 

@@ -677,11 +677,12 @@ function updateLastUpdateTime(cacheMetadata = null) {
 
 /**
  * Fetch AI-generated summary of Bitcoin price trends
+ * @param {string} period - Time period ('24h', '7d', '30d', '90d')
  * @returns {Promise<Object>} Summary response with metadata
  */
-async function fetchAISummary() {
+async function fetchAISummary(period = '24h') {
     try {
-        const workerUrl = `${WORKER_BASE_URL}/api/summary`;
+        const workerUrl = `${WORKER_BASE_URL}/api/summary?period=${period}`;
         const response = await fetch(workerUrl);
         
         if (!response.ok) {
@@ -799,13 +800,23 @@ function showSummaryError(errorMessage) {
 }
 
 /**
+ * Get the currently selected period
+ * @returns {string} Selected period ('24h', '7d', '30d', '90d')
+ */
+function getSelectedPeriod() {
+    const selectedBtn = document.querySelector('.period-btn.bg-purple-600');
+    return selectedBtn ? selectedBtn.dataset.period : '24h';
+}
+
+/**
  * Request and display AI summary
  */
 async function requestAISummary() {
     showSummaryLoading();
     
     try {
-        const result = await fetchAISummary();
+        const period = getSelectedPeriod();
+        const result = await fetchAISummary(period);
         displaySummary(result.data, result.cacheMetadata);
     } catch (error) {
         showSummaryError('Failed to generate AI summary. Please try again.');
@@ -1898,6 +1909,19 @@ function initEventListeners() {
 
     document.getElementById('retrySummary').addEventListener('click', async function() {
         await requestAISummary();
+    });
+
+    // Period selection button handlers
+    document.querySelectorAll('.period-btn').forEach(button => {
+        button.addEventListener('click', function() {
+            // Update button styles
+            document.querySelectorAll('.period-btn').forEach(btn => {
+                btn.classList.remove('bg-purple-600', 'text-white', 'border-purple-600');
+                btn.classList.add('bg-white', 'dark:bg-gray-800', 'text-gray-700', 'dark:text-gray-300', 'border-gray-300', 'dark:border-gray-600');
+            });
+            this.classList.remove('bg-white', 'dark:bg-gray-800', 'text-gray-700', 'dark:text-gray-300', 'border-gray-300', 'dark:border-gray-600');
+            this.classList.add('bg-purple-600', 'text-white', 'border-purple-600');
+        });
     });
 
     // Save values and recalculate when inputs change
