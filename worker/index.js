@@ -502,6 +502,7 @@ async function handleRequest(request, env, ctx) {
   try {
     // Parse the request URL to get the query parameters
     const url = new URL(request.url);
+    const searchParams = new URLSearchParams(url.search);
     
     // Special endpoint to get supported currencies from CoinGecko
     if (url.pathname === '/api/v3/simple/supported_vs_currencies') {
@@ -570,8 +571,6 @@ async function handleRequest(request, env, ctx) {
     
     // Fetch supported currencies list for validation
     const supportedCurrencies = await fetchSupportedCurrencies(env, ctx);
-    
-    const searchParams = new URLSearchParams(url.search);
     
     // Check if this is a request that uses vs_currency parameter
     const vsCurrency = searchParams.get('vs_currency') || searchParams.get('vs_currencies');
