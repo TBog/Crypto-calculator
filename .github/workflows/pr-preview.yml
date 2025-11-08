@@ -35,7 +35,11 @@ jobs:
         run: npm ci
 
       - name: Copy static files to `dist/`
-        run: rsync -av --delete --exclude 'worker/' --exclude 'src/' --exclude 'node_modules/' --exclude '.git/' --exclude '.github/' --exclude 'dist/' ./ dist/
+        run: |
+          # Copy favicons and other root assets
+          cp favicon.ico favicon-192.png dist/
+          # Copy source files (HTML, JS)
+          cp src/index.html src/script.js dist/
 
       - name: Build Tailwind CSS
         run: npm run build:css
