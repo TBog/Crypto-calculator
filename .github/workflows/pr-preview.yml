@@ -41,7 +41,7 @@ jobs:
         run: npm run build:css
 
       - name: List all files for debug purposes
-        if: ${{ env.ACTIONS_STEP_DEBUG == 'true' || env.ACTIONS_RUNNER_DEBUG == 'true' }}
+        if: ${{ runner.debug == '1' }}
         run: ls -RF ./
 
       - name: Deploy preview
