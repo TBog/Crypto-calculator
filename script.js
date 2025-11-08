@@ -660,8 +660,9 @@ function updateLastUpdateTime(cacheMetadata = null) {
                 const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
                 const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
                 const remainingMinutes = Math.floor(remainingSeconds / 60);
+                const remainingSecondsDisplay = remainingSeconds % 60;
                 
-                displayText += ` (cached, expires in ${remainingMinutes}m)`;
+                displayText += ` (cached, expires in ${remainingMinutes}m ${remainingSecondsDisplay}s)`;
             } else if (status === 'MISS' && maxAge) {
                 // Fresh data from backend
                 const expiresMinutes = Math.floor(maxAge / 60);
@@ -743,8 +744,9 @@ function updateSummaryTime(cacheMetadata = null) {
                 const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
                 const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
                 const remainingMinutes = Math.floor(remainingSeconds / 60);
+                const remainingSecondsDisplay = remainingSeconds % 60;
                 
-                displayText += ` (cached, expires in ${remainingMinutes}m)`;
+                displayText += ` (cached, expires in ${remainingMinutes}m ${remainingSecondsDisplay}s)`;
             } else if (status === 'MISS' && maxAge) {
                 // Fresh data from backend
                 const expiresMinutes = Math.floor(maxAge / 60);
