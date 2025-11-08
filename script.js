@@ -772,8 +772,8 @@ function displaySummary(summaryData, cacheMetadata) {
     loadingContainer.style.display = 'none';
     displayContainer.style.display = 'block';
     
-    // Display the summary text
-    summaryText.textContent = summaryData.summary;
+    // Parse markdown and display as HTML (parseMarkdown is defined in markdown-parser.js)
+    summaryText.innerHTML = parseMarkdown(summaryData.summary);
     
     // Update the timestamp with cache info
     updateSummaryTime(cacheMetadata);
