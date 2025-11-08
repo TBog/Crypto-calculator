@@ -682,7 +682,7 @@ function updateLastUpdateTime(cacheMetadata = null) {
  */
 async function fetchAISummary(period = '24h') {
     try {
-        const workerUrl = `${WORKER_BASE_URL}/api/summary?period=${period}`;
+        const workerUrl = `${WORKER_BASE_URL}/ai/summary?period=${period}`;
         const response = await fetch(workerUrl);
         
         if (!response.ok) {

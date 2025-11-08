@@ -141,7 +141,7 @@ All CoinGecko API v3 endpoints are proxied through the worker:
 
 **Get Bitcoin Price Trend Summary (AI-Powered):**
 ```
-GET /api/summary
+GET /ai/summary
 ```
 
 Returns an AI-generated natural language summary of Bitcoin price trends over the last 24 hours. The summary is generated using Cloudflare Workers AI analyzing USD price data.

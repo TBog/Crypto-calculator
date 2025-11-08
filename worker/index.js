@@ -519,7 +519,7 @@ async function handleRequest(request, env, ctx) {
     }
     
     // Special endpoint for LLM-powered Bitcoin price trend summary
-    if (url.pathname === '/api/summary') {
+    if (url.pathname === '/ai/summary') {
       try {
         // Get period parameter (default to 24h)
         const period = searchParams.get('period') || '24h';
