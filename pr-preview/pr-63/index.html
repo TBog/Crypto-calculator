@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Profit Calculator</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png">
+    <link rel="stylesheet" href="output.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <style>
+        @keyframes digitChange {
+            0% {
+                opacity: 0.5;
+                transform: scale(0.95);
+            }
+            50% {
+                opacity: 0.8;
+                transform: scale(1.05);
+            }
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        .animate-digit {
+            animation: digitChange 0.3s ease-in-out;
+        }
+
+        /* Smooth slide-down animation for results */
+        #results {
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transition: max-height 0.5s ease-out, opacity 0.3s ease-out;
+        }
+
+        #results.show {
+            max-height: 500px;
+            opacity: 1;
+        }
+
+        /* Individual digit animation */
+        @keyframes digitFlip {
+            0% {
+                transform: rotateX(0deg);
+                opacity: 1;
+            }
+            50% {
+                transform: rotateX(90deg);
+                opacity: 0.5;
+            }
+            100% {
+                transform: rotateX(0deg);
+                opacity: 1;
+            }
+        }
+
+        .digit-flip {
+            display: inline-block;
+            animation: digitFlip 0.4s ease-in-out;
+        }
+
+        /* Cookie consent banner styles */
+        #cookieConsent {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(255, 255, 255, 0.98);
+            border-top: 1px solid #e5e7eb;
+            box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            transform: translateY(100%);
+            transition: transform 0.3s ease-in-out;
+        }
+
+        #cookieConsent.show {
+            transform: translateY(0);
+        }
+
+        .dark #cookieConsent {
+            background: rgba(31, 41, 55, 0.98);
+            border-top: 1px solid #4b5563;
+        }
+
+        /* Dark mode fallback styles - ensures dark mode works even if Tailwind config fails */
+        .dark body {
+            background-color: rgb(17, 24, 39);
+            color: rgb(229, 231, 235);
+        }
+
+        .dark .bg-white {
+            background-color: rgb(31, 41, 55) !important;
+        }
+
+        .dark .bg-gray-50 {
+            background-color: rgb(55, 65, 81) !important;
+        }
+
+        .dark .bg-gray-100 {
+            background-color: rgb(17, 24, 39) !important;
+        }
+
+        .dark .bg-gray-200 {
+            background-color: rgb(55, 65, 81) !important;
+        }
+
+        .dark .bg-gray-700 {
+            background-color: rgb(75, 85, 99) !important;
+        }
+
+        .dark .text-gray-800, 
+        .dark .text-gray-700,
+        .dark .text-gray-600 {
+            color: rgb(229, 231, 235) !important;
+        }
+
+        .dark .text-gray-400,
+        .dark .text-gray-300 {
+            color: rgb(209, 213, 219) !important;
+        }
+
+        .dark h1, .dark h2, .dark h3 {
+            color: rgb(255, 255, 255) !important;
+        }
+
+        .dark input, .dark select {
+            background-color: rgb(55, 65, 81) !important;
+            border-color: rgb(75, 85, 99) !important;
+            color: rgb(255, 255, 255) !important;
+        }
+
+        .dark .border-gray-300,
+        .dark .border-gray-200 {
+            border-color: rgb(75, 85, 99) !important;
+        }
+
+        .dark .border-gray-600 {
+            border-color: rgb(75, 85, 99) !important;
+        }
+
+        .dark .border-gray-700 {
+            border-color: rgb(75, 85, 99) !important;
+        }
+
+        .dark button:not(.bg-blue-600):not(.bg-green-600):not(.bg-red-600):not(.bg-red-500) {
+            background-color: rgb(55, 65, 81) !important;
+        }
+
+        .dark button:hover:not(.bg-blue-600):not(.bg-green-600):not(.bg-red-600):not(.bg-red-500) {
+            background-color: rgb(75, 85, 99) !important;
+        }
+
+        /* Searchable dropdown styles */
+        .currency-dropdown-container {
+            position: relative;
+        }
+
+        .currency-dropdown-list {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 300px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #d1d5db;
+            border-top: none;
+            border-radius: 0 0 0.375rem 0.375rem;
+            z-index: 10;
+            display: none;
+        }
+
+        .dark .currency-dropdown-list {
+            background: rgb(55, 65, 81);
+            border-color: rgb(75, 85, 99);
+        }
+
+        .currency-dropdown-list.show {
+            display: block;
+        }
+
+        .currency-option {
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            transition: background-color 0.15s ease-in-out;
+        }
+
+        .currency-option:hover {
+            background-color: #f3f4f6;
+        }
+
+        .dark .currency-option:hover {
+            background-color: rgb(75, 85, 99);
+        }
+
+        .currency-option.selected {
+            background-color: #dbeafe;
+        }
+
+        .dark .currency-option.selected {
+            background-color: rgb(30, 58, 138);
+        }
+
+        .currency-option.hidden {
+            display: none;
+        }
+
+        /* Toggle switch styles */
+        #autoRefreshToggle[aria-checked="true"] {
+            background-color: #3b82f6;
+        }
+
+        .dark #autoRefreshToggle[aria-checked="true"] {
+            background-color: #2563eb;
+        }
+
+        #autoRefreshToggle[aria-checked="true"] span {
+            transform: translateX(1.25rem);
+        }
+
+        /* Hide elements based on viewport width using media queries */
+        /* This ensures proper behavior when switching to desktop mode on mobile */
+        .mobile-only {
+            display: none;
+        }
+
+        .desktop-only {
+            display: block;
+        }
+
+        /* Show mobile selector and hide desktop selector on narrow viewports */
+        @media (max-width: 768px) {
+            .desktop-only {
+                display: none !important;
+            }
+
+            .mobile-only {
+                display: block;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 min-h-screen py-8 px-4 transition-colors duration-200">
+    <div class="max-w-2xl lg:max-w-7xl mx-auto">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 md:p-8">
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-3xl font-bold text-gray-800 dark:text-white">Crypto Profit Calculator</h1>
+                <div class="flex gap-2">
+                    <button 
+                        id="cookieSettings" 
+                        class="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                        title="Cookie settings"
+                    >
+                        <svg class="w-6 h-6 text-gray-700 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
+                        </svg>
+                    </button>
+                    <button 
+                        id="darkModeToggle" 
+                        class="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                        title="Toggle dark mode"
+                    >
+                        <svg id="sunIcon" class="w-6 h-6 text-yellow-500 hidden" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd"></path>
+                        </svg>
+                        <svg id="moonIcon" class="w-6 h-6 text-gray-700 dark:text-gray-300" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Two-column layout on desktop: form on left, chart on right -->
+            <div class="lg:grid lg:grid-cols-2 lg:gap-6">
+                <!-- Left column: Form and Results -->
+                <div>
+            <form id="calcForm" class="space-y-4">
+                <div>
+                    <label for="investment" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Investment Amount
+                    </label>
+                    <input 
+                        type="number" 
+                        id="investment" 
+                        step="0.01"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        placeholder="Enter investment amount"
+                    />
+                </div>
+
+                <div>
+                    <label for="buyPrice" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Buy Price
+                    </label>
+                    <input 
+                        type="number" 
+                        id="buyPrice" 
+                        step="0.01"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        placeholder="Enter buy price"
+                    />
+                </div>
+
+                <div>
+                    <label for="sellPrice" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Sell Price
+                    </label>
+                    <div class="flex gap-2">
+                        <input 
+                            type="number" 
+                            id="sellPrice" 
+                            step="0.01"
+                            class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            placeholder="Enter sell price"
+                        />
+                        <button
+                            type="button"
+                            id="refreshPrice"
+                            class="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-md transition"
+                            title="Refresh current BTC price"
+                        >
+                            🔄
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="fee" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Fee (%)
+                    </label>
+                    <input 
+                        type="number" 
+                        id="fee" 
+                        step="0.001"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        placeholder="Enter fee percentage"
+                    />
+                </div>
+
+                <div>
+                    <label for="currencySearch" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Currency
+                    </label>
+                    
+                    <!-- Custom searchable dropdown for desktop -->
+                    <div class="currency-dropdown-container desktop-only">
+                        <input 
+                            type="text" 
+                            id="currencySearch" 
+                            class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            placeholder="Search currency..."
+                            autocomplete="off"
+                        />
+                        <div id="currencyDropdown" class="currency-dropdown-list">
+                            <div class="currency-option selected" data-value="USD">USD - US Dollar</div>
+                            <div class="currency-option" data-value="AED">AED - UAE Dirham</div>
+                            <div class="currency-option" data-value="AFN">AFN - Afghan Afghani</div>
+                            <div class="currency-option" data-value="ALL">ALL - Albanian Lek</div>
+                            <div class="currency-option" data-value="AMD">AMD - Armenian Dram</div>
+                            <div class="currency-option" data-value="ANG">ANG - Netherlands Antillean Guilder</div>
+                            <div class="currency-option" data-value="AOA">AOA - Angolan Kwanza</div>
+                            <div class="currency-option" data-value="ARS">ARS - Argentine Peso</div>
+                            <div class="currency-option" data-value="AUD">AUD - Australian Dollar</div>
+                            <div class="currency-option" data-value="AWG">AWG - Aruban Florin</div>
+                            <div class="currency-option" data-value="AZN">AZN - Azerbaijani Manat</div>
+                            <div class="currency-option" data-value="BAM">BAM - Bosnia-Herzegovina Convertible Mark</div>
+                            <div class="currency-option" data-value="BBD">BBD - Barbadian Dollar</div>
+                            <div class="currency-option" data-value="BDT">BDT - Bangladeshi Taka</div>
+                            <div class="currency-option" data-value="BGN">BGN - Bulgarian Lev</div>
+                            <div class="currency-option" data-value="BHD">BHD - Bahraini Dinar</div>
+                            <div class="currency-option" data-value="BIF">BIF - Burundian Franc</div>
+                            <div class="currency-option" data-value="BMD">BMD - Bermudian Dollar</div>
+                            <div class="currency-option" data-value="BND">BND - Brunei Dollar</div>
+                            <div class="currency-option" data-value="BOB">BOB - Bolivian Boliviano</div>
+                            <div class="currency-option" data-value="BRL">BRL - Brazilian Real</div>
+                            <div class="currency-option" data-value="BSD">BSD - Bahamian Dollar</div>
+                            <div class="currency-option" data-value="BTN">BTN - Bhutanese Ngultrum</div>
+                            <div class="currency-option" data-value="BWP">BWP - Botswana Pula</div>
+                            <div class="currency-option" data-value="BYN">BYN - Belarusian Ruble</div>
+                            <div class="currency-option" data-value="BZD">BZD - Belize Dollar</div>
+                            <div class="currency-option" data-value="CAD">CAD - Canadian Dollar</div>
+                            <div class="currency-option" data-value="CDF">CDF - Congolese Franc</div>
+                            <div class="currency-option" data-value="CHF">CHF - Swiss Franc</div>
+                            <div class="currency-option" data-value="CLF">CLF - Chilean Unit of Account</div>
+                            <div class="currency-option" data-value="CLP">CLP - Chilean Peso</div>
+                            <div class="currency-option" data-value="CNH">CNH - Chinese Yuan (Offshore)</div>
+                            <div class="currency-option" data-value="CNY">CNY - Chinese Yuan</div>
+                            <div class="currency-option" data-value="COP">COP - Colombian Peso</div>
+                            <div class="currency-option" data-value="CRC">CRC - Costa Rican Colón</div>
+                            <div class="currency-option" data-value="CUP">CUP - Cuban Peso</div>
+                            <div class="currency-option" data-value="CVE">CVE - Cape Verdean Escudo</div>
+                            <div class="currency-option" data-value="CZK">CZK - Czech Koruna</div>
+                            <div class="currency-option" data-value="DJF">DJF - Djiboutian Franc</div>
+                            <div class="currency-option" data-value="DKK">DKK - Danish Krone</div>
+                            <div class="currency-option" data-value="DOP">DOP - Dominican Peso</div>
+                            <div class="currency-option" data-value="DZD">DZD - Algerian Dinar</div>
+                            <div class="currency-option" data-value="EGP">EGP - Egyptian Pound</div>
+                            <div class="currency-option" data-value="ERN">ERN - Eritrean Nakfa</div>
+                            <div class="currency-option" data-value="ETB">ETB - Ethiopian Birr</div>
+                            <div class="currency-option" data-value="EUR">EUR - Euro</div>
+                            <div class="currency-option" data-value="FJD">FJD - Fijian Dollar</div>
+                            <div class="currency-option" data-value="FKP">FKP - Falkland Islands Pound</div>
+                            <div class="currency-option" data-value="FOK">FOK - Faroese Króna</div>
+                            <div class="currency-option" data-value="GBP">GBP - British Pound</div>
+                            <div class="currency-option" data-value="GEL">GEL - Georgian Lari</div>
+                            <div class="currency-option" data-value="GGP">GGP - Guernsey Pound</div>
+                            <div class="currency-option" data-value="GHS">GHS - Ghanaian Cedi</div>
+                            <div class="currency-option" data-value="GIP">GIP - Gibraltar Pound</div>
+                            <div class="currency-option" data-value="GMD">GMD - Gambian Dalasi</div>
+                            <div class="currency-option" data-value="GNF">GNF - Guinean Franc</div>
+                            <div class="currency-option" data-value="GTQ">GTQ - Guatemalan Quetzal</div>
+                            <div class="currency-option" data-value="GYD">GYD - Guyanese Dollar</div>
+                            <div class="currency-option" data-value="HKD">HKD - Hong Kong Dollar</div>
+                            <div class="currency-option" data-value="HNL">HNL - Honduran Lempira</div>
+                            <div class="currency-option" data-value="HRK">HRK - Croatian Kuna</div>
+                            <div class="currency-option" data-value="HTG">HTG - Haitian Gourde</div>
+                            <div class="currency-option" data-value="HUF">HUF - Hungarian Forint</div>
+                            <div class="currency-option" data-value="IDR">IDR - Indonesian Rupiah</div>
+                            <div class="currency-option" data-value="ILS">ILS - Israeli New Shekel</div>
+                            <div class="currency-option" data-value="IMP">IMP - Isle of Man Pound</div>
+                            <div class="currency-option" data-value="INR">INR - Indian Rupee</div>
+                            <div class="currency-option" data-value="IQD">IQD - Iraqi Dinar</div>
+                            <div class="currency-option" data-value="IRR">IRR - Iranian Rial</div>
+                            <div class="currency-option" data-value="ISK">ISK - Icelandic Króna</div>
+                            <div class="currency-option" data-value="JEP">JEP - Jersey Pound</div>
+                            <div class="currency-option" data-value="JMD">JMD - Jamaican Dollar</div>
+                            <div class="currency-option" data-value="JOD">JOD - Jordanian Dinar</div>
+                            <div class="currency-option" data-value="JPY">JPY - Japanese Yen</div>
+                            <div class="currency-option" data-value="KES">KES - Kenyan Shilling</div>
+                            <div class="currency-option" data-value="KGS">KGS - Kyrgyzstani Som</div>
+                            <div class="currency-option" data-value="KHR">KHR - Cambodian Riel</div>
+                            <div class="currency-option" data-value="KID">KID - Kiribati Dollar</div>
+                            <div class="currency-option" data-value="KMF">KMF - Comorian Franc</div>
+                            <div class="currency-option" data-value="KRW">KRW - South Korean Won</div>
+                            <div class="currency-option" data-value="KWD">KWD - Kuwaiti Dinar</div>
+                            <div class="currency-option" data-value="KYD">KYD - Cayman Islands Dollar</div>
+                            <div class="currency-option" data-value="KZT">KZT - Kazakhstani Tenge</div>
+                            <div class="currency-option" data-value="LAK">LAK - Lao Kip</div>
+                            <div class="currency-option" data-value="LBP">LBP - Lebanese Pound</div>
+                            <div class="currency-option" data-value="LKR">LKR - Sri Lankan Rupee</div>
+                            <div class="currency-option" data-value="LRD">LRD - Liberian Dollar</div>
+                            <div class="currency-option" data-value="LSL">LSL - Lesotho Loti</div>
+                            <div class="currency-option" data-value="LYD">LYD - Libyan Dinar</div>
+                            <div class="currency-option" data-value="MAD">MAD - Moroccan Dirham</div>
+                            <div class="currency-option" data-value="MDL">MDL - Moldovan Leu</div>
+                            <div class="currency-option" data-value="MGA">MGA - Malagasy Ariary</div>
+                            <div class="currency-option" data-value="MKD">MKD - Macedonian Denar</div>
+                            <div class="currency-option" data-value="MMK">MMK - Myanmar Kyat</div>
+                            <div class="currency-option" data-value="MNT">MNT - Mongolian Tögrög</div>
+                            <div class="currency-option" data-value="MOP">MOP - Macanese Pataca</div>
+                            <div class="currency-option" data-value="MRU">MRU - Mauritanian Ouguiya</div>
+                            <div class="currency-option" data-value="MUR">MUR - Mauritian Rupee</div>
+                            <div class="currency-option" data-value="MVR">MVR - Maldivian Rufiyaa</div>
+                            <div class="currency-option" data-value="MWK">MWK - Malawian Kwacha</div>
+                            <div class="currency-option" data-value="MXN">MXN - Mexican Peso</div>
+                            <div class="currency-option" data-value="MYR">MYR - Malaysian Ringgit</div>
+                            <div class="currency-option" data-value="MZN">MZN - Mozambican Metical</div>
+                            <div class="currency-option" data-value="NAD">NAD - Namibian Dollar</div>
+                            <div class="currency-option" data-value="NGN">NGN - Nigerian Naira</div>
+                            <div class="currency-option" data-value="NIO">NIO - Nicaraguan Córdoba</div>
+                            <div class="currency-option" data-value="NOK">NOK - Norwegian Krone</div>
+                            <div class="currency-option" data-value="NPR">NPR - Nepalese Rupee</div>
+                            <div class="currency-option" data-value="NZD">NZD - New Zealand Dollar</div>
+                            <div class="currency-option" data-value="OMR">OMR - Omani Rial</div>
+                            <div class="currency-option" data-value="PAB">PAB - Panamanian Balboa</div>
+                            <div class="currency-option" data-value="PEN">PEN - Peruvian Sol</div>
+                            <div class="currency-option" data-value="PGK">PGK - Papua New Guinean Kina</div>
+                            <div class="currency-option" data-value="PHP">PHP - Philippine Peso</div>
+                            <div class="currency-option" data-value="PKR">PKR - Pakistani Rupee</div>
+                            <div class="currency-option" data-value="PLN">PLN - Polish Złoty</div>
+                            <div class="currency-option" data-value="PYG">PYG - Paraguayan Guaraní</div>
+                            <div class="currency-option" data-value="QAR">QAR - Qatari Riyal</div>
+                            <div class="currency-option" data-value="RON">RON - Romanian Leu</div>
+                            <div class="currency-option" data-value="RSD">RSD - Serbian Dinar</div>
+                            <div class="currency-option" data-value="RUB">RUB - Russian Ruble</div>
+                            <div class="currency-option" data-value="RWF">RWF - Rwandan Franc</div>
+                            <div class="currency-option" data-value="SAR">SAR - Saudi Riyal</div>
+                            <div class="currency-option" data-value="SBD">SBD - Solomon Islands Dollar</div>
+                            <div class="currency-option" data-value="SCR">SCR - Seychellois Rupee</div>
+                            <div class="currency-option" data-value="SDG">SDG - Sudanese Pound</div>
+                            <div class="currency-option" data-value="SEK">SEK - Swedish Krona</div>
+                            <div class="currency-option" data-value="SGD">SGD - Singapore Dollar</div>
+                            <div class="currency-option" data-value="SHP">SHP - Saint Helena Pound</div>
+                            <div class="currency-option" data-value="SLE">SLE - Sierra Leonean Leone</div>
+                            <div class="currency-option" data-value="SLL">SLL - Sierra Leonean Leone (Old)</div>
+                            <div class="currency-option" data-value="SOS">SOS - Somali Shilling</div>
+                            <div class="currency-option" data-value="SRD">SRD - Surinamese Dollar</div>
+                            <div class="currency-option" data-value="SSP">SSP - South Sudanese Pound</div>
+                            <div class="currency-option" data-value="STN">STN - São Tomé and Príncipe Dobra</div>
+                            <div class="currency-option" data-value="SYP">SYP - Syrian Pound</div>
+                            <div class="currency-option" data-value="SZL">SZL - Eswatini Lilangeni</div>
+                            <div class="currency-option" data-value="THB">THB - Thai Baht</div>
+                            <div class="currency-option" data-value="TJS">TJS - Tajikistani Somoni</div>
+                            <div class="currency-option" data-value="TMT">TMT - Turkmenistani Manat</div>
+                            <div class="currency-option" data-value="TND">TND - Tunisian Dinar</div>
+                            <div class="currency-option" data-value="TOP">TOP - Tongan Paʻanga</div>
+                            <div class="currency-option" data-value="TRY">TRY - Turkish Lira</div>
+                            <div class="currency-option" data-value="TTD">TTD - Trinidad and Tobago Dollar</div>
+                            <div class="currency-option" data-value="TVD">TVD - Tuvaluan Dollar</div>
+                            <div class="currency-option" data-value="TWD">TWD - New Taiwan Dollar</div>
+                            <div class="currency-option" data-value="TZS">TZS - Tanzanian Shilling</div>
+                            <div class="currency-option" data-value="UAH">UAH - Ukrainian Hryvnia</div>
+                            <div class="currency-option" data-value="UGX">UGX - Ugandan Shilling</div>
+                            <div class="currency-option" data-value="UYU">UYU - Uruguayan Peso</div>
+                            <div class="currency-option" data-value="UZS">UZS - Uzbekistani Som</div>
+                            <div class="currency-option" data-value="VES">VES - Venezuelan Bolívar</div>
+                            <div class="currency-option" data-value="VND">VND - Vietnamese Đồng</div>
+                            <div class="currency-option" data-value="VUV">VUV - Vanuatu Vatu</div>
+                            <div class="currency-option" data-value="WST">WST - Samoan Tālā</div>
+                            <div class="currency-option" data-value="XAF">XAF - Central African CFA Franc</div>
+                            <div class="currency-option" data-value="XCD">XCD - East Caribbean Dollar</div>
+                            <div class="currency-option" data-value="XCG">XCG - Caribbean Guilder</div>
+                            <div class="currency-option" data-value="XDR">XDR - Special Drawing Rights</div>
+                            <div class="currency-option" data-value="XOF">XOF - West African CFA Franc</div>
+                            <div class="currency-option" data-value="XPF">XPF - CFP Franc</div>
+                            <div class="currency-option" data-value="YER">YER - Yemeni Rial</div>
+                            <div class="currency-option" data-value="ZAR">ZAR - South African Rand</div>
+                            <div class="currency-option" data-value="ZMW">ZMW - Zambian Kwacha</div>
+                            <div class="currency-option" data-value="ZWL">ZWL - Zimbabwean Dollar</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Native select for mobile devices -->
+                    <select id="currencyMobile" class="mobile-only w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                        <option value="USD" selected>USD - US Dollar</option>
+                        <option value="AED">AED - UAE Dirham</option>
+                        <option value="AFN">AFN - Afghan Afghani</option>
+                        <option value="ALL">ALL - Albanian Lek</option>
+                        <option value="AMD">AMD - Armenian Dram</option>
+                        <option value="ANG">ANG - Netherlands Antillean Guilder</option>
+                        <option value="AOA">AOA - Angolan Kwanza</option>
+                        <option value="ARS">ARS - Argentine Peso</option>
+                        <option value="AUD">AUD - Australian Dollar</option>
+                        <option value="AWG">AWG - Aruban Florin</option>
+                        <option value="AZN">AZN - Azerbaijani Manat</option>
+                        <option value="BAM">BAM - Bosnia-Herzegovina Convertible Mark</option>
+                        <option value="BBD">BBD - Barbadian Dollar</option>
+                        <option value="BDT">BDT - Bangladeshi Taka</option>
+                        <option value="BGN">BGN - Bulgarian Lev</option>
+                        <option value="BHD">BHD - Bahraini Dinar</option>
+                        <option value="BIF">BIF - Burundian Franc</option>
+                        <option value="BMD">BMD - Bermudian Dollar</option>
+                        <option value="BND">BND - Brunei Dollar</option>
+                        <option value="BOB">BOB - Bolivian Boliviano</option>
+                        <option value="BRL">BRL - Brazilian Real</option>
+                        <option value="BSD">BSD - Bahamian Dollar</option>
+                        <option value="BTN">BTN - Bhutanese Ngultrum</option>
+                        <option value="BWP">BWP - Botswana Pula</option>
+                        <option value="BYN">BYN - Belarusian Ruble</option>
+                        <option value="BZD">BZD - Belize Dollar</option>
+                        <option value="CAD">CAD - Canadian Dollar</option>
+                        <option value="CDF">CDF - Congolese Franc</option>
+                        <option value="CHF">CHF - Swiss Franc</option>
+                        <option value="CLF">CLF - Chilean Unit of Account</option>
+                        <option value="CLP">CLP - Chilean Peso</option>
+                        <option value="CNH">CNH - Chinese Yuan (Offshore)</option>
+                        <option value="CNY">CNY - Chinese Yuan</option>
+                        <option value="COP">COP - Colombian Peso</option>
+                        <option value="CRC">CRC - Costa Rican Colón</option>
+                        <option value="CUP">CUP - Cuban Peso</option>
+                        <option value="CVE">CVE - Cape Verdean Escudo</option>
+                        <option value="CZK">CZK - Czech Koruna</option>
+                        <option value="DJF">DJF - Djiboutian Franc</option>
+                        <option value="DKK">DKK - Danish Krone</option>
+                        <option value="DOP">DOP - Dominican Peso</option>
+                        <option value="DZD">DZD - Algerian Dinar</option>
+                        <option value="EGP">EGP - Egyptian Pound</option>
+                        <option value="ERN">ERN - Eritrean Nakfa</option>
+                        <option value="ETB">ETB - Ethiopian Birr</option>
+                        <option value="EUR">EUR - Euro</option>
+                        <option value="FJD">FJD - Fijian Dollar</option>
+                        <option value="FKP">FKP - Falkland Islands Pound</option>
+                        <option value="FOK">FOK - Faroese Króna</option>
+                        <option value="GBP">GBP - British Pound</option>
+                        <option value="GEL">GEL - Georgian Lari</option>
+                        <option value="GGP">GGP - Guernsey Pound</option>
+                        <option value="GHS">GHS - Ghanaian Cedi</option>
+                        <option value="GIP">GIP - Gibraltar Pound</option>
+                        <option value="GMD">GMD - Gambian Dalasi</option>
+                        <option value="GNF">GNF - Guinean Franc</option>
+                        <option value="GTQ">GTQ - Guatemalan Quetzal</option>
+                        <option value="GYD">GYD - Guyanese Dollar</option>
+                        <option value="HKD">HKD - Hong Kong Dollar</option>
+                        <option value="HNL">HNL - Honduran Lempira</option>
+                        <option value="HRK">HRK - Croatian Kuna</option>
+                        <option value="HTG">HTG - Haitian Gourde</option>
+                        <option value="HUF">HUF - Hungarian Forint</option>
+                        <option value="IDR">IDR - Indonesian Rupiah</option>
+                        <option value="ILS">ILS - Israeli New Shekel</option>
+                        <option value="IMP">IMP - Isle of Man Pound</option>
+                        <option value="INR">INR - Indian Rupee</option>
+                        <option value="IQD">IQD - Iraqi Dinar</option>
+                        <option value="IRR">IRR - Iranian Rial</option>
+                        <option value="ISK">ISK - Icelandic Króna</option>
+                        <option value="JEP">JEP - Jersey Pound</option>
+                        <option value="JMD">JMD - Jamaican Dollar</option>
+                        <option value="JOD">JOD - Jordanian Dinar</option>
+                        <option value="JPY">JPY - Japanese Yen</option>
+                        <option value="KES">KES - Kenyan Shilling</option>
+                        <option value="KGS">KGS - Kyrgyzstani Som</option>
+                        <option value="KHR">KHR - Cambodian Riel</option>
+                        <option value="KID">KID - Kiribati Dollar</option>
+                        <option value="KMF">KMF - Comorian Franc</option>
+                        <option value="KRW">KRW - South Korean Won</option>
+                        <option value="KWD">KWD - Kuwaiti Dinar</option>
+                        <option value="KYD">KYD - Cayman Islands Dollar</option>
+                        <option value="KZT">KZT - Kazakhstani Tenge</option>
+                        <option value="LAK">LAK - Lao Kip</option>
+                        <option value="LBP">LBP - Lebanese Pound</option>
+                        <option value="LKR">LKR - Sri Lankan Rupee</option>
+                        <option value="LRD">LRD - Liberian Dollar</option>
+                        <option value="LSL">LSL - Lesotho Loti</option>
+                        <option value="LYD">LYD - Libyan Dinar</option>
+                        <option value="MAD">MAD - Moroccan Dirham</option>
+                        <option value="MDL">MDL - Moldovan Leu</option>
+                        <option value="MGA">MGA - Malagasy Ariary</option>
+                        <option value="MKD">MKD - Macedonian Denar</option>
+                        <option value="MMK">MMK - Myanmar Kyat</option>
+                        <option value="MNT">MNT - Mongolian Tögrög</option>
+                        <option value="MOP">MOP - Macanese Pataca</option>
+                        <option value="MRU">MRU - Mauritanian Ouguiya</option>
+                        <option value="MUR">MUR - Mauritian Rupee</option>
+                        <option value="MVR">MVR - Maldivian Rufiyaa</option>
+                        <option value="MWK">MWK - Malawian Kwacha</option>
+                        <option value="MXN">MXN - Mexican Peso</option>
+                        <option value="MYR">MYR - Malaysian Ringgit</option>
+                        <option value="MZN">MZN - Mozambican Metical</option>
+                        <option value="NAD">NAD - Namibian Dollar</option>
+                        <option value="NGN">NGN - Nigerian Naira</option>
+                        <option value="NIO">NIO - Nicaraguan Córdoba</option>
+                        <option value="NOK">NOK - Norwegian Krone</option>
+                        <option value="NPR">NPR - Nepalese Rupee</option>
+                        <option value="NZD">NZD - New Zealand Dollar</option>
+                        <option value="OMR">OMR - Omani Rial</option>
+                        <option value="PAB">PAB - Panamanian Balboa</option>
+                        <option value="PEN">PEN - Peruvian Sol</option>
+                        <option value="PGK">PGK - Papua New Guinean Kina</option>
+                        <option value="PHP">PHP - Philippine Peso</option>
+                        <option value="PKR">PKR - Pakistani Rupee</option>
+                        <option value="PLN">PLN - Polish Złoty</option>
+                        <option value="PYG">PYG - Paraguayan Guaraní</option>
+                        <option value="QAR">QAR - Qatari Riyal</option>
+                        <option value="RON">RON - Romanian Leu</option>
+                        <option value="RSD">RSD - Serbian Dinar</option>
+                        <option value="RUB">RUB - Russian Ruble</option>
+                        <option value="RWF">RWF - Rwandan Franc</option>
+                        <option value="SAR">SAR - Saudi Riyal</option>
+                        <option value="SBD">SBD - Solomon Islands Dollar</option>
+                        <option value="SCR">SCR - Seychellois Rupee</option>
+                        <option value="SDG">SDG - Sudanese Pound</option>
+                        <option value="SEK">SEK - Swedish Krona</option>
+                        <option value="SGD">SGD - Singapore Dollar</option>
+                        <option value="SHP">SHP - Saint Helena Pound</option>
+                        <option value="SLE">SLE - Sierra Leonean Leone</option>
+                        <option value="SLL">SLL - Sierra Leonean Leone (Old)</option>
+                        <option value="SOS">SOS - Somali Shilling</option>
+                        <option value="SRD">SRD - Surinamese Dollar</option>
+                        <option value="SSP">SSP - South Sudanese Pound</option>
+                        <option value="STN">STN - São Tomé and Príncipe Dobra</option>
+                        <option value="SYP">SYP - Syrian Pound</option>
+                        <option value="SZL">SZL - Eswatini Lilangeni</option>
+                        <option value="THB">THB - Thai Baht</option>
+                        <option value="TJS">TJS - Tajikistani Somoni</option>
+                        <option value="TMT">TMT - Turkmenistani Manat</option>
+                        <option value="TND">TND - Tunisian Dinar</option>
+                        <option value="TOP">TOP - Tongan Paʻanga</option>
+                        <option value="TRY">TRY - Turkish Lira</option>
+                        <option value="TTD">TTD - Trinidad and Tobago Dollar</option>
+                        <option value="TVD">TVD - Tuvaluan Dollar</option>
+                        <option value="TWD">TWD - New Taiwan Dollar</option>
+                        <option value="TZS">TZS - Tanzanian Shilling</option>
+                        <option value="UAH">UAH - Ukrainian Hryvnia</option>
+                        <option value="UGX">UGX - Ugandan Shilling</option>
+                        <option value="UYU">UYU - Uruguayan Peso</option>
+                        <option value="UZS">UZS - Uzbekistani Som</option>
+                        <option value="VES">VES - Venezuelan Bolívar</option>
+                        <option value="VND">VND - Vietnamese Đồng</option>
+                        <option value="VUV">VUV - Vanuatu Vatu</option>
+                        <option value="WST">WST - Samoan Tālā</option>
+                        <option value="XAF">XAF - Central African CFA Franc</option>
+                        <option value="XCD">XCD - East Caribbean Dollar</option>
+                        <option value="XCG">XCG - Caribbean Guilder</option>
+                        <option value="XDR">XDR - Special Drawing Rights</option>
+                        <option value="XOF">XOF - West African CFA Franc</option>
+                        <option value="XPF">XPF - CFP Franc</option>
+                        <option value="YER">YER - Yemeni Rial</option>
+                        <option value="ZAR">ZAR - South African Rand</option>
+                        <option value="ZMW">ZMW - Zambian Kwacha</option>
+                        <option value="ZWL">ZWL - Zimbabwean Dollar</option>
+                    </select>
+                    
+                    <!-- Hidden input to store the actual currency value -->
+                    <input type="hidden" id="currency" value="USD" />
+                </div>
+
+                <div class="flex gap-2">
+                    <button 
+                        type="submit" 
+                        class="flex-1 bg-blue-600 text-white py-3 rounded-md hover:bg-blue-700 transition font-semibold"
+                    >
+                        Calculate
+                    </button>
+                    <button 
+                        type="button"
+                        id="saveTransaction"
+                        class="flex-1 bg-green-600 text-white py-3 rounded-md hover:bg-green-700 transition font-semibold"
+                    >
+                        Save Transaction
+                    </button>
+                </div>
+            </form>
+
+            <div id="results" class="mt-6">
+                <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 space-y-3">
+                    <h2 class="text-xl font-bold text-gray-800 dark:text-white mb-3">Results</h2>
+                    
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 dark:text-gray-400">Coins Purchased:</span>
+                            <span id="coinsPurchased" class="font-semibold dark:text-white"></span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 dark:text-gray-400">Buy Fee:</span>
+                            <span id="buyFee" class="font-semibold text-red-600 dark:text-red-400"></span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 dark:text-gray-400">Gross Sale Amount:</span>
+                            <span id="grossSale" class="font-semibold dark:text-white"></span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 dark:text-gray-400">Sell Fee:</span>
+                            <span id="sellFee" class="font-semibold text-red-600 dark:text-red-400"></span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 dark:text-gray-400">Net Sale Amount:</span>
+                            <span id="netSale" class="font-semibold dark:text-white"></span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 dark:text-gray-400">Total Fees:</span>
+                            <span id="totalFees" class="font-semibold text-red-600 dark:text-red-400"></span>
+                        </div>
+                        
+                        <div class="border-t dark:border-gray-600 pt-3 mt-3">
+                            <div class="flex justify-between items-center">
+                                <span class="text-lg font-bold text-gray-800 dark:text-white">Net Profit/Loss:</span>
+                                <span id="netProfit" class="text-2xl font-bold"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+                </div>
+
+                <!-- Right column: Chart -->
+                <div>
+            <!-- Bitcoin Price Chart -->
+            <div id="chartSection" class="lg:mt-0 mt-6">
+                <div class="bg-white dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold text-gray-800 dark:text-white">Bitcoin Price (Last 24 Hours)</h2>
+                        <div class="flex gap-2 items-center">
+                            <div class="flex items-center gap-2">
+                                <label for="autoRefreshToggle" class="text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                                    Auto-refresh
+                                </label>
+                                <button
+                                    id="autoRefreshToggle"
+                                    class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 bg-gray-300 dark:bg-gray-600"
+                                    role="switch"
+                                    aria-checked="false"
+                                    title="Toggle auto-refresh every 5 minutes"
+                                >
+                                    <span class="translate-x-1 inline-block w-4 h-4 transform bg-white rounded-full transition-transform"></span>
+                                </button>
+                            </div>
+                            <button 
+                                id="refreshChart"
+                                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-md transition font-semibold"
+                                title="Refresh chart data"
+                            >
+                                🔄 Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="relative" style="height: 600px;">
+                        <canvas id="priceChart"></canvas>
+                    </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
+                        Use mouse wheel or pinch to zoom. Click and drag to pan. Double-click to reset zoom.
+                        <span class="md:hidden"><br>Values shown in K (thousands), M (millions), or B (billions) for readability.</span>
+                        <span id="lastUpdateTime" class="block md:inline md:ml-4 text-gray-400 dark:text-gray-500"></span>
+                    </p>
+                </div>
+            </div>
+                </div>
+
+                <!-- Close right column -->
+                </div>
+            </div>
+            <!-- End of two-column grid -->
+
+            <!-- Data Attribution and Warnings -->
+            <div id="dataAttribution" class="mt-6" style="display: none;">
+                <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                    <h3 class="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-2">📊 Data Sources</h3>
+                    <p class="text-xs text-blue-700 dark:text-blue-400">
+                        Bitcoin prices provided by <a href="https://www.coingecko.com/" target="_blank" rel="noopener" class="underline">CoinGecko API</a>
+                    </p>
+                    <p id="exchangeRateAttribution" class="text-xs text-blue-700 dark:text-blue-400 mt-1" style="display: none;">
+                        Exchange rates provided by <a href="https://www.exchangerate-api.com/" target="_blank" rel="noopener" class="underline">ExchangeRate-API</a>
+                    </p>
+                    <p id="conversionWarning" class="text-xs text-amber-700 dark:text-amber-400 mt-2 font-semibold" style="display: none;">
+                        ⚠️ Exchange rates are approximate and may vary from actual values
+                    </p>
+                </div>
+            </div>
+            <!-- Saved Transactions Section -->
+            <div id="transactionsSection" class="mt-6" style="display: none;">
+                <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                    <div class="flex justify-between items-center mb-3">
+                        <h2 class="text-xl font-bold text-gray-800 dark:text-white">Saved Transactions</h2>
+                        <button 
+                            id="clearAllTransactions"
+                            class="px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition font-semibold"
+                        >
+                            Clear All
+                        </button>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="border-b dark:border-gray-600">
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Investment</th>
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Buy Price</th>
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Coins</th>
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Sell (Break Even)</th>
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Coins to Sell</th>
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Current Profit/Loss</th>
+                                    <th class="text-left py-2 px-2 text-gray-700 dark:text-gray-300">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="transactionsTableBody" class="dark:text-gray-200">
+                                <!-- Transactions will be inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cookie Consent Banner -->
+    <div id="cookieConsent" class="py-4 px-4">
+        <div class="max-w-4xl mx-auto relative">
+            <button 
+                id="closeBanner" 
+                class="absolute top-0 right-0 p-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition"
+                title="Close banner"
+                aria-label="Close consent banner"
+            >
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+            <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+                <div class="flex-1">
+                    <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-1">Cookie & Storage Consent</h3>
+                    <p class="text-sm text-gray-600 dark:text-gray-300">
+                        We use cookies and local storage to save your preferences (dark mode, form values) and transaction history. 
+                        By clicking "Accept", you consent to the storage of this data on your device in accordance with GDPR.
+                    </p>
+                    <p class="text-sm text-gray-600 dark:text-gray-300 mt-2">
+                        You can export your data as a shareable code and import it later to restore your settings and transactions.
+                    </p>
+                </div>
+                <div class="flex flex-col gap-2 flex-shrink-0">
+                    <div class="flex gap-2">
+                        <button 
+                            id="cookieDecline" 
+                            class="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition font-semibold"
+                        >
+                            Decline
+                        </button>
+                        <button 
+                            id="cookieAccept" 
+                            class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition font-semibold"
+                        >
+                            Accept
+                        </button>
+                    </div>
+                    <div class="flex gap-2">
+                        <button 
+                            id="shareData" 
+                            class="flex-1 px-4 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition font-semibold"
+                            title="Share your data as a code"
+                        >
+                            🔗 Share
+                        </button>
+                        <button 
+                            id="downloadData" 
+                            class="flex-1 px-4 py-2 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600 transition font-semibold"
+                            title="Download your data as a file"
+                        >
+                            💾 Download
+                        </button>
+                        <button 
+                            id="importData" 
+                            class="flex-1 px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 transition font-semibold"
+                            title="Import data from a code"
+                        >
+                            📥 Import Data
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
