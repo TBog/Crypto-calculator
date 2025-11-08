@@ -28,14 +28,22 @@ const SUPPORTED_CURRENCIES_CACHE_TTL = 86400;
 // Cache duration for exchange rates (1 hour in seconds)
 const EXCHANGE_RATE_CACHE_TTL = 3600;
 
+// Cache duration for LLM summaries (5 minutes in seconds)
+const SUMMARY_CACHE_TTL = 300;
+
+// Cache duration for price history used in summaries (10 minutes in seconds)
+const PRICE_HISTORY_CACHE_TTL = 600;
+
 /**
- * Fetch supported vs_currencies from CoinGecko API
+ * Generic function to fetch data from CoinGecko API with caching
+ * @param {string} endpoint - CoinGecko API endpoint (e.g., '/api/v3/simple/supported_vs_currencies')
+ * @param {string} cacheKey - Cache key for storing the response
+ * @param {number} cacheTTL - Cache time-to-live in seconds
  * @param {Object} env - Environment variables
  * @param {Object} ctx - Execution context
- * @returns {Promise<Array<string>>} Array of supported currency codes
+ * @returns {Promise<{data: Object, cacheStatus: string}>} API response data with cache status
  */
-async function fetchSupportedCurrencies(env, ctx) {
-  const cacheKey = 'coingecko-supported-currencies';
+async function fetchFromCoinGecko(endpoint, cacheKey, cacheTTL, env, ctx) {
   const cache = caches.default;
   
   // Try to get from cache first
@@ -44,7 +52,7 @@ async function fetchSupportedCurrencies(env, ctx) {
   
   if (cachedResponse) {
     const data = await cachedResponse.json();
-    return data.currencies;
+    return { data, cacheStatus: 'HIT' };
   }
   
   // Fetch from CoinGecko API
@@ -54,30 +62,46 @@ async function fetchSupportedCurrencies(env, ctx) {
     headers.set('x-cg-demo-api-key', apiKey);
   }
   
-  try {
-    const response = await fetch('https://api.coingecko.com/api/v3/simple/supported_vs_currencies', {
-      headers: headers
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch supported currencies: ${response.status}`);
+  const url = `https://api.coingecko.com${endpoint}`;
+  const response = await fetch(url, { headers });
+  
+  if (!response.ok) {
+    throw new Error(`CoinGecko API request failed: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  
+  // Cache the result
+  const cacheResponse = new Response(JSON.stringify(data), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': `public, max-age=${cacheTTL}`
     }
-    
-    const currencies = await response.json();
-    
-    // Cache the result for 1 day
-    const cacheResponse = new Response(JSON.stringify({ currencies }), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': `public, max-age=${SUPPORTED_CURRENCIES_CACHE_TTL}`
-      }
-    });
-    
-    // Cache asynchronously using waitUntil - allows response to be sent while cache operation completes
-    // This is the recommended pattern for Cloudflare Workers to avoid blocking the response
-    ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
-    
-    return currencies;
+  });
+  
+  // Cache asynchronously using waitUntil - allows response to be sent while cache operation completes
+  // This is the recommended pattern for Cloudflare Workers to avoid blocking the response
+  ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
+  
+  return { data, cacheStatus: 'MISS' };
+}
+
+/**
+ * Fetch supported vs_currencies from CoinGecko API
+ * @param {Object} env - Environment variables
+ * @param {Object} ctx - Execution context
+ * @returns {Promise<Array<string>>} Array of supported currency codes
+ */
+async function fetchSupportedCurrencies(env, ctx) {
+  try {
+    const result = await fetchFromCoinGecko(
+      '/api/v3/simple/supported_vs_currencies',
+      'coingecko-supported-currencies',
+      SUPPORTED_CURRENCIES_CACHE_TTL,
+      env,
+      ctx
+    );
+    return result.data;
   } catch (error) {
     console.error('Failed to fetch supported currencies, using fallback:', error);
     // Fallback to minimal list if API fails - only BTC and USD as that's what we rely on
@@ -221,6 +245,176 @@ function convertSimplePriceData(data, exchangeRate, targetCurrency) {
   return converted;
 }
 
+/**
+ * Fetch Bitcoin price history from CoinGecko API in USD
+ * Uses cache to avoid repeated API calls
+ * @param {Object} env - Environment variables
+ * @param {Object} ctx - Execution context
+ * @param {number} days - Number of days of history (1, 7, 30, or 90)
+ * @returns {Promise<{data: Object, cacheStatus: string}>} Price history data with cache status
+ */
+async function fetchPriceHistory(env, ctx, days = 1) {
+  try {
+    return await fetchFromCoinGecko(
+      `/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${days}`,
+      `price-history-usd-${days}d`,
+      PRICE_HISTORY_CACHE_TTL,
+      env,
+      ctx
+    );
+  } catch (error) {
+    console.error('Failed to fetch price history:', error);
+    throw error;
+  }
+}
+
+/**
+ * Convert price history data to human-readable text for LLM
+ * @param {Object} priceData - Price history data from CoinGecko
+ * @param {string} periodLabel - Period label (e.g., "Last 24 Hours", "Last 7 Days")
+ * @returns {string} Human-readable text description
+ */
+function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
+  if (!priceData || !priceData.prices || priceData.prices.length === 0) {
+    return "No price data available.";
+  }
+  
+  const prices = priceData.prices;
+  const startPrice = prices[0][1];
+  const endPrice = prices[prices.length - 1][1];
+  const priceChange = endPrice - startPrice;
+  const priceChangePercent = ((priceChange / startPrice) * 100).toFixed(2);
+  
+  // Calculate high and low
+  let highPrice = -Infinity;
+  let lowPrice = Infinity;
+  let highTime = null;
+  let lowTime = null;
+  
+  for (const [timestamp, price] of prices) {
+    if (price > highPrice) {
+      highPrice = price;
+      highTime = timestamp;
+    }
+    if (price < lowPrice) {
+      lowPrice = price;
+      lowTime = timestamp;
+    }
+  }
+  
+  // Format timestamps
+  const startTime = new Date(prices[0][0]).toISOString();
+  const endTime = new Date(prices[prices.length - 1][0]).toISOString();
+  const highTimeFormatted = new Date(highTime).toISOString();
+  const lowTimeFormatted = new Date(lowTime).toISOString();
+  
+  // Create hourly summary (sample every few hours for brevity)
+  let hourlySummary = "Price points:\n";
+  const sampleInterval = Math.max(1, Math.floor(prices.length / 12)); // Sample ~12 points
+  for (let i = 0; i < prices.length; i += sampleInterval) {
+    const [timestamp, price] = prices[i];
+    const time = new Date(timestamp).toISOString();
+    hourlySummary += `- ${time}: $${price.toFixed(2)}\n`;
+  }
+  
+  const text = `Bitcoin (BTC) Price Analysis for the ${periodLabel} (in USD):
+
+Period: ${startTime} to ${endTime}
+
+Summary Statistics:
+- Starting Price: $${startPrice.toFixed(2)}
+- Ending Price: $${endPrice.toFixed(2)}
+- Price Change: $${priceChange.toFixed(2)} (${priceChangePercent}%)
+- Period High: $${highPrice.toFixed(2)} at ${highTimeFormatted}
+- Period Low: $${lowPrice.toFixed(2)} at ${lowTimeFormatted}
+- Volatility Range: $${(highPrice - lowPrice).toFixed(2)}
+
+${hourlySummary}
+
+Total data points: ${prices.length}`;
+
+  return text;
+}
+
+/**
+ * Generate LLM summary of Bitcoin price trends
+ * @param {Object} env - Environment variables (includes AI binding)
+ * @param {Object} ctx - Execution context
+ * @param {string} period - Time period ('24h', '7d', '30d', '90d')
+ * @returns {Promise<{summary: Object, cacheStatus: string}>} Summary response with cache status
+ */
+async function generatePriceSummary(env, ctx, period = '24h') {
+  // Map period to days and labels
+  const periodConfig = {
+    '24h': { days: 1, label: 'Last 24 Hours' },
+    '7d': { days: 7, label: 'Last 7 Days' },
+    '30d': { days: 30, label: 'Last 30 Days' },
+    '90d': { days: 90, label: 'Last 3 Months' }
+  };
+  
+  const config = periodConfig[period] || periodConfig['24h'];
+  const cacheKey = `btc-price-summary-${period}`;
+  const cache = caches.default;
+  
+  // Try to get from cache first
+  const cacheUrl = new URL(`https://cache-internal/${cacheKey}`);
+  const cachedResponse = await cache.match(cacheUrl);
+  
+  if (cachedResponse) {
+    const data = await cachedResponse.json();
+    return { summary: data, cacheStatus: 'HIT' };
+  }
+  
+  // Fetch price history (will use cache if available)
+  const priceResult = await fetchPriceHistory(env, ctx, config.days);
+  const priceData = priceResult.data;
+  
+  // Convert to human-readable text
+  const priceText = convertPriceHistoryToText(priceData, config.label);
+  
+  // Generate summary using Cloudflare Workers AI
+  try {
+    const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a cryptocurrency market analyst. You write on a website with bullet points instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under 300 words.'
+        },
+        {
+          role: 'user',
+          content: priceText
+        }
+      ]
+    });
+    
+    const summary = {
+      summary: response.response || response,
+      timestamp: Date.now(),
+      period: period,
+      priceData: {
+        startPrice: priceData.prices[0][1],
+        endPrice: priceData.prices[priceData.prices.length - 1][1],
+        dataPoints: priceData.prices.length
+      }
+    };
+    
+    // Cache the result for 5 minutes
+    const cacheResponse = new Response(JSON.stringify(summary), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': `public, max-age=${SUMMARY_CACHE_TTL}`
+      }
+    });
+    
+    ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
+    
+    return { summary, cacheStatus: 'MISS' };
+  } catch (error) {
+    console.error('Failed to generate LLM summary:', error);
+    throw error;
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     return handleRequest(request, env, ctx);
@@ -323,11 +517,62 @@ async function handleRequest(request, env, ctx) {
         }
       });
     }
+
+    // Parse the URL search (a string of parameters, starts with the question mark) to get the parameters
+    const searchParams = new URLSearchParams(url.search);
+    
+    // Special endpoint for LLM-powered Bitcoin price trend summary
+    if (url.pathname === '/ai/summary') {
+      try {
+        // Get period parameter (default to 24h)
+        const period = searchParams.get('period') || '24h';
+        
+        // Validate period
+        const validPeriods = ['24h', '7d', '30d', '90d'];
+        if (!validPeriods.includes(period)) {
+          return new Response(JSON.stringify({
+            error: 'Invalid period parameter',
+            message: `Period must be one of: ${validPeriods.join(', ')}`
+          }), {
+            status: 400,
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'application/json'
+            }
+          });
+        }
+        
+        const result = await generatePriceSummary(env, ctx, period);
+        
+        return new Response(JSON.stringify(result.summary), {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json',
+            'Cache-Control': `public, max-age=${SUMMARY_CACHE_TTL}`,
+            'X-Cache-Status': result.cacheStatus,
+            'X-Data-Source': 'CoinGecko API + Cloudflare Workers AI',
+            'X-Summary-Currency': 'USD',
+            'X-Summary-Period': period
+          }
+        });
+      } catch (error) {
+        console.error('Failed to generate summary:', error);
+        return new Response(JSON.stringify({
+          error: 'Failed to generate price summary',
+          message: error.message
+        }), {
+          status: 500,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json'
+          }
+        });
+      }
+    }
     
     // Fetch supported currencies list for validation
     const supportedCurrencies = await fetchSupportedCurrencies(env, ctx);
-    
-    const searchParams = new URLSearchParams(url.search);
     
     // Check if this is a request that uses vs_currency parameter
     const vsCurrency = searchParams.get('vs_currency') || searchParams.get('vs_currencies');
