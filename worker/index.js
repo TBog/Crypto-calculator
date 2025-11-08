@@ -41,7 +41,7 @@ const PRICE_HISTORY_CACHE_TTL = 600;
  * @param {number} cacheTTL - Cache time-to-live in seconds
  * @param {Object} env - Environment variables
  * @param {Object} ctx - Execution context
- * @returns {Promise<Object>} API response data
+ * @returns {Promise<{data: Object, cacheStatus: string}>} API response data with cache status
  */
 async function fetchFromCoinGecko(endpoint, cacheKey, cacheTTL, env, ctx) {
   const cache = caches.default;
@@ -51,7 +51,8 @@ async function fetchFromCoinGecko(endpoint, cacheKey, cacheTTL, env, ctx) {
   const cachedResponse = await cache.match(cacheUrl);
   
   if (cachedResponse) {
-    return await cachedResponse.json();
+    const data = await cachedResponse.json();
+    return { data, cacheStatus: 'HIT' };
   }
   
   // Fetch from CoinGecko API
@@ -82,7 +83,7 @@ async function fetchFromCoinGecko(endpoint, cacheKey, cacheTTL, env, ctx) {
   // This is the recommended pattern for Cloudflare Workers to avoid blocking the response
   ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
   
-  return data;
+  return { data, cacheStatus: 'MISS' };
 }
 
 /**
@@ -93,14 +94,14 @@ async function fetchFromCoinGecko(endpoint, cacheKey, cacheTTL, env, ctx) {
  */
 async function fetchSupportedCurrencies(env, ctx) {
   try {
-    const data = await fetchFromCoinGecko(
+    const result = await fetchFromCoinGecko(
       '/api/v3/simple/supported_vs_currencies',
       'coingecko-supported-currencies',
       SUPPORTED_CURRENCIES_CACHE_TTL,
       env,
       ctx
     );
-    return data;
+    return result.data;
   } catch (error) {
     console.error('Failed to fetch supported currencies, using fallback:', error);
     // Fallback to minimal list if API fails - only BTC and USD as that's what we rely on
@@ -249,7 +250,7 @@ function convertSimplePriceData(data, exchangeRate, targetCurrency) {
  * Uses cache to avoid repeated API calls
  * @param {Object} env - Environment variables
  * @param {Object} ctx - Execution context
- * @returns {Promise<Object>} Price history data
+ * @returns {Promise<{data: Object, cacheStatus: string}>} Price history data with cache status
  */
 async function fetchPriceHistory(env, ctx) {
   try {
@@ -337,7 +338,7 @@ Total data points: ${prices.length}`;
  * Generate LLM summary of Bitcoin price trends
  * @param {Object} env - Environment variables (includes AI binding)
  * @param {Object} ctx - Execution context
- * @returns {Promise<Object>} Summary response
+ * @returns {Promise<{summary: Object, cacheStatus: string}>} Summary response with cache status
  */
 async function generatePriceSummary(env, ctx) {
   const cacheKey = 'btc-price-summary';
@@ -349,11 +350,12 @@ async function generatePriceSummary(env, ctx) {
   
   if (cachedResponse) {
     const data = await cachedResponse.json();
-    return data;
+    return { summary: data, cacheStatus: 'HIT' };
   }
   
   // Fetch price history (will use cache if available)
-  const priceData = await fetchPriceHistory(env, ctx);
+  const priceResult = await fetchPriceHistory(env, ctx);
+  const priceData = priceResult.data;
   
   // Convert to human-readable text
   const priceText = convertPriceHistoryToText(priceData);
@@ -393,7 +395,7 @@ async function generatePriceSummary(env, ctx) {
     
     ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
     
-    return summary;
+    return { summary, cacheStatus: 'MISS' };
   } catch (error) {
     console.error('Failed to generate LLM summary:', error);
     throw error;
@@ -506,14 +508,15 @@ async function handleRequest(request, env, ctx) {
     // Special endpoint for LLM-powered Bitcoin price trend summary
     if (url.pathname === '/api/summary') {
       try {
-        const summary = await generatePriceSummary(env, ctx);
+        const result = await generatePriceSummary(env, ctx);
         
-        return new Response(JSON.stringify(summary), {
+        return new Response(JSON.stringify(result.summary), {
           status: 200,
           headers: {
             ...corsHeaders,
             'Content-Type': 'application/json',
             'Cache-Control': `public, max-age=${SUMMARY_CACHE_TTL}`,
+            'X-Cache-Status': result.cacheStatus,
             'X-Data-Source': 'CoinGecko API + Cloudflare Workers AI',
             'X-Summary-Currency': 'USD'
           }
