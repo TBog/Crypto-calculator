@@ -105,19 +105,17 @@ function parseMarkdown(markdown) {
                 .join('');
             return `<ol class="list-decimal list-inside my-3 space-y-1">${items}</ol>`;
         } else if (block.type === 'header') {
-            return block.lines.join('<br>');
+            return block.lines.filter(line => line.trim()).join('<br>');
         } else {
-            // Regular text block
-            const text = block.lines.join('<br>').trim();
+            // Regular text block - filter out empty lines before joining
+            const text = block.lines
+                .filter(line => line.trim())
+                .join('<br>');
             return text ? `<p class="my-2">${text}</p>` : '';
         }
     }).filter(b => b);
     
     html = htmlBlocks.join('');
-    
-    // Clean up extra breaks around block elements
-    html = html.replace(/<br><\/p>/g, '</p>');
-    html = html.replace(/<p class="my-2"><br>/g, '<p class="my-2">');
     
     return html;
 }
