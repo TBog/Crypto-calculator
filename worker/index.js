@@ -35,13 +35,15 @@ const SUMMARY_CACHE_TTL = 300;
 const PRICE_HISTORY_CACHE_TTL = 600;
 
 /**
- * Fetch supported vs_currencies from CoinGecko API
+ * Generic function to fetch data from CoinGecko API with caching
+ * @param {string} endpoint - CoinGecko API endpoint (e.g., '/api/v3/simple/supported_vs_currencies')
+ * @param {string} cacheKey - Cache key for storing the response
+ * @param {number} cacheTTL - Cache time-to-live in seconds
  * @param {Object} env - Environment variables
  * @param {Object} ctx - Execution context
- * @returns {Promise<Array<string>>} Array of supported currency codes
+ * @returns {Promise<Object>} API response data
  */
-async function fetchSupportedCurrencies(env, ctx) {
-  const cacheKey = 'coingecko-supported-currencies';
+async function fetchFromCoinGecko(endpoint, cacheKey, cacheTTL, env, ctx) {
   const cache = caches.default;
   
   // Try to get from cache first
@@ -49,8 +51,7 @@ async function fetchSupportedCurrencies(env, ctx) {
   const cachedResponse = await cache.match(cacheUrl);
   
   if (cachedResponse) {
-    const data = await cachedResponse.json();
-    return data.currencies;
+    return await cachedResponse.json();
   }
   
   // Fetch from CoinGecko API
@@ -60,30 +61,46 @@ async function fetchSupportedCurrencies(env, ctx) {
     headers.set('x-cg-demo-api-key', apiKey);
   }
   
-  try {
-    const response = await fetch('https://api.coingecko.com/api/v3/simple/supported_vs_currencies', {
-      headers: headers
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch supported currencies: ${response.status}`);
+  const url = `https://api.coingecko.com${endpoint}`;
+  const response = await fetch(url, { headers });
+  
+  if (!response.ok) {
+    throw new Error(`CoinGecko API request failed: ${response.status}`);
+  }
+  
+  const data = await response.json();
+  
+  // Cache the result
+  const cacheResponse = new Response(JSON.stringify(data), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': `public, max-age=${cacheTTL}`
     }
-    
-    const currencies = await response.json();
-    
-    // Cache the result for 1 day
-    const cacheResponse = new Response(JSON.stringify({ currencies }), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': `public, max-age=${SUPPORTED_CURRENCIES_CACHE_TTL}`
-      }
-    });
-    
-    // Cache asynchronously using waitUntil - allows response to be sent while cache operation completes
-    // This is the recommended pattern for Cloudflare Workers to avoid blocking the response
-    ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
-    
-    return currencies;
+  });
+  
+  // Cache asynchronously using waitUntil - allows response to be sent while cache operation completes
+  // This is the recommended pattern for Cloudflare Workers to avoid blocking the response
+  ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
+  
+  return data;
+}
+
+/**
+ * Fetch supported vs_currencies from CoinGecko API
+ * @param {Object} env - Environment variables
+ * @param {Object} ctx - Execution context
+ * @returns {Promise<Array<string>>} Array of supported currency codes
+ */
+async function fetchSupportedCurrencies(env, ctx) {
+  try {
+    const data = await fetchFromCoinGecko(
+      '/api/v3/simple/supported_vs_currencies',
+      'coingecko-supported-currencies',
+      SUPPORTED_CURRENCIES_CACHE_TTL,
+      env,
+      ctx
+    );
+    return data;
   } catch (error) {
     console.error('Failed to fetch supported currencies, using fallback:', error);
     // Fallback to minimal list if API fails - only BTC and USD as that's what we rely on
@@ -235,46 +252,14 @@ function convertSimplePriceData(data, exchangeRate, targetCurrency) {
  * @returns {Promise<Object>} Price history data
  */
 async function fetchPriceHistory(env, ctx) {
-  const cacheKey = 'price-history-usd-24h';
-  const cache = caches.default;
-  
-  // Try to get from cache first
-  const cacheUrl = new URL(`https://cache-internal/${cacheKey}`);
-  const cachedResponse = await cache.match(cacheUrl);
-  
-  if (cachedResponse) {
-    const data = await cachedResponse.json();
-    return data;
-  }
-  
-  // Fetch from CoinGecko API
-  const apiKey = env.COINGECKO_KEY;
-  const headers = new Headers();
-  if (apiKey) {
-    headers.set('x-cg-demo-api-key', apiKey);
-  }
-  
   try {
-    const url = 'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=1';
-    const response = await fetch(url, { headers });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch price history: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    // Cache the result for 10 minutes
-    const cacheResponse = new Response(JSON.stringify(data), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': `public, max-age=${PRICE_HISTORY_CACHE_TTL}`
-      }
-    });
-    
-    ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
-    
-    return data;
+    return await fetchFromCoinGecko(
+      '/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=1',
+      'price-history-usd-24h',
+      PRICE_HISTORY_CACHE_TTL,
+      env,
+      ctx
+    );
   } catch (error) {
     console.error('Failed to fetch price history:', error);
     throw error;
