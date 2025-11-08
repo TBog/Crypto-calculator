@@ -764,10 +764,12 @@ function updateSummaryTime(cacheMetadata = null) {
 function displaySummary(summaryData, cacheMetadata) {
     const requestContainer = document.getElementById('summaryRequestContainer');
     const displayContainer = document.getElementById('summaryDisplayContainer');
+    const loadingContainer = document.getElementById('summaryLoadingContainer');
     const summaryText = document.getElementById('summaryText');
     
-    // Hide request button, show summary
+    // Hide request button and loading, show summary
     requestContainer.style.display = 'none';
+    loadingContainer.style.display = 'none';
     displayContainer.style.display = 'block';
     
     // Display the summary text
