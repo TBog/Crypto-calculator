@@ -676,6 +676,143 @@ function updateLastUpdateTime(cacheMetadata = null) {
 }
 
 /**
+ * Fetch AI-generated summary of Bitcoin price trends
+ * @returns {Promise<Object>} Summary response with metadata
+ */
+async function fetchAISummary() {
+    try {
+        const workerUrl = `${WORKER_BASE_URL}/api/summary`;
+        const response = await fetch(workerUrl);
+        
+        if (!response.ok) {
+            throw new Error(`Worker responded with status ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Extract cache metadata from response headers
+        const cacheStatus = response.headers.get('X-Cache-Status');
+        const cacheControl = response.headers.get('Cache-Control');
+        
+        // Parse max-age from Cache-Control header if available
+        let maxAge = null;
+        if (cacheControl) {
+            const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
+            if (maxAgeMatch) {
+                maxAge = parseInt(maxAgeMatch[1], 10);
+            }
+        }
+        
+        return {
+            data,
+            cacheMetadata: {
+                status: cacheStatus,
+                maxAge: maxAge,
+                fetchTime: Date.now()
+            }
+        };
+    } catch (error) {
+        console.error('Failed to fetch AI summary:', error);
+        throw error;
+    }
+}
+
+/**
+ * Update the AI summary display time and cache information
+ * @param {Object} cacheMetadata - Cache metadata from backend
+ */
+function updateSummaryTime(cacheMetadata = null) {
+    const summaryUpdateElement = document.getElementById('summaryUpdateTime');
+    if (summaryUpdateElement) {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString(undefined, { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        
+        let displayText = `Analysis generated: ${timeString}`;
+        
+        // Add cache information if available
+        if (cacheMetadata) {
+            const { status, maxAge, fetchTime } = cacheMetadata;
+            
+            if (status === 'HIT' && maxAge && fetchTime) {
+                // Calculate remaining cache time
+                const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
+                const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
+                const remainingMinutes = Math.floor(remainingSeconds / 60);
+                
+                displayText += ` (cached, expires in ${remainingMinutes}m)`;
+            } else if (status === 'MISS' && maxAge) {
+                // Fresh data from backend
+                const expiresMinutes = Math.floor(maxAge / 60);
+                displayText += ` (fresh analysis, cache ${expiresMinutes}m)`;
+            }
+        }
+        
+        summaryUpdateElement.textContent = displayText;
+    }
+}
+
+/**
+ * Display the AI summary
+ * @param {Object} summaryData - Summary data from API
+ * @param {Object} cacheMetadata - Cache metadata
+ */
+function displaySummary(summaryData, cacheMetadata) {
+    const requestContainer = document.getElementById('summaryRequestContainer');
+    const displayContainer = document.getElementById('summaryDisplayContainer');
+    const summaryText = document.getElementById('summaryText');
+    
+    // Hide request button, show summary
+    requestContainer.style.display = 'none';
+    displayContainer.style.display = 'block';
+    
+    // Display the summary text
+    summaryText.textContent = summaryData.summary;
+    
+    // Update the timestamp with cache info
+    updateSummaryTime(cacheMetadata);
+}
+
+/**
+ * Show loading state for AI summary
+ */
+function showSummaryLoading() {
+    document.getElementById('summaryRequestContainer').style.display = 'none';
+    document.getElementById('summaryDisplayContainer').style.display = 'none';
+    document.getElementById('summaryErrorContainer').style.display = 'none';
+    document.getElementById('summaryLoadingContainer').style.display = 'block';
+}
+
+/**
+ * Show error state for AI summary
+ * @param {string} errorMessage - Error message to display
+ */
+function showSummaryError(errorMessage) {
+    document.getElementById('summaryRequestContainer').style.display = 'none';
+    document.getElementById('summaryDisplayContainer').style.display = 'none';
+    document.getElementById('summaryLoadingContainer').style.display = 'none';
+    document.getElementById('summaryErrorContainer').style.display = 'block';
+    document.getElementById('summaryErrorText').textContent = errorMessage;
+}
+
+/**
+ * Request and display AI summary
+ */
+async function requestAISummary() {
+    showSummaryLoading();
+    
+    try {
+        const result = await fetchAISummary();
+        displaySummary(result.data, result.cacheMetadata);
+    } catch (error) {
+        showSummaryError('Failed to generate AI summary. Please try again.');
+    }
+}
+
+/**
  * Refresh chart and sell price
  * Uses chart data to get the most recent price, which is more efficient
  * as it avoids a separate API call and ensures price/chart synchronization
@@ -1748,6 +1885,19 @@ function initEventListeners() {
     // Auto-refresh toggle handler
     document.getElementById('autoRefreshToggle').addEventListener('click', function() {
         toggleAutoRefresh();
+    });
+
+    // AI Summary button handlers
+    document.getElementById('requestSummary').addEventListener('click', async function() {
+        await requestAISummary();
+    });
+
+    document.getElementById('refreshSummary').addEventListener('click', async function() {
+        await requestAISummary();
+    });
+
+    document.getElementById('retrySummary').addEventListener('click', async function() {
+        await requestAISummary();
     });
 
     // Save values and recalculate when inputs change
