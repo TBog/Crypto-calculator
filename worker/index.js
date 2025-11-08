@@ -378,7 +378,7 @@ async function generatePriceSummary(env, ctx, period = '24h') {
       messages: [
         {
           role: 'system',
-          content: 'You are a cryptocurrency market analyst. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under 150 words.'
+          content: 'You are a cryptocurrency market analyst. You write on a website with bullet points instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under 300 words.'
         },
         {
           role: 'user',
@@ -502,7 +502,6 @@ async function handleRequest(request, env, ctx) {
   try {
     // Parse the request URL to get the query parameters
     const url = new URL(request.url);
-    const searchParams = new URLSearchParams(url.search);
     
     // Special endpoint to get supported currencies from CoinGecko
     if (url.pathname === '/api/v3/simple/supported_vs_currencies') {
@@ -518,6 +517,9 @@ async function handleRequest(request, env, ctx) {
         }
       });
     }
+
+    // Parse the URL search (a string of parameters, starts with the question mark) to get the parameters
+    const searchParams = new URLSearchParams(url.search);
     
     // Special endpoint for LLM-powered Bitcoin price trend summary
     if (url.pathname === '/ai/summary') {
