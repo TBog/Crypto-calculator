@@ -18,6 +18,11 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
   - Converts prices, market caps, and volumes transparently
   - Returns data as if CoinGecko natively supported the currency
   - Notifies frontend via response headers about the conversion
+- **AI-Powered Price Summaries**: Uses Cloudflare Workers AI to generate natural language summaries of Bitcoin price trends
+  - Analyzes 24-hour price history
+  - Identifies key movements and patterns
+  - Provides concise market analysis
+  - Cached for 5 minutes for optimal performance
 
 ## Deployment Steps
 
@@ -43,6 +48,9 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
    name = "crypto-cache"
    main = "index.js"
    compatibility_date = "2024-10-01"
+   
+   [ai]
+   binding = "AI"
    
    [env.production]
    # Add your environment variables here after deployment
@@ -130,6 +138,37 @@ All CoinGecko API v3 endpoints are proxied through the worker:
 - `/api/v3/simple/supported_vs_currencies` - Get CoinGecko supported currencies
 
 ### Additional Endpoints
+
+**Get Bitcoin Price Trend Summary (AI-Powered):**
+```
+GET /api/summary
+```
+
+Returns an AI-generated natural language summary of Bitcoin price trends over the last 24 hours. The summary is generated using Cloudflare Workers AI analyzing USD price data.
+
+Response format:
+```json
+{
+  "summary": "Bitcoin has shown moderate volatility over the past 24 hours...",
+  "timestamp": 1699459200000,
+  "priceData": {
+    "startPrice": 43250.50,
+    "endPrice": 43890.75,
+    "dataPoints": 25
+  }
+}
+```
+
+**Features:**
+- Analyzes 24-hour price history in USD
+- Identifies trends, movements, and patterns
+- Cached for 5 minutes to optimize performance
+- Reuses cached price history data when available
+
+**Headers:**
+- `X-Data-Source: CoinGecko API + Cloudflare Workers AI`
+- `X-Summary-Currency: USD`
+- `Cache-Control: public, max-age=300`
 
 **Get All Supported Currencies from ExchangeRate-API:**
 ```
