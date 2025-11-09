@@ -325,11 +325,6 @@ function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
   const sampleInterval = Math.max(1, Math.floor(prices.length / targetSamples));
 
   // Simple sample of data
-  // for (let i = 0; i < prices.length; i += sampleInterval) {
-  //   const [timestamp, price] = prices[i];
-  //   const time = new Date(timestamp).toISOString();
-  //   dataSummary += `- ${time}: $${price.toFixed(0)}\n`;
-  // }
 
   /**
    * Split the data into evenly sized chunks.
