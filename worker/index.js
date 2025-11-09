@@ -308,13 +308,55 @@ function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
   const highTimeFormatted = new Date(highTime).toISOString();
   const lowTimeFormatted = new Date(lowTime).toISOString();
   
-  // Create hourly summary (sample every few hours for brevity)
-  let hourlySummary = "Price points:\n";
-  const sampleInterval = Math.max(1, Math.floor(prices.length / 12)); // Sample ~12 points
+  let dataSummary = "Price points:\n";
+  
+  // Set maximum number of samples
+  const targetSamples = 30;
+  const sampleInterval = Math.max(1, Math.floor(prices.length / targetSamples));
+
+  // Simple sample of data
+  // for (let i = 0; i < prices.length; i += sampleInterval) {
+  //   const [timestamp, price] = prices[i];
+  //   const time = new Date(timestamp).toISOString();
+  //   dataSummary += `- ${time}: $${price.toFixed(0)}\n`;
+  // }
+
+  /**
+   * Split the data into evenly sized chunks.
+   * For each chunk:
+   * Computes avg, max, and min.
+   * Compares the current chunk’s average to the previous sample’s chosen price.
+   * Chooses the max if the average is rising, min if falling.
+   * Outputs one representative sample per chunk, tagged with its timestamp.
+   */
+  let prevValue = null;
   for (let i = 0; i < prices.length; i += sampleInterval) {
-    const [timestamp, price] = prices[i];
+    const chunk = prices.slice(i, i + sampleInterval);
+    if (chunk.length === 0) continue;
+
+    // Compute stats for this chunk
+    const avg = chunk.reduce((sum, [, price]) => sum + price, 0) / chunk.length;
+    const maxEntry = chunk.reduce((a, b) => (a[1] > b[1] ? a : b));
+    const minEntry = chunk.reduce((a, b) => (a[1] < b[1] ? a : b));
+
+    let chosenEntry;
+
+    if (prevValue === null) {
+      chosenEntry = [chunk[Math.floor(chunk.length / 2)][0], avg];
+    } else if (avg > prevValue) {
+      // Uptrend → pick max
+      chosenEntry = maxEntry;
+    } else {
+      // Downtrend or flat → pick min
+      chosenEntry = minEntry;
+    }
+
+    const [timestamp, price] = chosenEntry;
     const time = new Date(timestamp).toISOString();
-    hourlySummary += `- ${time}: $${price.toFixed(2)}\n`;
+
+    dataSummary += `- ${time}: $${price.toFixed(0)}\n`;
+
+    prevValue = avg; // reference for next delta
   }
   
   const text = `Bitcoin (BTC) Price Analysis for the ${periodLabel} (in USD):
@@ -329,7 +371,7 @@ Summary Statistics:
 - Period Low: $${lowPrice.toFixed(2)} at ${lowTimeFormatted}
 - Volatility Range: $${(highPrice - lowPrice).toFixed(2)}
 
-${hourlySummary}
+${dataSummary}
 
 Total data points: ${prices.length}`;
 
@@ -378,19 +420,21 @@ async function generatePriceSummary(env, ctx, period = '24h') {
       messages: [
         {
           role: 'system',
-          content: 'You are a cryptocurrency market analyst. You write on a website with bullet points instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under 300 words.'
+          content: 'You are a cryptocurrency market analyst. You write using markdown instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under 300 words.'
         },
         {
           role: 'user',
           content: priceText
         }
-      ]
+      ],
+      max_tokens: 1024  // Increased from default 256 to prevent truncation for longer periods
     });
     
     const summary = {
       summary: response.response || response,
       timestamp: Date.now(),
       period: period,
+      dataInputAI: priceText,
       priceData: {
         startPrice: priceData.prices[0][1],
         endPrice: priceData.prices[priceData.prices.length - 1][1],
@@ -433,8 +477,8 @@ async function handleRequest(request, env, ctx) {
   const origin = request.headers.get('Origin');
   
   // Validate origin against allowed list
-  let isAllowedOrigin = false;
-  if (origin) {
+  let isAllowedOrigin = true;//false;
+  if (origin && !isAllowedOrigin) {
     try {
       const originUrl = new URL(origin);
       
