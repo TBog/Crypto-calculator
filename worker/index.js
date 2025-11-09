@@ -498,7 +498,7 @@ async function handleRequest(request, env, ctx) {
   const origin = request.headers.get('Origin');
   
   // Validate origin against allowed list
-  let isAllowedOrigin = true;//false;
+  let isAllowedOrigin = false;
   if (origin && !isAllowedOrigin) {
     try {
       const originUrl = new URL(origin);
