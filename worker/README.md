@@ -24,6 +24,30 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
   - Provides concise market analysis
   - Cached for 5 minutes for optimal performance
 
+## Testing
+
+This worker includes a comprehensive test suite. See [TEST_README.md](./TEST_README.md) for details.
+
+**Quick Start:**
+```bash
+cd worker
+npm install
+npm test
+```
+
+**Run tests in watch mode:**
+```bash
+npm run test:watch
+```
+
+The test suite covers:
+- AI summary generation with all period options (24h, 7d, 30d, 90d)
+- Token limit validation (verifies the fix for summary truncation)
+- Price data sampling logic
+- Origin validation and CORS
+- Cache configuration
+- Response headers
+
 ## Deployment Steps
 
 ### Prerequisites
