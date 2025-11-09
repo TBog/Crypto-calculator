@@ -268,6 +268,16 @@ async function fetchPriceHistory(env, ctx, days = 1) {
   }
 }
 
+function formatTimestamp(timestamp) {
+  const d = new Date(timestamp);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0"); // Months are 0-indexed
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+}
+
 /**
  * Convert price history data to human-readable text for LLM
  * @param {Object} priceData - Price history data from CoinGecko
@@ -308,10 +318,10 @@ function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
   const highTimeFormatted = new Date(highTime).toISOString();
   const lowTimeFormatted = new Date(lowTime).toISOString();
   
-  let dataSummary = "Price points:\n";
+  let dataSummary = "|date time|price(USD)|\n|---|---|\n";
   
   // Set maximum number of samples
-  const targetSamples = 30;
+  const targetSamples = 90 * 4;
   const sampleInterval = Math.max(1, Math.floor(prices.length / targetSamples));
 
   // Simple sample of data
@@ -333,33 +343,49 @@ function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
   for (let i = 0; i < prices.length; i += sampleInterval) {
     const chunk = prices.slice(i, i + sampleInterval);
     if (chunk.length === 0) continue;
-
-    // Compute stats for this chunk
-    const avg = chunk.reduce((sum, [, price]) => sum + price, 0) / chunk.length;
-    const maxEntry = chunk.reduce((a, b) => (a[1] > b[1] ? a : b));
-    const minEntry = chunk.reduce((a, b) => (a[1] < b[1] ? a : b));
-
+  
     let chosenEntry;
-
-    if (prevValue === null) {
-      chosenEntry = [chunk[Math.floor(chunk.length / 2)][0], avg];
-    } else if (avg > prevValue) {
-      // Uptrend → pick max
-      chosenEntry = maxEntry;
+  
+    if (chunk.length === 1) {
+      // Fast path for single-point chunks
+      const [timestamp, price] = chunk[0];
+      chosenEntry = [timestamp, price];
     } else {
-      // Downtrend or flat → pick min
-      chosenEntry = minEntry;
+      // Normal multi-point logic
+      let sum = 0;
+      let maxEntry = chunk[0];
+      let minEntry = chunk[0];
+  
+      for (const entry of chunk) {
+        const [, price] = entry;
+        sum += price;
+        if (price > maxEntry[1]) maxEntry = entry;
+        if (price < minEntry[1]) minEntry = entry;
+      }
+  
+      const avg = sum / chunk.length;
+  
+      if (prevValue === null) {
+        chosenEntry = [chunk[Math.floor(chunk.length / 2)][0], avg];
+      } else if (avg > prevValue) {
+        // Uptrend → pick max
+        chosenEntry = maxEntry;
+      } else {
+        // Downtrend or flat → pick min
+        chosenEntry = minEntry;
+      }
     }
-
+  
     const [timestamp, price] = chosenEntry;
-    const time = new Date(timestamp).toISOString();
-
-    dataSummary += `- ${time}: $${price.toFixed(0)}\n`;
-
-    prevValue = avg; // reference for next delta
+    const time = formatTimestamp(timestamp);
+  
+    dataSummary += `|${time}|${price.toFixed(0)}|\n`;
+  
+    prevValue = price;
   }
   
-  const text = `Bitcoin (BTC) Price Analysis for the ${periodLabel} (in USD):
+  const text = `### DATA_BTC
+Bitcoin (BTC) data for ${periodLabel} (in USD):
 
 Period: ${startTime} to ${endTime}
 
@@ -420,14 +446,14 @@ async function generatePriceSummary(env, ctx, period = '24h') {
       messages: [
         {
           role: 'system',
-          content: 'You are a cryptocurrency market analyst. You write using markdown instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under 300 words.'
+          content: 'You are a highly experienced **Cryptocurrency Financial Analyst**. You write using markdown instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns followed by a final, three-sentence executive narrative. Your analysis must be purely based on the data provided in the DATA_BTC section. Response must be professional and quantitative.'
         },
         {
           role: 'user',
           content: priceText
         }
       ],
-      max_tokens: 1024  // Increased from default 256 to prevent truncation for longer periods
+      max_tokens: 512  // Increased from default 256 to prevent truncation for longer periods
     });
     
     const summary = {
