@@ -309,8 +309,10 @@ function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
   const lowTimeFormatted = new Date(lowTime).toISOString();
   
   // Create hourly summary (sample every few hours for brevity)
+  // Adjust sample size based on period length to keep input context manageable
+  const targetSamples = prices.length > 200 ? 8 : 12; // Fewer samples for longer periods
   let hourlySummary = "Price points:\n";
-  const sampleInterval = Math.max(1, Math.floor(prices.length / 12)); // Sample ~12 points
+  const sampleInterval = Math.max(1, Math.floor(prices.length / targetSamples));
   for (let i = 0; i < prices.length; i += sampleInterval) {
     const [timestamp, price] = prices[i];
     const time = new Date(timestamp).toISOString();
@@ -384,7 +386,8 @@ async function generatePriceSummary(env, ctx, period = '24h') {
           role: 'user',
           content: priceText
         }
-      ]
+      ],
+      max_tokens: 1024  // Increased from default 256 to prevent truncation for longer periods
     });
     
     const summary = {
