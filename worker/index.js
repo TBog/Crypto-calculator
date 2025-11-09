@@ -335,7 +335,7 @@ function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
    * Split the data into evenly sized chunks.
    * For each chunk:
    * Computes avg, max, and min.
-   * Compares the current chunk’s average to the previous sample’s chosen price.
+   * Compares the current chunk's average to the previous chunk's average.
    * Chooses the max if the average is rising, min if falling.
    * Outputs one representative sample per chunk, tagged with its timestamp.
    */
