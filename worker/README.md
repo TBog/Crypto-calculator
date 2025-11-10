@@ -24,6 +24,30 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
   - Provides concise market analysis
   - Cached for 5 minutes for optimal performance
 
+## Testing
+
+This worker includes a comprehensive test suite. See [TEST_README.md](./TEST_README.md) for details.
+
+**Quick Start:**
+```bash
+cd worker
+npm install
+npm test
+```
+
+**Run tests in watch mode:**
+```bash
+npm run test:watch
+```
+
+The test suite covers:
+- AI summary generation with all period options (24h, 7d, 30d, 90d)
+- Token limit validation (verifies the fix for summary truncation)
+- Price data sampling logic
+- Origin validation and CORS
+- Cache configuration
+- Response headers
+
 ## Deployment Steps
 
 ### Prerequisites
@@ -141,16 +165,20 @@ All CoinGecko API v3 endpoints are proxied through the worker:
 
 **Get Bitcoin Price Trend Summary (AI-Powered):**
 ```
-GET /ai/summary
+GET /ai/summary?period=24h
 ```
 
-Returns an AI-generated natural language summary of Bitcoin price trends over the last 24 hours. The summary is generated using Cloudflare Workers AI analyzing USD price data.
+Returns an AI-generated natural language summary of Bitcoin price trends. The summary is generated using Cloudflare Workers AI analyzing USD price data.
+
+**Query Parameters:**
+- `period` (optional): Time period for analysis. Valid values: `24h`, `7d`, `30d`, `90d`. Default: `24h`
 
 Response format:
 ```json
 {
   "summary": "Bitcoin has shown moderate volatility over the past 24 hours...",
   "timestamp": 1699459200000,
+  "period": "24h",
   "priceData": {
     "startPrice": 43250.50,
     "endPrice": 43890.75,
@@ -160,14 +188,21 @@ Response format:
 ```
 
 **Features:**
-- Analyzes 24-hour price history in USD
+- Analyzes price history in USD (1 day to 3 months)
 - Identifies trends, movements, and patterns
 - Cached for 5 minutes to optimize performance
 - Reuses cached price history data when available
+- Uses Llama 3.1 8B Instruct model with max_tokens=1024 to prevent truncation
+
+**Technical Limits:**
+- Input context: ~8192 tokens (sufficient for all periods)
+- Output tokens: 1024 (supports comprehensive summaries up to ~800 words)
+- Input data is sampled (8-12 price points) to keep context manageable
 
 **Headers:**
 - `X-Data-Source: CoinGecko API + Cloudflare Workers AI`
 - `X-Summary-Currency: USD`
+- `X-Summary-Period: 24h|7d|30d|90d`
 - `Cache-Control: public, max-age=300`
 
 **Get All Supported Currencies from ExchangeRate-API:**
