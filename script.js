@@ -1799,6 +1799,12 @@ async function renderTransactions() {
     section.style.display = 'block';
     tbody.innerHTML = '';
     
+    // Check if there's a manually entered sell price in the form
+    const formSellPriceInput = document.getElementById('sellPrice');
+    const formSellPriceValue = formSellPriceInput ? parseFloat(formSellPriceInput.value) : null;
+    const formCurrency = document.getElementById('currency') ? document.getElementById('currency').value : null;
+    const hasManualSellPrice = formSellPriceValue && !isNaN(formSellPriceValue) && formSellPriceValue > 0;
+    
     // Get unique currencies to minimize API calls
     const uniqueCurrencies = [...new Set(transactions.map(tx => tx.currency))];
     
@@ -1812,7 +1818,15 @@ async function renderTransactions() {
     for (let i = 0; i < transactions.length; i++) {
         const tx = transactions[i];
         const currentPrice = priceMap.get(tx.currency);
-        const sellPrice = currentPrice !== null ? currentPrice : tx.buyPrice;
+        
+        // Use manually entered sell price if available and currency matches
+        let sellPrice;
+        if (hasManualSellPrice && tx.currency === formCurrency) {
+            sellPrice = formSellPriceValue;
+        } else {
+            sellPrice = currentPrice !== null ? currentPrice : tx.buyPrice;
+        }
+        
         const { coinsPurchased, netProfit, coinsToSellBreakEven, coinsToSellForProfit } = calculateTransactionProfit(tx, sellPrice);
         
         const profitClass = netProfit > 0 ? 'text-green-600 dark:text-green-400' : 
@@ -1977,12 +1991,20 @@ function initEventListeners() {
             if (areResultsVisible()) {
                 calculate();
             }
+            // Update saved transactions when sell price changes
+            if (id === 'sellPrice') {
+                renderTransactions();
+            }
         });
         // Also trigger on input event for real-time updates
         element.addEventListener('input', function() {
             // Only recalculate if results are visible
             if (areResultsVisible()) {
                 calculate();
+            }
+            // Update saved transactions when sell price changes
+            if (id === 'sellPrice') {
+                renderTransactions();
             }
         });
     });
