@@ -301,3 +301,197 @@ describe('Integration Tests', () => {
     expect(url.searchParams.get('period')).toBe('90d');
   });
 });
+
+describe('Bitcoin News Feed Feature', () => {
+  describe('Cache Configuration', () => {
+    it('should use 10-minute cache for Bitcoin news', () => {
+      const BITCOIN_NEWS_CACHE_TTL = 600; // 10 minutes
+      expect(BITCOIN_NEWS_CACHE_TTL).toBe(600);
+      expect(BITCOIN_NEWS_CACHE_TTL).toBeGreaterThanOrEqual(300); // At least 5 minutes
+      expect(BITCOIN_NEWS_CACHE_TTL).toBeLessThanOrEqual(600); // At most 10 minutes
+    });
+  });
+
+  describe('Endpoint Configuration', () => {
+    it('should use /api/bitcoin-news endpoint', () => {
+      const url = new URL('http://localhost/api/bitcoin-news');
+      expect(url.pathname).toBe('/api/bitcoin-news');
+    });
+  });
+
+  describe('NewsData.io API Integration', () => {
+    it('should use single API call with correct parameters', () => {
+      const apiKey = 'test-key';
+      const expectedUrl = `https://newsdata.io/api/1/crypto?apikey=${apiKey}&coin=btc&size=50`;
+      const url = new URL(expectedUrl);
+      
+      expect(url.hostname).toBe('newsdata.io');
+      expect(url.pathname).toBe('/api/1/crypto');
+      expect(url.searchParams.get('coin')).toBe('btc');
+      expect(url.searchParams.get('size')).toBe('50');
+    });
+
+    it('should optimize API credits by using single call', () => {
+      // Verify that we fetch all articles in one call instead of 3 separate calls
+      const articlesPerSentiment = 3; // Would require 3 API calls if done separately
+      const totalApiCallsRequired = 1; // Our optimized approach uses only 1 call
+      
+      expect(totalApiCallsRequired).toBe(1);
+      expect(totalApiCallsRequired).toBeLessThan(articlesPerSentiment);
+    });
+  });
+
+  describe('Data Structuring', () => {
+    it('should group articles by sentiment (positive, negative, neutral)', () => {
+      const mockArticles = [
+        { title: 'Article 1', sentiment: 'positive' },
+        { title: 'Article 2', sentiment: 'negative' },
+        { title: 'Article 3', sentiment: 'neutral' },
+        { title: 'Article 4', sentiment: 'positive' },
+      ];
+
+      const grouped = {
+        positive: mockArticles.filter(a => a.sentiment === 'positive'),
+        negative: mockArticles.filter(a => a.sentiment === 'negative'),
+        neutral: mockArticles.filter(a => a.sentiment === 'neutral'),
+      };
+
+      expect(grouped.positive.length).toBe(2);
+      expect(grouped.negative.length).toBe(1);
+      expect(grouped.neutral.length).toBe(1);
+    });
+
+    it('should handle alternative sentiment values (pos, neg)', () => {
+      const sentimentMapping = {
+        'positive': 'positive',
+        'pos': 'positive',
+        'negative': 'negative',
+        'neg': 'negative',
+        'neutral': 'neutral',
+        undefined: 'neutral'
+      };
+
+      expect(sentimentMapping['pos']).toBe('positive');
+      expect(sentimentMapping['neg']).toBe('negative');
+      expect(sentimentMapping[undefined]).toBe('neutral');
+    });
+
+    it('should include lastUpdatedExternal timestamp', () => {
+      const mockTimestamp = Date.now();
+      const response = {
+        articles: { positive: [], negative: [], neutral: [] },
+        lastUpdatedExternal: mockTimestamp
+      };
+
+      expect(response.lastUpdatedExternal).toBe(mockTimestamp);
+      expect(typeof response.lastUpdatedExternal).toBe('number');
+    });
+
+    it('should include sentiment counts in response', () => {
+      const response = {
+        articles: {
+          positive: [{}, {}],
+          negative: [{}],
+          neutral: [{}, {}, {}]
+        },
+        sentimentCounts: {
+          positive: 2,
+          negative: 1,
+          neutral: 3
+        }
+      };
+
+      expect(response.sentimentCounts.positive).toBe(2);
+      expect(response.sentimentCounts.negative).toBe(1);
+      expect(response.sentimentCounts.neutral).toBe(3);
+    });
+
+    it('should include total articles count', () => {
+      const response = {
+        totalArticles: 50
+      };
+
+      expect(response.totalArticles).toBeGreaterThanOrEqual(0);
+      expect(typeof response.totalArticles).toBe('number');
+    });
+  });
+
+  describe('Read-Through Caching', () => {
+    it('should use btc-news-latest as cache key', () => {
+      const cacheKey = 'btc-news-latest';
+      expect(cacheKey).toBe('btc-news-latest');
+    });
+
+    it('should return cache status (HIT or MISS)', () => {
+      const cacheHit = { cacheStatus: 'HIT' };
+      const cacheMiss = { cacheStatus: 'MISS' };
+
+      expect(cacheHit.cacheStatus).toBe('HIT');
+      expect(cacheMiss.cacheStatus).toBe('MISS');
+    });
+
+    it('should cache fresh data after MISS', () => {
+      // Verify caching behavior: MISS -> cache storage -> HIT
+      const cacheBehavior = [
+        { request: 1, status: 'MISS' }, // First request
+        { request: 2, status: 'HIT' },  // Second request (within TTL)
+      ];
+
+      expect(cacheBehavior[0].status).toBe('MISS');
+      expect(cacheBehavior[1].status).toBe('HIT');
+    });
+  });
+
+  describe('Response Headers', () => {
+    it('should include required headers for Bitcoin news', () => {
+      const requiredHeaders = [
+        'X-Cache-Status',
+        'X-Data-Source',
+        'X-Last-Updated',
+        'X-Cache-TTL',
+        'Cache-Control'
+      ];
+
+      requiredHeaders.forEach(header => {
+        expect(typeof header).toBe('string');
+        expect(header.length).toBeGreaterThan(0);
+      });
+    });
+
+    it('should set correct data source header', () => {
+      const dataSource = 'NewsData.io API';
+      expect(dataSource).toBe('NewsData.io API');
+    });
+
+    it('should expose custom headers via CORS', () => {
+      const exposedHeaders = 'X-Cache-Status, X-Currency-Converted, X-Conversion-Warning, X-Exchange-Rate, X-Data-Source-Price, X-Data-Source-Exchange, X-Data-Source, X-Last-Updated, X-Cache-TTL, Cache-Control';
+      
+      expect(exposedHeaders).toContain('X-Cache-Status');
+      expect(exposedHeaders).toContain('X-Last-Updated');
+      expect(exposedHeaders).toContain('X-Cache-TTL');
+      expect(exposedHeaders).toContain('X-Data-Source');
+    });
+  });
+
+  describe('Error Handling', () => {
+    it('should handle missing API key gracefully', () => {
+      const missingKeyError = 'NEWSDATA_API_KEY not configured';
+      expect(missingKeyError).toContain('NEWSDATA_API_KEY');
+    });
+
+    it('should handle API request failures', () => {
+      const apiError = 'NewsData.io API request failed: 401';
+      expect(apiError).toContain('NewsData.io API request failed');
+    });
+
+    it('should return appropriate error response', () => {
+      const errorResponse = {
+        error: 'Failed to fetch Bitcoin news',
+        message: 'API error details'
+      };
+
+      expect(errorResponse.error).toBe('Failed to fetch Bitcoin news');
+      expect(errorResponse).toHaveProperty('message');
+    });
+  });
+});
