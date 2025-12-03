@@ -229,8 +229,11 @@ Returns Bitcoin-related news articles grouped by sentiment (positive, negative, 
 **Features:**
 - **Single API Call Optimization**: Fetches all articles in one request (1 API credit instead of 3)
 - **Read-Through Caching**: 10-minute cache TTL for optimal performance and API credit efficiency
-- **Sentiment Grouping**: Automatically categorizes articles by sentiment
+- **Sentiment Grouping**: Automatically categorizes articles by sentiment (positive, negative, neutral)
 - **Comprehensive Response**: Includes article count, sentiment distribution, and timestamp
+- **Robust Handling**: Articles without sentiment data are automatically categorized as neutral
+
+**Note on Sentiment Data**: The sentiment field availability depends on your NewsData.io API plan. Articles without sentiment data are automatically categorized as "neutral" for consistent response structure.
 
 Response format:
 ```json

@@ -69,10 +69,14 @@ async function fetchBitcoinNews(env, ctx) {
   
   // CRITICAL: Use single API call to fetch all articles (optimized for API credits)
   // This fetches all Bitcoin-related articles in one request, regardless of sentiment
-  const newsUrl = `https://newsdata.io/api/1/crypto?apikey=${apiKey}&coin=btc&size=50`;
+  // Note: NewsData.io requires API key as a query parameter per their API documentation
+  const newsUrl = new URL('https://newsdata.io/api/1/crypto');
+  newsUrl.searchParams.set('apikey', apiKey);
+  newsUrl.searchParams.set('coin', 'btc');
+  newsUrl.searchParams.set('size', '50');
   
   try {
-    const response = await fetch(newsUrl);
+    const response = await fetch(newsUrl.toString());
     
     if (!response.ok) {
       throw new Error(`NewsData.io API request failed: ${response.status}`);
@@ -84,6 +88,8 @@ async function fetchBitcoinNews(env, ctx) {
     const lastUpdated = Date.now();
     
     // Process and group articles by sentiment
+    // NewsData.io API may or may not include sentiment field depending on plan
+    // Default to 'neutral' if sentiment is not provided
     const groupedBySentiment = {
       positive: [],
       negative: [],
@@ -93,14 +99,17 @@ async function fetchBitcoinNews(env, ctx) {
     // Group articles by sentiment category
     if (rawData.results && Array.isArray(rawData.results)) {
       rawData.results.forEach(article => {
-        const sentiment = article.sentiment?.toLowerCase() || 'neutral';
+        // Safely access sentiment field with optional chaining
+        // If no sentiment provided, default to 'neutral'
+        const sentiment = (article.sentiment?.toLowerCase() || 'neutral').trim();
         
-        // Normalize sentiment values
+        // Normalize sentiment values (handle various formats from API)
         if (sentiment === 'positive' || sentiment === 'pos') {
           groupedBySentiment.positive.push(article);
         } else if (sentiment === 'negative' || sentiment === 'neg') {
           groupedBySentiment.negative.push(article);
         } else {
+          // Default case: neutral, unknown, or missing sentiment
           groupedBySentiment.neutral.push(article);
         }
       });
