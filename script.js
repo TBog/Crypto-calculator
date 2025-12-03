@@ -863,13 +863,14 @@ async function fetchBitcoinNews() {
             }
         }
         
-        // Cache the news data
+        // Cache the news data with consistent timestamp
+        const now = Date.now();
         newsCache.data = data;
-        newsCache.timestamp = Date.now();
+        newsCache.timestamp = now;
         newsCache.cacheMetadata = {
             status: cacheStatus,
             maxAge: maxAge,
-            fetchTime: Date.now()
+            fetchTime: now
         };
         
         return {
@@ -1062,18 +1063,16 @@ function displayNews(articles, cacheMetadata) {
             neutral: []
         };
         
+        const validSentiments = ['positive', 'negative', 'neutral'];
+        
         filteredArticles.forEach(article => {
             const sent = (article.sentiment || 'neutral').toLowerCase();
-            if (grouped[sent]) {
-                grouped[sent].push(article);
-            } else {
-                // Fallback to neutral for any unexpected sentiment values
-                grouped.neutral.push(article);
-            }
+            const targetGroup = validSentiments.includes(sent) ? sent : 'neutral';
+            grouped[targetGroup].push(article);
         });
         
         // Display grouped articles
-        ['positive', 'negative', 'neutral'].forEach(sentimentType => {
+        validSentiments.forEach(sentimentType => {
             const articles = grouped[sentimentType];
             if (articles.length > 0) {
                 // Create group container
@@ -1329,11 +1328,12 @@ function startAutoRefresh() {
             await refreshChartAndPrice();
             
             // Also refresh news if it's been loaded and cache has expired
-            const newsDisplayContainer = document.getElementById('newsDisplayContainer');
-            if (newsDisplayContainer && newsDisplayContainer.style.display !== 'none') {
-                // Check if cache has expired before forcing refresh
-                const cached = getCachedNews();
-                if (!cached) {
+            // Check cache first to avoid unnecessary DOM query
+            const cached = getCachedNews();
+            if (!cached) {
+                // Cache expired - check if news is displayed before refreshing
+                const newsDisplayContainer = document.getElementById('newsDisplayContainer');
+                if (newsDisplayContainer && newsDisplayContainer.style.display !== 'none') {
                     await loadNews(true);
                 }
             }
