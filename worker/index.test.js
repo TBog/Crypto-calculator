@@ -322,13 +322,13 @@ describe('Bitcoin News Feed Feature', () => {
   describe('NewsData.io API Integration', () => {
     it('should use single API call with correct parameters', () => {
       const apiKey = 'test-key';
-      const expectedUrl = `https://newsdata.io/api/1/crypto?apikey=${apiKey}&coin=btc&size=50`;
+      const expectedUrl = `https://newsdata.io/api/1/crypto?apikey=${apiKey}&coin=btc&language=en`;
       const url = new URL(expectedUrl);
       
       expect(url.hostname).toBe('newsdata.io');
       expect(url.pathname).toBe('/api/1/crypto');
       expect(url.searchParams.get('coin')).toBe('btc');
-      expect(url.searchParams.get('size')).toBe('50');
+      expect(url.searchParams.get('language')).toBe('en');
     });
 
     it('should optimize API credits by using single call', () => {

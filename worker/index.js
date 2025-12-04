@@ -70,10 +70,12 @@ async function fetchBitcoinNews(env, ctx) {
   // CRITICAL: Use single API call to fetch all articles (optimized for API credits)
   // This fetches all Bitcoin-related articles in one request, regardless of sentiment
   // Note: NewsData.io requires API key as a query parameter per their API documentation
+  // Size parameter removed - API plan limits may vary (default is 10)
+  // Language filter ensures relevant English news articles
   const newsUrl = new URL('https://newsdata.io/api/1/crypto');
   newsUrl.searchParams.set('apikey', apiKey);
   newsUrl.searchParams.set('coin', 'btc');
-  newsUrl.searchParams.set('size', '50');
+  newsUrl.searchParams.set('language', 'en');
   
   try {
     const response = await fetch(newsUrl.toString());
