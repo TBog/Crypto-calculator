@@ -363,7 +363,7 @@ describe('Bitcoin News Feed Feature', () => {
 
       // Articles may not have sentiment in free tier
       expect(Array.isArray(articlesWithoutSentiment)).toBe(true);
-      expect(articlesWithoutSentiment.every(a => a.sentiment === undefined)).toBe(true);
+      expect(articlesWithoutSentiment.every(a => !a.hasOwnProperty('sentiment'))).toBe(true);
     });
 
     it('should include lastUpdatedExternal timestamp', () => {
