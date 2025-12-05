@@ -23,6 +23,12 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
   - Identifies key movements and patterns
   - Provides concise market analysis
   - Cached for 5 minutes for optimal performance
+- **Bitcoin News Feed**: Real-time Bitcoin news with sentiment analysis powered by NewsData.io
+  - Single API call optimization (1 credit per refresh instead of 3)
+  - Read-through caching with 10-minute TTL
+  - Automatic sentiment categorization (positive, negative, neutral)
+  - Comprehensive article metadata and sentiment distribution
+  - Fresh data indicators with lastUpdatedExternal timestamp
 
 ## Testing
 
@@ -86,11 +92,19 @@ The test suite covers:
    wrangler deploy
    ```
 
-5. **Set the API Key** (optional, but recommended):
+5. **Set the API Keys** (recommended):
+   
+   **CoinGecko API Key** (optional, for higher rate limits):
    ```bash
    wrangler secret put COINGECKO_KEY
    ```
    When prompted, enter your CoinGecko API key.
+   
+   **NewsData.io API Key** (required for Bitcoin news feed):
+   ```bash
+   wrangler secret put NEWSDATA_API_KEY
+   ```
+   When prompted, enter your NewsData.io API key. Get a free key at [newsdata.io](https://newsdata.io/).
 
 6. **Note your Worker URL**: After deployment, Wrangler will display your worker URL (e.g., `https://crypto-cache.YOUR_SUBDOMAIN.workers.dev`)
 
@@ -205,6 +219,61 @@ Response format:
 - `X-Summary-Period: 24h|7d|30d|90d`
 - `Cache-Control: public, max-age=300`
 
+**Get Bitcoin News Feed with Sentiment Analysis:**
+```
+GET /api/bitcoin-news
+```
+
+Returns Bitcoin-related news articles grouped by sentiment (positive, negative, neutral) from NewsData.io API.
+
+**Features:**
+- **Single API Call Optimization**: Fetches all articles in one request (1 API credit instead of 3)
+- **Read-Through Caching**: 10-minute cache TTL for optimal performance and API credit efficiency
+- **Sentiment Grouping**: Automatically categorizes articles by sentiment (positive, negative, neutral)
+- **Comprehensive Response**: Includes article count, sentiment distribution, and timestamp
+- **Robust Handling**: Articles without sentiment data are automatically categorized as neutral
+
+**Note on Sentiment Data**: The sentiment field availability depends on your NewsData.io API plan. Articles without sentiment data are automatically categorized as "neutral" for consistent response structure.
+
+Response format:
+```json
+{
+  "articles": {
+    "positive": [
+      {
+        "title": "Bitcoin Surges to New Heights",
+        "description": "Bitcoin reaches all-time high...",
+        "link": "https://example.com/article",
+        "pubDate": "2024-12-03 10:00:00",
+        "source_id": "cryptonews",
+        "sentiment": "positive"
+      }
+    ],
+    "negative": [...],
+    "neutral": [...]
+  },
+  "totalArticles": 50,
+  "lastUpdatedExternal": 1701601234567,
+  "sentimentCounts": {
+    "positive": 15,
+    "negative": 10,
+    "neutral": 25
+  }
+}
+```
+
+**Headers:**
+- `X-Cache-Status: HIT` or `MISS` - Indicates cache status
+- `X-Data-Source: NewsData.io API` - Attribution for news data source
+- `X-Last-Updated: 1701601234567` - Timestamp when data was fetched from NewsData.io
+- `X-Cache-TTL: 600` - Cache duration in seconds (10 minutes)
+- `Cache-Control: public, max-age=600`
+
+**Performance:**
+- Cache Duration: 10 minutes (600 seconds)
+- API Credits: 1 credit per cache refresh (optimized from 3 credits)
+- Fresh Data: Timestamp indicates exact time data was fetched from external API
+
 **Get All Supported Currencies from ExchangeRate-API:**
 ```
 GET /api/exchange-rates/supported-currencies
@@ -286,6 +355,7 @@ const ALLOWED_ORIGINS = [
 ## Environment Variables
 
 - `COINGECKO_KEY` (optional): Your CoinGecko API key for higher rate limits
+- `NEWSDATA_API_KEY` (required for news feed): Your NewsData.io API key for Bitcoin news feed feature. Get a free key at [newsdata.io](https://newsdata.io/)
 
 ## Additional Resources
 

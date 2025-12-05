@@ -34,6 +34,99 @@ const SUMMARY_CACHE_TTL = 300;
 // Cache duration for price history used in summaries (10 minutes in seconds)
 const PRICE_HISTORY_CACHE_TTL = 600;
 
+// Cache duration for Bitcoin news (5-10 minutes in seconds)
+const BITCOIN_NEWS_CACHE_TTL = 600; // 10 minutes
+
+/**
+ * Fetch Bitcoin news from NewsData.io API with read-through caching
+ * Uses a single API call to fetch all articles regardless of sentiment
+ * @param {Object} env - Environment variables (includes NEWSDATA_API_KEY)
+ * @param {Object} ctx - Execution context
+ * @returns {Promise<{data: Object, cacheStatus: string, lastUpdated: number}>} News data with cache status and timestamp
+ */
+async function fetchBitcoinNews(env, ctx) {
+  const cacheKey = 'btc-news-latest';
+  const cache = caches.default;
+  
+  // Try to get from cache first (Read-Through Cache pattern)
+  const cacheUrl = new URL(`https://cache-internal/${cacheKey}`);
+  const cachedResponse = await cache.match(cacheUrl);
+  
+  if (cachedResponse) {
+    const cachedData = await cachedResponse.json();
+    return { 
+      data: cachedData.data, 
+      cacheStatus: 'HIT',
+      lastUpdated: cachedData.lastUpdated 
+    };
+  }
+  
+  // Cache miss - fetch from NewsData.io API
+  const apiKey = env.NEWSDATA_API_KEY;
+  if (!apiKey) {
+    throw new Error('NEWSDATA_API_KEY not configured');
+  }
+  
+  // CRITICAL: Use single API call to fetch all articles (optimized for API credits)
+  // This fetches all Bitcoin-related articles in one request, regardless of sentiment
+  // Note: NewsData.io requires API key as a query parameter per their API documentation
+  // Size parameter removed - API plan limits may vary (default is 10)
+  // Language filter ensures relevant English news articles
+  // Remove duplicates to maximize unique articles in limited free tier (10 articles)
+  const newsUrl = new URL('https://newsdata.io/api/1/crypto');
+  newsUrl.searchParams.set('apikey', apiKey);
+  newsUrl.searchParams.set('coin', 'btc');
+  newsUrl.searchParams.set('language', 'en');
+  newsUrl.searchParams.set('removeduplicate', '1');
+  
+  try {
+    const response = await fetch(newsUrl.toString());
+    
+    if (!response.ok) {
+      throw new Error(`NewsData.io API request failed: ${response.status}`);
+    }
+    
+    const rawData = await response.json();
+    
+    // Record the exact time data was fetched from external API
+    const lastUpdated = Date.now();
+    
+    // Structure the final response with flat array of articles
+    // Note: Sentiment field may not be available in free tier plans
+    // Grouping is removed to support all plan types
+    const structuredData = {
+      articles: rawData.results || [],
+      totalArticles: rawData.totalResults || 0,
+      lastUpdatedExternal: lastUpdated // Timestamp when data was fetched from NewsData.io
+    };
+    
+    // Prepare cache response
+    const cacheData = {
+      data: structuredData,
+      lastUpdated: lastUpdated
+    };
+    
+    const cacheResponse = new Response(JSON.stringify(cacheData), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': `public, max-age=${BITCOIN_NEWS_CACHE_TTL}`
+      }
+    });
+    
+    // Cache asynchronously using waitUntil
+    ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
+    
+    return { 
+      data: structuredData, 
+      cacheStatus: 'MISS',
+      lastUpdated: lastUpdated 
+    };
+  } catch (error) {
+    console.error('Failed to fetch Bitcoin news:', error);
+    throw error;
+  }
+}
+
 /**
  * Generic function to fetch data from CoinGecko API with caching
  * @param {string} endpoint - CoinGecko API endpoint (e.g., '/api/v3/simple/supported_vs_currencies')
@@ -469,7 +562,7 @@ async function handleRequest(request, env, ctx) {
     'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400', // 24 hours
-    'Access-Control-Expose-Headers': 'X-Cache-Status, X-Currency-Converted, X-Conversion-Warning, X-Exchange-Rate, X-Data-Source-Price, X-Data-Source-Exchange, Cache-Control',
+    'Access-Control-Expose-Headers': 'X-Cache-Status, X-Currency-Converted, X-Conversion-Warning, X-Exchange-Rate, X-Data-Source-Price, X-Data-Source-Exchange, X-Data-Source, X-Last-Updated, X-Cache-TTL, Cache-Control',
   };
 
   // Handle CORS preflight requests
@@ -563,6 +656,38 @@ async function handleRequest(request, env, ctx) {
         console.error('Failed to generate summary:', error);
         return new Response(JSON.stringify({
           error: 'Failed to generate price summary',
+          message: error.message
+        }), {
+          status: 500,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json'
+          }
+        });
+      }
+    }
+    
+    // Special endpoint for Bitcoin news feed with caching and sentiment analysis
+    if (url.pathname === '/api/bitcoin-news') {
+      try {
+        const result = await fetchBitcoinNews(env, ctx);
+        
+        return new Response(JSON.stringify(result.data), {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json',
+            'Cache-Control': `public, max-age=${BITCOIN_NEWS_CACHE_TTL}`,
+            'X-Cache-Status': result.cacheStatus,
+            'X-Data-Source': 'NewsData.io API',
+            'X-Last-Updated': result.lastUpdated.toString(),
+            'X-Cache-TTL': BITCOIN_NEWS_CACHE_TTL.toString()
+          }
+        });
+      } catch (error) {
+        console.error('Failed to fetch Bitcoin news:', error);
+        return new Response(JSON.stringify({
+          error: 'Failed to fetch Bitcoin news',
           message: error.message
         }), {
           status: 500,

@@ -1,6 +1,7 @@
 name = "crypto-cache"
 main = "index.js"
 compatibility_date = "2024-10-01"
+compatibility_flags = ["nodejs_compat"]
 
 # AI binding for LLM summarization
 [ai]
@@ -8,8 +9,9 @@ binding = "AI"
 
 # Environment bindings
 # The COINGECKO_KEY should be set using: wrangler secret put COINGECKO_KEY
-# This keeps the API key secure and out of version control
+# The NEWSDATA_API_KEY should be set using: wrangler secret put NEWSDATA_API_KEY
+# This keeps the API keys secure and out of version control
 
 [env.production]
 # Production environment configuration
-# Secrets are automatically available in env.COINGECKO_KEY
+# Secrets are automatically available in env.COINGECKO_KEY and env.NEWSDATA_API_KEY
