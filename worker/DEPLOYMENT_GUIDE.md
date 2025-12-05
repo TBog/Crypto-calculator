@@ -292,14 +292,24 @@ const MAX_PAGES = 15;         // Maximum pagination pages
 
 ### NewsData.io API (Free Tier: 200 credits/day)
 
+**⚠️ IMPORTANT: The default hourly schedule may exceed the free tier limit.**
+
 With hourly cron (default):
 - ~5-11 credits per run (depending on pagination)
 - 24 runs/day = 120-264 credits/day
-- **May exceed free tier**
+- **⚠️ Maximum usage (264 credits) EXCEEDS the 200 credit free tier limit**
+- **Recommendation**: Use 2-hour schedule for free tier (see below)
 
-With 2-hour cron:
+With 2-hour cron (recommended for free tier):
 - 12 runs/day = 60-132 credits/day
-- **Fits within free tier**
+- **✅ Fits comfortably within free tier limits**
+- Still provides fresh data every 2 hours
+
+To use 2-hour schedule, edit `wrangler-news-updater.toml`:
+```toml
+[triggers]
+crons = ["0 */2 * * *"]  # Every 2 hours instead of hourly
+```
 
 ### Cloudflare Workers (Free Tier)
 

@@ -19,6 +19,9 @@ const TARGET_ARTICLES = 100;
 // Maximum number of pages to fetch (safety limit)
 const MAX_PAGES = 15;
 
+// Maximum articles to keep in KV storage (prevent size issues)
+const MAX_STORED_ARTICLES = 200;
+
 /**
  * Fetch articles from NewsData.io with pagination support
  * @param {string} apiKey - NewsData.io API key
@@ -116,7 +119,10 @@ async function aggregateArticles(env) {
   // Track article IDs we've already seen to detect duplicates
   const seenArticleIds = new Set();
   
-  // Fetch articles from existing KV to avoid re-processing
+  // Fetch article IDs from existing KV to avoid re-processing
+  // Note: This loads IDs into memory. With MAX_STORED_ARTICLES=200,
+  // this uses minimal memory (~10KB for 200 IDs). For larger datasets,
+  // consider a time-based deduplication strategy instead.
   try {
     const existingData = await env.CRYPTO_NEWS_CACHE.get(KV_KEY, { type: 'json' });
     if (existingData && existingData.articles) {
@@ -140,6 +146,9 @@ async function aggregateArticles(env) {
       
       // Filter out articles we've already stored
       const newArticles = pageData.articles.filter(article => {
+        // Use article_id as primary identifier, fallback to link
+        // NewsData.io API provides article_id as unique identifier
+        // If article_id is missing (rare), use link as fallback
         const articleId = article.article_id || article.link;
         if (!articleId || seenArticleIds.has(articleId)) {
           return false;
@@ -238,8 +247,7 @@ async function storeInKV(env, newArticles) {
     const existingData = await env.CRYPTO_NEWS_CACHE.get(KV_KEY, { type: 'json' });
     if (existingData && existingData.articles) {
       // Keep existing articles (up to a reasonable limit to avoid KV size issues)
-      const maxArticles = 200;
-      const existingArticles = existingData.articles.slice(0, maxArticles - newArticles.length);
+      const existingArticles = existingData.articles.slice(0, MAX_STORED_ARTICLES - newArticles.length);
       allArticles = [...newArticles, ...existingArticles];
       console.log(`Merged ${newArticles.length} new articles with ${existingArticles.length} existing articles`);
     }
