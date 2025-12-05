@@ -9,6 +9,10 @@ compatibility_flags = ["nodejs_compat"]
 [triggers]
 crons = ["0 * * * *"]
 
+# AI binding for sentiment analysis
+[ai]
+binding = "AI"
+
 # KV namespace for storing analyzed news
 [[kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
@@ -18,12 +22,11 @@ id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID_FROM_STEP_2"
 
 # Environment bindings
 # The NEWSDATA_API_KEY should be set using: wrangler secret put NEWSDATA_API_KEY
-# The GEMINI_API_KEY should be set using: wrangler secret put GEMINI_API_KEY
-# This keeps the API keys secure and out of version control
+# This keeps the API key secure and out of version control
 
 [env.production]
 # Production environment configuration
-# Secrets are automatically available in env.NEWSDATA_API_KEY and env.GEMINI_API_KEY
+# Secrets are automatically available in env.NEWSDATA_API_KEY
 [[env.production.kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with production KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production

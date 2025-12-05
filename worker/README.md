@@ -26,7 +26,7 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
 - **Bitcoin News Feed with Scheduled Updates**: Bitcoin news with AI-powered sentiment analysis
   - **NEW: Optimized Scheduled Worker** - Hourly cron job with early-exit pagination
   - Early-exit optimization: Stops fetching when hitting known articles
-  - Gemini API sentiment analysis (positive, negative, neutral)
+  - Cloudflare Workers AI sentiment analysis (positive, negative, neutral)
   - Two-key KV structure: ID index for deduplication + full payload for API
   - Exactly 2 KV writes per run (48/day total)
   - Maintains up to 500 articles with sentiment tags
@@ -234,7 +234,7 @@ Returns Bitcoin-related news articles with AI-powered sentiment analysis from a 
 - **Scheduled Worker**: Runs hourly with early-exit pagination optimization
 - **Early Exit**: Stops fetching when hitting a known article (saves API credits)
 - **Two-Key KV**: Separate ID index for O(1) deduplication + full payload for API
-- **Gemini API Sentiment**: Each article analyzed using Google's Gemini Pro model
+- **Workers AI Sentiment**: Each article analyzed using Cloudflare Workers AI (Llama 3.1 8B)
 - **Exactly 2 KV Writes**: Updates both ID index and full payload per run
 - **Ultra-Fast API**: Endpoint reads from KV (millisecond latency)
 
@@ -242,7 +242,7 @@ Returns Bitcoin-related news articles with AI-powered sentiment analysis from a 
 - **Hourly Updates**: Fresh news aggregated every hour by cron job
 - **Smart Pagination**: Early-exit when encountering known articles
 - **Up to 500 Articles**: Maintains larger history than previous 200-article limit
-- **Gemini-Powered Sentiment**: High-accuracy classification (positive, negative, neutral)
+- **AI-Powered Sentiment**: Edge-native sentiment classification (positive, negative, neutral)
 - **Optimized for Free Tier**: Minimal API credits (early exit) and KV writes (2 per run)
 - **Deduplication**: ID index enables fast O(1) duplicate detection
 - **Sentiment Distribution**: Includes counts of articles by sentiment
@@ -382,10 +382,10 @@ const ALLOWED_ORIGINS = [
 
 ### Scheduled News Updater Worker (`news-updater-cron.js`)
 - `NEWSDATA_API_KEY` (required): Your NewsData.io API key. Get a free key at [newsdata.io](https://newsdata.io/)
-- `GEMINI_API_KEY` (required): Your Google Gemini API key. Get a free key at [Google AI Studio](https://makersuite.google.com/app/apikey)
 - `CRYPTO_NEWS_CACHE` (KV binding): Cloudflare KV namespace for storing analyzed news and ID index
+- `AI` (binding): Cloudflare Workers AI for sentiment analysis
 
-**Note:** The main API worker no longer needs `NEWSDATA_API_KEY` or `GEMINI_API_KEY` as it only reads from KV.
+**Note:** The main API worker no longer needs `NEWSDATA_API_KEY` as it only reads from KV.
 
 ## Deployment
 
