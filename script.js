@@ -967,18 +967,18 @@ function displayNews(articles, cacheMetadata) {
         articles.forEach(article => {
                     // Create article card
                     const articleDiv = document.createElement('div');
-                    articleDiv.className = 'bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-200 dark:border-gray-600';
+                    articleDiv.className = 'bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border border-gray-200 dark:border-gray-600';
                     
                     // Title with source icon
                     const titleH4 = document.createElement('h4');
-                    titleH4.className = 'font-semibold text-sm text-gray-800 dark:text-white mb-1 flex items-center gap-2';
+                    titleH4.className = 'text-sm text-gray-800 dark:text-white mb-2 flex items-center gap-3 bg-gradient-to-r from-gray-100 to-gray-50 dark:from-gray-700 dark:to-gray-700/50 p-2 rounded';
                     
                     // Add source icon if available
                     if (article.source_icon) {
                         const iconImg = document.createElement('img');
                         iconImg.src = article.source_icon;
                         iconImg.alt = article.source_name || 'Source';
-                        iconImg.className = 'w-4 h-4 rounded-sm flex-shrink-0';
+                        iconImg.className = 'w-4 h-4 rounded-sm flex-shrink-0 ml-1';
                         iconImg.onerror = function() { this.style.display = 'none'; }; // Hide if image fails to load
                         titleH4.appendChild(iconImg);
                     }
