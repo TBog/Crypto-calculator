@@ -22,6 +22,9 @@ const MAX_STORED_ARTICLES = 500;
 // Maximum number of pages to fetch (safety limit)
 const MAX_PAGES = 15;
 
+// ID index TTL in seconds (30 days)
+const ID_INDEX_TTL = 60 * 60 * 24 * 30;
+
 /**
  * Fetch articles from NewsData.io with pagination support
  * @param {string} apiKey - NewsData.io API key
@@ -55,8 +58,8 @@ async function fetchNewsPage(apiKey, nextPage = null) {
 }
 
 /**
- * Analyze sentiment of an article using Gemini API
- * @param {Object} env - Environment variables (includes GEMINI_API_KEY)
+ * Analyze sentiment of an article using Cloudflare Workers AI
+ * @param {Object} env - Environment variables (includes AI binding)
  * @param {Object} article - Article object to analyze
  * @returns {Promise<string>} Sentiment classification (positive, negative, neutral)
  */
@@ -65,40 +68,23 @@ async function analyzeSentiment(env, article) {
     // Construct prompt from article title and description
     const text = `${article.title || ''}. ${article.description || ''}`;
     
-    // Use Gemini API to classify sentiment
-    const apiKey = env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.warn('GEMINI_API_KEY not configured, using neutral sentiment');
-      return 'neutral';
-    }
-    
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+    // Use Cloudflare Workers AI to classify sentiment
+    const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a sentiment analysis assistant. Classify the sentiment of the provided Bitcoin-related news article as exactly one word: "positive", "negative", or "neutral". Only respond with that single word.'
         },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `Classify the sentiment of this Bitcoin-related news article as exactly one word: "positive", "negative", or "neutral". Only respond with that single word.\n\nArticle: ${text}`
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 10,
-          }
-        })
-      }
-    );
+        {
+          role: 'user',
+          content: text
+        }
+      ],
+      max_tokens: 10
+    });
     
-    if (!response.ok) {
-      throw new Error(`Gemini API request failed: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    const sentiment = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toLowerCase();
+    // Extract sentiment from response
+    const sentiment = (response.response || response || '').trim().toLowerCase();
     
     // Validate and normalize sentiment
     if (sentiment.includes('positive')) {
@@ -294,7 +280,7 @@ async function storeInKV(env, newArticles, allKnownIds) {
     KV_KEY_IDS, 
     JSON.stringify(idArray),
     {
-      expirationTtl: 60 * 60 * 24 * 30  // 30 days TTL
+      expirationTtl: ID_INDEX_TTL
     }
   );
   console.log(`Write #2: Stored ${idArray.length} article IDs in index under key: ${KV_KEY_IDS}`);
