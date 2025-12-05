@@ -1135,16 +1135,6 @@ async function loadNews(forceRefresh = false) {
 }
 
 /**
- * Refresh news display with current filters
- */
-function refreshNewsDisplay() {
-    const cached = getCachedNews();
-    if (cached && cached.data && cached.data.articles) {
-        displayNews(cached.data.articles, cached.cacheMetadata);
-    }
-}
-
-/**
  * Refresh chart and sell price
  * Uses chart data to get the most recent price, which is more efficient
  * as it avoids a separate API call and ensures price/chart synchronization
