@@ -978,7 +978,7 @@ function displayNews(articles, cacheMetadata) {
                         const iconImg = document.createElement('img');
                         iconImg.src = article.source_icon;
                         iconImg.alt = article.source_name || 'Source';
-                        iconImg.className = 'w-4 h-4 rounded-sm flex-shrink-0 ml-1';
+                        iconImg.className = 'w-4 h-4 rounded-sm flex-shrink-0';
                         iconImg.onerror = function() { this.style.display = 'none'; }; // Hide if image fails to load
                         titleH4.appendChild(iconImg);
                     }
