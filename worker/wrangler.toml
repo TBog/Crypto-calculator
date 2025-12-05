@@ -7,11 +7,19 @@ compatibility_flags = ["nodejs_compat"]
 [ai]
 binding = "AI"
 
+# KV namespace for reading cached news (written by news-updater-cron worker)
+[[kv_namespaces]]
+binding = "CRYPTO_NEWS_CACHE"
+id = "YOUR_KV_NAMESPACE_ID"  # Replace with actual KV namespace ID after creating it
+
 # Environment bindings
 # The COINGECKO_KEY should be set using: wrangler secret put COINGECKO_KEY
-# The NEWSDATA_API_KEY should be set using: wrangler secret put NEWSDATA_API_KEY
+# The NEWSDATA_API_KEY should be set using: wrangler secret put NEWSDATA_API_KEY (no longer needed after migration)
 # This keeps the API keys secure and out of version control
 
 [env.production]
 # Production environment configuration
 # Secrets are automatically available in env.COINGECKO_KEY and env.NEWSDATA_API_KEY
+[[env.production.kv_namespaces]]
+binding = "CRYPTO_NEWS_CACHE"
+id = "YOUR_PRODUCTION_KV_NAMESPACE_ID"  # Replace with production KV namespace ID
