@@ -1100,20 +1100,34 @@ function displayNews(articles, cacheMetadata) {
                     const articleDiv = document.createElement('div');
                     articleDiv.className = 'bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-200 dark:border-gray-600';
                     
-                    // Title (with link if available)
+                    // Title with source icon
                     const titleH4 = document.createElement('h4');
-                    titleH4.className = 'font-semibold text-sm text-gray-800 dark:text-white mb-1';
+                    titleH4.className = 'font-semibold text-sm text-gray-800 dark:text-white mb-1 flex items-center gap-2';
                     
+                    // Add source icon if available
+                    if (article.source_icon) {
+                        const iconImg = document.createElement('img');
+                        iconImg.src = article.source_icon;
+                        iconImg.alt = article.source_name || 'Source';
+                        iconImg.className = 'w-4 h-4 rounded-sm flex-shrink-0';
+                        iconImg.onerror = function() { this.style.display = 'none'; }; // Hide if image fails to load
+                        titleH4.appendChild(iconImg);
+                    }
+                    
+                    // Title text/link
                     if (article.link) {
                         const titleLink = document.createElement('a');
                         titleLink.href = article.link;
                         titleLink.target = '_blank';
                         titleLink.rel = 'noopener noreferrer';
-                        titleLink.className = 'hover:text-blue-600 dark:hover:text-blue-400 transition';
+                        titleLink.className = 'hover:text-blue-600 dark:hover:text-blue-400 transition flex-1';
                         titleLink.textContent = article.title || 'Untitled';
                         titleH4.appendChild(titleLink);
                     } else {
-                        titleH4.textContent = article.title || 'Untitled';
+                        const titleSpan = document.createElement('span');
+                        titleSpan.className = 'flex-1';
+                        titleSpan.textContent = article.title || 'Untitled';
+                        titleH4.appendChild(titleSpan);
                     }
                     articleDiv.appendChild(titleH4);
                     
@@ -1129,9 +1143,20 @@ function displayNews(articles, cacheMetadata) {
                     const footerDiv = document.createElement('div');
                     footerDiv.className = 'flex items-center justify-between text-xs text-gray-500 dark:text-gray-400';
                     
-                    const sourceSpan = document.createElement('span');
-                    sourceSpan.textContent = article.source || 'Unknown Source';
-                    footerDiv.appendChild(sourceSpan);
+                    // Source name with link
+                    if (article.source_url && article.source_name) {
+                        const sourceLink = document.createElement('a');
+                        sourceLink.href = article.source_url;
+                        sourceLink.target = '_blank';
+                        sourceLink.rel = 'noopener noreferrer';
+                        sourceLink.className = 'hover:text-blue-600 dark:hover:text-blue-400 transition';
+                        sourceLink.textContent = article.source_name;
+                        footerDiv.appendChild(sourceLink);
+                    } else {
+                        const sourceSpan = document.createElement('span');
+                        sourceSpan.textContent = article.source_name || 'Unknown Source';
+                        footerDiv.appendChild(sourceSpan);
+                    }
                     
                     const timeSpan = document.createElement('span');
                     timeSpan.textContent = formatRelativeTime(article.pubDate);
