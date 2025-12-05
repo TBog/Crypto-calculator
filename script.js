@@ -895,6 +895,7 @@ async function fetchBitcoinNews() {
         // Extract cache metadata from response headers
         const cacheStatus = response.headers.get('X-Cache-Status');
         const cacheControl = response.headers.get('Cache-Control');
+        const lastUpdated = response.headers.get('X-Last-Updated');
         
         // Parse max-age from Cache-Control header if available
         let maxAge = null;
@@ -905,6 +906,9 @@ async function fetchBitcoinNews() {
             }
         }
         
+        // Use lastUpdatedExternal from data if available, otherwise use header or current time
+        const fetchTime = data.lastUpdatedExternal || (lastUpdated ? parseInt(lastUpdated) : Date.now());
+        
         // Cache the news data with consistent timestamp
         const now = Date.now();
         newsCache.data = data;
@@ -912,7 +916,8 @@ async function fetchBitcoinNews() {
         newsCache.cacheMetadata = {
             status: cacheStatus,
             maxAge: maxAge,
-            fetchTime: now
+            fetchTime: fetchTime, // This is when data was fetched from external API
+            displayTime: now // This is when we displayed it to user
         };
         
         return {
@@ -1089,31 +1094,32 @@ function displayNews(articles, cacheMetadata) {
 function updateNewsTime(cacheMetadata = null) {
     const newsUpdateElement = document.getElementById('newsUpdateTime');
     if (newsUpdateElement) {
-        const now = new Date();
-        const timeString = now.toLocaleTimeString(undefined, { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            second: '2-digit'
-        });
-        
-        let displayText = `Last updated: ${timeString}`;
+        let displayText = '';
         
         // Add cache information if available
-        if (cacheMetadata) {
-            const { status, maxAge, fetchTime } = cacheMetadata;
+        if (cacheMetadata && cacheMetadata.fetchTime) {
+            const { status, fetchTime } = cacheMetadata;
             
-            if (status === 'HIT' && maxAge && fetchTime) {
-                // Calculate remaining cache time
-                const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
-                const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
-                const remainingMinutes = Math.floor(remainingSeconds / 60);
-                
-                displayText += ` (cached, expires in ${remainingMinutes}m)`;
-            } else if (status === 'MISS' && maxAge) {
-                // Fresh data from backend
-                const expiresMinutes = Math.floor(maxAge / 60);
-                displayText += ` (fresh data, cache ${expiresMinutes}m)`;
+            // Show when data was fetched from external API (by scheduled worker)
+            const fetchDate = new Date(fetchTime);
+            const timeAgo = formatRelativeTime(fetchDate.toISOString());
+            
+            if (status === 'KV') {
+                // Data is from KV, populated by scheduled worker
+                displayText = `Data refreshed ${timeAgo} (updated hourly by scheduled worker)`;
+            } else {
+                // Fallback for other cache statuses
+                displayText = `Last updated: ${timeAgo}`;
             }
+        } else {
+            // Fallback if no metadata
+            const now = new Date();
+            const timeString = now.toLocaleTimeString(undefined, { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            displayText = `Last updated: ${timeString}`;
         }
         
         newsUpdateElement.textContent = displayText;
