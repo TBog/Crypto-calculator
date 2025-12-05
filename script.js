@@ -825,6 +825,315 @@ async function requestAISummary() {
     }
 }
 
+// ========== BITCOIN NEWS FEED ==========
+
+// News cache
+const newsCache = {
+    data: null,
+    timestamp: null,
+    cacheMetadata: null
+};
+const NEWS_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Fetch Bitcoin news from the API
+ * @returns {Promise<Object>} News data with cache metadata
+ */
+async function fetchBitcoinNews() {
+    try {
+        const workerUrl = `${WORKER_BASE_URL}/api/bitcoin-news`;
+        const response = await fetch(workerUrl);
+        
+        if (!response.ok) {
+            throw new Error(`Worker responded with status ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Extract cache metadata from response headers
+        const cacheStatus = response.headers.get('X-Cache-Status');
+        const cacheControl = response.headers.get('Cache-Control');
+        
+        // Parse max-age from Cache-Control header if available
+        let maxAge = null;
+        if (cacheControl) {
+            const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
+            if (maxAgeMatch) {
+                maxAge = parseInt(maxAgeMatch[1], 10);
+            }
+        }
+        
+        // Cache the news data with consistent timestamp
+        const now = Date.now();
+        newsCache.data = data;
+        newsCache.timestamp = now;
+        newsCache.cacheMetadata = {
+            status: cacheStatus,
+            maxAge: maxAge,
+            fetchTime: now
+        };
+        
+        return {
+            data,
+            cacheMetadata: newsCache.cacheMetadata
+        };
+    } catch (error) {
+        console.error('Failed to fetch Bitcoin news:', error);
+        throw error;
+    }
+}
+
+/**
+ * Get cached news if available and not expired
+ * @returns {Object|null} Cached news data or null
+ */
+function getCachedNews() {
+    if (!newsCache.data || !newsCache.timestamp) {
+        return null;
+    }
+    
+    const cacheAge = Date.now() - newsCache.timestamp;
+    if (cacheAge > NEWS_CACHE_DURATION) {
+        return null;
+    }
+    
+    return {
+        data: newsCache.data,
+        cacheMetadata: newsCache.cacheMetadata
+    };
+}
+
+/**
+ * Format relative time
+ * @param {string} dateString - ISO date string
+ * @returns {string} Formatted relative time
+ */
+function formatRelativeTime(dateString) {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 60) {
+        return `${diffMins}m ago`;
+    } else if (diffHours < 24) {
+        return `${diffHours}h ago`;
+    } else {
+        return `${diffDays}d ago`;
+    }
+}
+
+/**
+ * Display news articles
+ * @param {Array} articles - Array of news articles
+ * @param {Object} cacheMetadata - Cache metadata
+ */
+function displayNews(articles, cacheMetadata) {
+    const newsArticles = document.getElementById('newsArticles');
+    const displayContainer = document.getElementById('newsDisplayContainer');
+    const loadingContainer = document.getElementById('newsLoadingContainer');
+    const initialContainer = document.getElementById('newsInitialContainer');
+    const errorContainer = document.getElementById('newsErrorContainer');
+    
+    // Hide other states, show news
+    initialContainer.style.display = 'none';
+    loadingContainer.style.display = 'none';
+    errorContainer.style.display = 'none';
+    displayContainer.style.display = 'block';
+    
+    // Clear existing content
+    newsArticles.innerHTML = '';
+    
+    if (!articles || articles.length === 0) {
+        // Create empty state message using safe DOM manipulation
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'text-center py-8 text-gray-500 dark:text-gray-400';
+        
+        const messageP = document.createElement('p');
+        messageP.className = 'text-sm';
+        messageP.textContent = 'No articles available at the moment.';
+        emptyDiv.appendChild(messageP);
+        
+        const hintP = document.createElement('p');
+        hintP.className = 'text-xs mt-2';
+        hintP.textContent = 'Try refreshing to get the latest news.';
+        emptyDiv.appendChild(hintP);
+        
+        newsArticles.appendChild(emptyDiv);
+    } else {
+        // Display all articles in a simple list
+        articles.forEach(article => {
+                    // Create article card
+                    const articleDiv = document.createElement('div');
+                    articleDiv.className = 'bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border border-gray-200 dark:border-gray-600';
+                    
+                    // Title with source icon
+                    const titleH4 = document.createElement('h4');
+                    titleH4.className = 'text-sm text-gray-800 dark:text-white mb-2 flex items-center gap-3 bg-gradient-to-r from-gray-100 to-gray-50 dark:from-gray-700 dark:to-gray-700/50 p-2 rounded';
+                    
+                    // Add source icon if available
+                    if (article.source_icon) {
+                        const iconImg = document.createElement('img');
+                        iconImg.src = article.source_icon;
+                        iconImg.alt = article.source_name || 'Source';
+                        iconImg.className = 'w-4 h-4 rounded-sm flex-shrink-0';
+                        iconImg.onerror = function() { this.style.display = 'none'; }; // Hide if image fails to load
+                        titleH4.appendChild(iconImg);
+                    }
+                    
+                    // Title text/link
+                    if (article.link) {
+                        const titleLink = document.createElement('a');
+                        titleLink.href = article.link;
+                        titleLink.target = '_blank';
+                        titleLink.rel = 'noopener noreferrer';
+                        titleLink.className = 'hover:text-blue-600 dark:hover:text-blue-400 transition flex-1';
+                        titleLink.textContent = article.title || 'Untitled';
+                        titleH4.appendChild(titleLink);
+                    } else {
+                        const titleSpan = document.createElement('span');
+                        titleSpan.className = 'flex-1';
+                        titleSpan.textContent = article.title || 'Untitled';
+                        titleH4.appendChild(titleSpan);
+                    }
+                    articleDiv.appendChild(titleH4);
+                    
+                    // Description
+                    if (article.description) {
+                        const descP = document.createElement('p');
+                        descP.className = 'text-xs text-gray-600 dark:text-gray-300 mb-2 line-clamp-2';
+                        descP.textContent = article.description;
+                        articleDiv.appendChild(descP);
+                    }
+                    
+                    // Footer (source and time)
+                    const footerDiv = document.createElement('div');
+                    footerDiv.className = 'flex items-center justify-between text-xs text-gray-500 dark:text-gray-400';
+                    
+                    // Source name with link
+                    if (article.source_url && article.source_name) {
+                        const sourceLink = document.createElement('a');
+                        sourceLink.href = article.source_url;
+                        sourceLink.target = '_blank';
+                        sourceLink.rel = 'noopener noreferrer';
+                        sourceLink.className = 'hover:text-blue-600 dark:hover:text-blue-400 transition';
+                        sourceLink.textContent = article.source_name;
+                        footerDiv.appendChild(sourceLink);
+                    } else {
+                        const sourceSpan = document.createElement('span');
+                        sourceSpan.textContent = article.source_name || 'Unknown Source';
+                        footerDiv.appendChild(sourceSpan);
+                    }
+                    
+                    const timeSpan = document.createElement('span');
+                    timeSpan.textContent = formatRelativeTime(article.pubDate);
+                    footerDiv.appendChild(timeSpan);
+                    
+                    articleDiv.appendChild(footerDiv);
+                    newsArticles.appendChild(articleDiv);
+                });
+            }
+    
+    // Update timestamp
+    updateNewsTime(cacheMetadata);
+}
+
+/**
+ * Update the news feed timestamp and cache information
+ * @param {Object} cacheMetadata - Cache metadata from backend
+ */
+function updateNewsTime(cacheMetadata = null) {
+    const newsUpdateElement = document.getElementById('newsUpdateTime');
+    if (newsUpdateElement) {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString(undefined, { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        
+        let displayText = `Last updated: ${timeString}`;
+        
+        // Add cache information if available
+        if (cacheMetadata) {
+            const { status, maxAge, fetchTime } = cacheMetadata;
+            
+            if (status === 'HIT' && maxAge && fetchTime) {
+                // Calculate remaining cache time
+                const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
+                const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
+                const remainingMinutes = Math.floor(remainingSeconds / 60);
+                
+                displayText += ` (cached, expires in ${remainingMinutes}m)`;
+            } else if (status === 'MISS' && maxAge) {
+                // Fresh data from backend
+                const expiresMinutes = Math.floor(maxAge / 60);
+                displayText += ` (fresh data, cache ${expiresMinutes}m)`;
+            }
+        }
+        
+        newsUpdateElement.textContent = displayText;
+    }
+}
+
+/**
+ * Show loading state for news
+ */
+function showNewsLoading() {
+    document.getElementById('newsInitialContainer').style.display = 'none';
+    document.getElementById('newsDisplayContainer').style.display = 'none';
+    document.getElementById('newsErrorContainer').style.display = 'none';
+    document.getElementById('newsLoadingContainer').style.display = 'block';
+}
+
+/**
+ * Show error state for news
+ * @param {string} errorMessage - Error message to display
+ */
+function showNewsError(errorMessage) {
+    document.getElementById('newsInitialContainer').style.display = 'none';
+    document.getElementById('newsDisplayContainer').style.display = 'none';
+    document.getElementById('newsLoadingContainer').style.display = 'none';
+    document.getElementById('newsErrorContainer').style.display = 'block';
+    document.getElementById('newsErrorText').textContent = errorMessage;
+}
+
+/**
+ * Load and display news feed
+ * @param {boolean} forceRefresh - Force refresh from API, bypass cache
+ */
+async function loadNews(forceRefresh = false) {
+    showNewsLoading();
+    
+    try {
+        let result;
+        
+        // Try to use cached data if not forcing refresh
+        if (!forceRefresh) {
+            const cached = getCachedNews();
+            if (cached) {
+                result = cached;
+            }
+        }
+        
+        // Fetch from API if no cache or force refresh
+        if (!result) {
+            result = await fetchBitcoinNews();
+        }
+        
+        if (result.data && result.data.articles) {
+            displayNews(result.data.articles, result.cacheMetadata);
+        } else {
+            throw new Error('Invalid news data received');
+        }
+    } catch (error) {
+        console.error('Failed to load news:', error);
+        showNewsError('Failed to load news feed. Please try again.');
+    }
+}
+
 /**
  * Refresh chart and sell price
  * Uses chart data to get the most recent price, which is more efficient
@@ -896,6 +1205,17 @@ function startAutoRefresh() {
     autoRefreshTimer = setInterval(async () => {
         try {
             await refreshChartAndPrice();
+            
+            // Also refresh news if it's been loaded and cache has expired
+            // Check cache first to avoid unnecessary DOM query
+            const cached = getCachedNews();
+            if (!cached) {
+                // Cache expired - check if news is displayed before refreshing
+                const newsDisplayContainer = document.getElementById('newsDisplayContainer');
+                if (newsDisplayContainer && newsDisplayContainer.style.display !== 'none') {
+                    await loadNews(true);
+                }
+            }
         } catch (error) {
             console.error('Auto-refresh failed:', error);
             // Continue running timer even if one refresh fails
@@ -1938,6 +2258,19 @@ function initEventListeners() {
             this.classList.remove('bg-white', 'dark:bg-gray-800', 'text-gray-700', 'dark:text-gray-300', 'border-gray-300', 'dark:border-gray-600');
             this.classList.add('bg-purple-600', 'text-white', 'border-purple-600');
         });
+    });
+
+    // Bitcoin News Feed button handlers
+    document.getElementById('loadNews').addEventListener('click', async function() {
+        await loadNews(false);
+    });
+
+    document.getElementById('refreshNews').addEventListener('click', async function() {
+        await loadNews(true);
+    });
+
+    document.getElementById('retryNews').addEventListener('click', async function() {
+        await loadNews(true);
     });
 
     // Save values and recalculate when inputs change
