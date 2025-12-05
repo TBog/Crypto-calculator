@@ -342,7 +342,7 @@ describe('Bitcoin News Feed Feature', () => {
   });
 
   describe('Data Structuring', () => {
-    it('should group articles by sentiment (positive, negative, neutral)', () => {
+    it('should return articles as a flat array', () => {
       const mockArticles = [
         { title: 'Article 1', sentiment: 'positive' },
         { title: 'Article 2', sentiment: 'negative' },
@@ -350,36 +350,26 @@ describe('Bitcoin News Feed Feature', () => {
         { title: 'Article 4', sentiment: 'positive' },
       ];
 
-      const grouped = {
-        positive: mockArticles.filter(a => a.sentiment === 'positive'),
-        negative: mockArticles.filter(a => a.sentiment === 'negative'),
-        neutral: mockArticles.filter(a => a.sentiment === 'neutral'),
-      };
-
-      expect(grouped.positive.length).toBe(2);
-      expect(grouped.negative.length).toBe(1);
-      expect(grouped.neutral.length).toBe(1);
+      // Backend returns flat array, client-side handles grouping
+      expect(Array.isArray(mockArticles)).toBe(true);
+      expect(mockArticles.length).toBe(4);
     });
 
-    it('should handle alternative sentiment values (pos, neg)', () => {
-      const sentimentMapping = {
-        'positive': 'positive',
-        'pos': 'positive',
-        'negative': 'negative',
-        'neg': 'negative',
-        'neutral': 'neutral',
-        undefined: 'neutral'
-      };
+    it('should handle articles without sentiment field', () => {
+      const articlesWithoutSentiment = [
+        { title: 'Article 1' },
+        { title: 'Article 2' },
+      ];
 
-      expect(sentimentMapping['pos']).toBe('positive');
-      expect(sentimentMapping['neg']).toBe('negative');
-      expect(sentimentMapping[undefined]).toBe('neutral');
+      // Articles may not have sentiment in free tier
+      expect(Array.isArray(articlesWithoutSentiment)).toBe(true);
+      expect(articlesWithoutSentiment.every(a => a.sentiment === undefined)).toBe(true);
     });
 
     it('should include lastUpdatedExternal timestamp', () => {
       const mockTimestamp = Date.now();
       const response = {
-        articles: { positive: [], negative: [], neutral: [] },
+        articles: [],
         lastUpdatedExternal: mockTimestamp
       };
 
@@ -387,32 +377,16 @@ describe('Bitcoin News Feed Feature', () => {
       expect(typeof response.lastUpdatedExternal).toBe('number');
     });
 
-    it('should include sentiment counts in response', () => {
-      const response = {
-        articles: {
-          positive: [{}, {}],
-          negative: [{}],
-          neutral: [{}, {}, {}]
-        },
-        sentimentCounts: {
-          positive: 2,
-          negative: 1,
-          neutral: 3
-        }
-      };
-
-      expect(response.sentimentCounts.positive).toBe(2);
-      expect(response.sentimentCounts.negative).toBe(1);
-      expect(response.sentimentCounts.neutral).toBe(3);
-    });
-
     it('should include total articles count', () => {
       const response = {
-        totalArticles: 50
+        totalArticles: 50,
+        articles: []
       };
 
       expect(response.totalArticles).toBeGreaterThanOrEqual(0);
       expect(typeof response.totalArticles).toBe('number');
+      expect(Array.isArray(response.articles)).toBe(true);
+    });
     });
   });
 

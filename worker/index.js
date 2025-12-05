@@ -89,44 +89,13 @@ async function fetchBitcoinNews(env, ctx) {
     // Record the exact time data was fetched from external API
     const lastUpdated = Date.now();
     
-    // Process and group articles by sentiment
-    // NewsData.io API may or may not include sentiment field depending on plan
-    // Default to 'neutral' if sentiment is not provided
-    const groupedBySentiment = {
-      positive: [],
-      negative: [],
-      neutral: []
-    };
-    
-    // Group articles by sentiment category
-    if (rawData.results && Array.isArray(rawData.results)) {
-      rawData.results.forEach(article => {
-        // Safely access sentiment field with optional chaining
-        // If no sentiment provided, default to 'neutral'
-        const sentiment = (article.sentiment?.toLowerCase() || 'neutral').trim();
-        
-        // Normalize sentiment values (handle various formats from API)
-        if (sentiment === 'positive' || sentiment === 'pos') {
-          groupedBySentiment.positive.push(article);
-        } else if (sentiment === 'negative' || sentiment === 'neg') {
-          groupedBySentiment.negative.push(article);
-        } else {
-          // Default case: neutral, unknown, or missing sentiment
-          groupedBySentiment.neutral.push(article);
-        }
-      });
-    }
-    
-    // Structure the final response
+    // Structure the final response with flat array of articles
+    // Note: Sentiment field may not be available in free tier plans
+    // Grouping is removed to support all plan types
     const structuredData = {
-      articles: groupedBySentiment,
+      articles: rawData.results || [],
       totalArticles: rawData.totalResults || 0,
-      lastUpdatedExternal: lastUpdated, // Timestamp when data was fetched from NewsData.io
-      sentimentCounts: {
-        positive: groupedBySentiment.positive.length,
-        negative: groupedBySentiment.negative.length,
-        neutral: groupedBySentiment.neutral.length
-      }
+      lastUpdatedExternal: lastUpdated // Timestamp when data was fetched from NewsData.io
     };
     
     // Prepare cache response
