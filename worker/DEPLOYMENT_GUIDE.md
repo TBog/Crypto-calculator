@@ -95,13 +95,23 @@ Published crypto-news-updater (x.xx sec)
 Current Deployment ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-### Step 6: Set NewsData.io API Key for News Updater
+### Step 6: Set API Keys for News Updater
+
+Set the NewsData.io API key:
 
 ```bash
 wrangler secret put NEWSDATA_API_KEY --config wrangler-news-updater.toml
 ```
 
-**Prompt:** Enter your NewsData.io API key when prompted. The key will be stored securely.
+**Prompt:** Enter your NewsData.io API key when prompted. Get a free key at [newsdata.io](https://newsdata.io/).
+
+Set the Gemini API key:
+
+```bash
+wrangler secret put GEMINI_API_KEY --config wrangler-news-updater.toml
+```
+
+**Prompt:** Enter your Gemini API key when prompted. Get a free key at [Google AI Studio](https://makersuite.google.com/app/apikey).
 
 ### Step 7: Verify Scheduled Worker Configuration
 
@@ -248,12 +258,13 @@ wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrang
 
 ### Issue: Sentiment analysis not working
 
-**Symptoms:** Articles in KV don't have sentiment field
+**Symptoms:** Articles in KV don't have sentiment field or all show neutral
 
 **Solutions:**
-1. Verify AI binding is configured in `wrangler-news-updater.toml`
-2. Check Cloudflare Workers AI is enabled for your account
-3. Review worker logs for AI-related errors
+1. Verify GEMINI_API_KEY is set: `wrangler secret list --config wrangler-news-updater.toml`
+2. Check Gemini API quota in [Google AI Studio](https://makersuite.google.com/app/apikey)
+3. Review worker logs for Gemini API-related errors
+4. Verify Gemini API key has permissions for the Gemini Pro model
 
 ### Issue: Running out of API credits
 
@@ -315,8 +326,14 @@ crons = ["0 */2 * * *"]  # Every 2 hours instead of hourly
 
 - Scheduled workers: 1M requests/month (plenty)
 - KV reads: 100K/day (plenty)
-- KV writes: 1K/day (plenty - 24 writes/day)
-- Workers AI: Check Cloudflare pricing page
+- KV writes: 1K/day (plenty - 48 writes/day with 2 writes per run)
+
+### Gemini API (Free Tier)
+
+- 60 requests per minute
+- With hourly schedule: 1-10 requests per run (sentiment analysis)
+- Well within free tier limits
+- Free tier includes Gemini Pro model
 
 ## Rollback Plan
 
@@ -351,11 +368,12 @@ For issues with:
 - Cloudflare Workers: https://developers.cloudflare.com/workers/
 - Wrangler CLI: https://developers.cloudflare.com/workers/wrangler/
 - NewsData.io API: https://newsdata.io/documentation
+- Gemini API: https://ai.google.dev/tutorials/rest_quickstart
 
 ## Additional Resources
 
 - [Cloudflare Workers Docs](https://developers.cloudflare.com/workers/)
 - [Cloudflare KV Docs](https://developers.cloudflare.com/kv/)
-- [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/)
 - [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
 - [NewsData.io API Docs](https://newsdata.io/documentation)
+- [Gemini API Docs](https://ai.google.dev/docs)

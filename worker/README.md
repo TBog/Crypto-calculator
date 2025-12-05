@@ -24,12 +24,14 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
   - Provides concise market analysis
   - Cached for 5 minutes for optimal performance
 - **Bitcoin News Feed with Scheduled Updates**: Bitcoin news with AI-powered sentiment analysis
-  - **NEW: Scheduled Worker Architecture** - Hourly cron job for aggregation and analysis
-  - Fetches 100+ articles using pagination (handles NewsData.io 12-hour delay)
-  - AI sentiment analysis on each article (positive, negative, neutral)
-  - Stores enriched data in Cloudflare KV for ultra-fast retrieval
-  - API endpoint simply reads from KV (millisecond latency)
-  - Optimized API credit usage: Fixed cost per hour vs per user request
+  - **NEW: Optimized Scheduled Worker** - Hourly cron job with early-exit pagination
+  - Early-exit optimization: Stops fetching when hitting known articles
+  - Gemini API sentiment analysis (positive, negative, neutral)
+  - Two-key KV structure: ID index for deduplication + full payload for API
+  - Exactly 2 KV writes per run (48/day total)
+  - Maintains up to 500 articles with sentiment tags
+  - API endpoint reads from KV (millisecond latency)
+  - Optimized for free tier: Minimal API credits and KV operations
   - See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for setup instructions
 
 ## Testing
@@ -229,17 +231,20 @@ GET /api/bitcoin-news
 Returns Bitcoin-related news articles with AI-powered sentiment analysis from a scheduled worker pipeline.
 
 **Architecture:**
-- **Scheduled Worker**: Runs hourly to aggregate 100+ articles with pagination
-- **AI Sentiment Analysis**: Each article analyzed using Cloudflare Workers AI (Llama 3.1)
-- **KV Storage**: Pre-analyzed data stored in Cloudflare KV for instant retrieval
-- **Ultra-Fast API**: Endpoint simply reads from KV (millisecond latency)
+- **Scheduled Worker**: Runs hourly with early-exit pagination optimization
+- **Early Exit**: Stops fetching when hitting a known article (saves API credits)
+- **Two-Key KV**: Separate ID index for O(1) deduplication + full payload for API
+- **Gemini API Sentiment**: Each article analyzed using Google's Gemini Pro model
+- **Exactly 2 KV Writes**: Updates both ID index and full payload per run
+- **Ultra-Fast API**: Endpoint reads from KV (millisecond latency)
 
 **Features:**
 - **Hourly Updates**: Fresh news aggregated every hour by cron job
-- **100+ Articles**: Pagination fetches sufficient articles despite NewsData.io 12-hour delay
-- **AI-Powered Sentiment**: Each article classified as positive, negative, or neutral
-- **Optimized API Usage**: Fixed ~11 credits/hour (instead of per-request)
-- **High Performance**: KV reads are instant, no external API calls per user
+- **Smart Pagination**: Early-exit when encountering known articles
+- **Up to 500 Articles**: Maintains larger history than previous 200-article limit
+- **Gemini-Powered Sentiment**: High-accuracy classification (positive, negative, neutral)
+- **Optimized for Free Tier**: Minimal API credits (early exit) and KV writes (2 per run)
+- **Deduplication**: ID index enables fast O(1) duplicate detection
 - **Sentiment Distribution**: Includes counts of articles by sentiment
 
 **Deployment:**
@@ -278,13 +283,18 @@ Response format:
 
 **Performance:**
 - Response Time: <10ms (KV read only)
-- Data Freshness: Updated hourly by scheduled worker
-- API Credits: ~264/day (11 per hour × 24 hours) - predictable cost
+- Data Freshness: Updated hourly by scheduled worker with early-exit optimization
+- API Credits: Variable (early-exit saves credits), typically 1-5 per hour
+- KV Writes: Exactly 2 per run (48/day total, well under 1,000/day limit)
 - Scalability: Unlimited user requests with fixed backend cost
 
+**KV Keys:**
+- `BTC_ANALYZED_NEWS` - Full articles payload (read by API)
+- `BTC_ID_INDEX` - Article ID index for deduplication (read/write by scheduled worker)
+
 **Workers:**
-- `index.js` - Main API worker (reads from KV)
-- `news-updater-cron.js` - Scheduled worker (writes to KV)
+- `index.js` - Main API worker (reads `BTC_ANALYZED_NEWS` from KV)
+- `news-updater-cron.js` - Scheduled worker (updates both KV keys)
 
 **Get All Supported Currencies from ExchangeRate-API:**
 ```
@@ -372,10 +382,10 @@ const ALLOWED_ORIGINS = [
 
 ### Scheduled News Updater Worker (`news-updater-cron.js`)
 - `NEWSDATA_API_KEY` (required): Your NewsData.io API key. Get a free key at [newsdata.io](https://newsdata.io/)
-- `CRYPTO_NEWS_CACHE` (KV binding): Cloudflare KV namespace for storing analyzed news
-- `AI` (binding): Cloudflare Workers AI for sentiment analysis
+- `GEMINI_API_KEY` (required): Your Google Gemini API key. Get a free key at [Google AI Studio](https://makersuite.google.com/app/apikey)
+- `CRYPTO_NEWS_CACHE` (KV binding): Cloudflare KV namespace for storing analyzed news and ID index
 
-**Note:** The main API worker no longer needs `NEWSDATA_API_KEY` as it only reads from KV.
+**Note:** The main API worker no longer needs `NEWSDATA_API_KEY` or `GEMINI_API_KEY` as it only reads from KV.
 
 ## Deployment
 

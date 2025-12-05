@@ -2,25 +2,25 @@
  * Scheduled Cloudflare Worker for Bitcoin News Aggregation & Analysis
  * 
  * This worker runs on a cron schedule (hourly) to:
- * 1. Fetch 100+ Bitcoin articles from NewsData.io using pagination
- * 2. Analyze sentiment of each article using Cloudflare Workers AI
+ * 1. Fetch Bitcoin articles from NewsData.io using pagination with early-exit optimization
+ * 2. Analyze sentiment of each article using Gemini API
  * 3. Store enriched data in Cloudflare KV for fast retrieval
  * 
- * This approach optimizes API credit usage by running on a schedule
- * rather than on-demand per user request.
+ * This approach optimizes API credit usage by:
+ * - Running on a schedule (not per-request)
+ * - Early-exit when hitting known articles (stops fetching old data)
+ * - Using separate ID index for fast deduplication
  */
 
-// Fixed KV key for storing analyzed Bitcoin news
-const KV_KEY = 'BTC_ANALYZED_NEWS';
+// KV keys for optimized storage
+const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';  // Full articles payload
+const KV_KEY_IDS = 'BTC_ID_INDEX';         // ID index for deduplication
 
-// Target number of articles to fetch (100+)
-const TARGET_ARTICLES = 100;
+// Maximum articles to keep in KV storage (prevent size issues)
+const MAX_STORED_ARTICLES = 500;
 
 // Maximum number of pages to fetch (safety limit)
 const MAX_PAGES = 15;
-
-// Maximum articles to keep in KV storage (prevent size issues)
-const MAX_STORED_ARTICLES = 200;
 
 /**
  * Fetch articles from NewsData.io with pagination support
@@ -55,8 +55,8 @@ async function fetchNewsPage(apiKey, nextPage = null) {
 }
 
 /**
- * Analyze sentiment of an article using Cloudflare Workers AI
- * @param {Object} env - Environment variables (includes AI binding)
+ * Analyze sentiment of an article using Gemini API
+ * @param {Object} env - Environment variables (includes GEMINI_API_KEY)
  * @param {Object} article - Article object to analyze
  * @returns {Promise<string>} Sentiment classification (positive, negative, neutral)
  */
@@ -65,23 +65,40 @@ async function analyzeSentiment(env, article) {
     // Construct prompt from article title and description
     const text = `${article.title || ''}. ${article.description || ''}`;
     
-    // Use LLM to classify sentiment
-    const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a sentiment analysis assistant. Classify the sentiment of the provided Bitcoin-related news article as exactly one word: "positive", "negative", or "neutral". Only respond with that single word.'
-        },
-        {
-          role: 'user',
-          content: text
-        }
-      ],
-      max_tokens: 10
-    });
+    // Use Gemini API to classify sentiment
+    const apiKey = env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.warn('GEMINI_API_KEY not configured, using neutral sentiment');
+      return 'neutral';
+    }
     
-    // Extract sentiment from response
-    const sentiment = (response.response || response || '').trim().toLowerCase();
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: `Classify the sentiment of this Bitcoin-related news article as exactly one word: "positive", "negative", or "neutral". Only respond with that single word.\n\nArticle: ${text}`
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 10,
+          }
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Gemini API request failed: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    const sentiment = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim().toLowerCase();
     
     // Validate and normalize sentiment
     if (sentiment.includes('positive')) {
@@ -99,79 +116,69 @@ async function analyzeSentiment(env, article) {
 }
 
 /**
- * Fetch and aggregate 100+ articles with pagination
+ * Fetch and aggregate articles with early-exit optimization
+ * Stops pagination immediately when a known article is encountered
  * @param {Object} env - Environment variables
- * @returns {Promise<Array>} Array of articles
+ * @param {Set} knownIds - Set of known article IDs for deduplication
+ * @returns {Promise<Array>} Array of new articles
  */
-async function aggregateArticles(env) {
+async function aggregateArticles(env, knownIds) {
   const apiKey = env.NEWSDATA_API_KEY;
   if (!apiKey) {
     throw new Error('NEWSDATA_API_KEY not configured');
   }
   
-  let allArticles = [];
+  let newArticles = [];
   let nextPage = null;
   let pageCount = 0;
   let creditsUsed = 0;
+  let earlyExitTriggered = false;
   
-  console.log('Starting article aggregation...');
+  console.log('Starting article aggregation with early-exit optimization...');
+  console.log(`Known article IDs: ${knownIds.size}`);
   
-  // Track article IDs we've already seen to detect duplicates
-  const seenArticleIds = new Set();
-  
-  // Fetch article IDs from existing KV to avoid re-processing
-  // Note: This loads IDs into memory. With MAX_STORED_ARTICLES=200,
-  // this uses minimal memory (~10KB for 200 IDs). For larger datasets,
-  // consider a time-based deduplication strategy instead.
-  try {
-    const existingData = await env.CRYPTO_NEWS_CACHE.get(KV_KEY, { type: 'json' });
-    if (existingData && existingData.articles) {
-      existingData.articles.forEach(article => {
-        if (article.article_id) {
-          seenArticleIds.add(article.article_id);
-        }
-      });
-      console.log(`Found ${seenArticleIds.size} existing articles in KV`);
-    }
-  } catch (error) {
-    console.log('No existing data in KV or error reading:', error.message);
-  }
-  
-  // Pagination loop
+  // Pagination loop with early exit
   do {
     try {
       console.log(`Fetching page ${pageCount + 1}...`);
       const pageData = await fetchNewsPage(apiKey, nextPage);
       creditsUsed++;
       
-      // Filter out articles we've already stored
-      const newArticles = pageData.articles.filter(article => {
-        // Use article_id as primary identifier, fallback to link
-        // NewsData.io API provides article_id as unique identifier
-        // If article_id is missing (rare), use link as fallback
+      // Check each article in this page
+      for (const article of pageData.articles) {
         const articleId = article.article_id || article.link;
-        if (!articleId || seenArticleIds.has(articleId)) {
-          return false;
+        
+        if (!articleId) {
+          console.warn('Article missing ID, skipping');
+          continue;
         }
-        seenArticleIds.add(articleId);
-        return true;
-      });
+        
+        // Early exit: If we hit a known article, stop immediately
+        if (knownIds.has(articleId)) {
+          console.log(`Early exit triggered: Found known article "${article.title?.substring(0, 50)}..."`);
+          earlyExitTriggered = true;
+          break;
+        }
+        
+        // Add new article to collection
+        newArticles.push(article);
+        knownIds.add(articleId);
+      }
       
-      console.log(`Page ${pageCount + 1}: ${pageData.articles.length} total, ${newArticles.length} new articles`);
-      
-      // If we got no new articles, stop pagination
-      if (newArticles.length === 0) {
-        console.log('No new articles found, stopping pagination');
+      // Break out of pagination loop if early exit was triggered
+      if (earlyExitTriggered) {
+        console.log(`Stopping pagination due to early exit after ${pageCount} page(s)`);
         break;
       }
       
-      allArticles = allArticles.concat(newArticles);
+      console.log(`Page ${pageCount + 1}: ${pageData.articles.length} total, ${newArticles.length} new articles so far`);
+      
       nextPage = pageData.nextPage;
       pageCount++;
       
-      // Stop if we've reached target or max pages
-      if (allArticles.length >= TARGET_ARTICLES || pageCount >= MAX_PAGES) {
-        console.log(`Stopping: ${allArticles.length} articles collected, ${pageCount} pages fetched`);
+      // Stop if we've reached max pages
+      if (pageCount >= MAX_PAGES) {
+        console.log(`Stopping: Max pages (${MAX_PAGES}) reached`);
         break;
       }
       
@@ -187,9 +194,9 @@ async function aggregateArticles(env) {
     }
   } while (nextPage && pageCount < MAX_PAGES);
   
-  console.log(`Aggregation complete: ${allArticles.length} new articles, ${creditsUsed} credits used`);
+  console.log(`Aggregation complete: ${newArticles.length} new articles, ${creditsUsed} credits used`);
   
-  return allArticles;
+  return newArticles;
 }
 
 /**
@@ -232,19 +239,22 @@ async function analyzeArticles(env, articles) {
 }
 
 /**
- * Store analyzed articles in Cloudflare KV
+ * Store analyzed articles in Cloudflare KV using two-key optimization
+ * Write #1: Update full news payload (BTC_ANALYZED_NEWS)
+ * Write #2: Update ID index (BTC_ID_INDEX)
  * @param {Object} env - Environment variables
  * @param {Array} newArticles - New analyzed articles
+ * @param {Set} allKnownIds - Updated set of all known IDs
  * @returns {Promise<void>}
  */
-async function storeInKV(env, newArticles) {
+async function storeInKV(env, newArticles, allKnownIds) {
   const timestamp = Date.now();
   
   // Merge with existing articles to maintain history
   let allArticles = [...newArticles];
   
   try {
-    const existingData = await env.CRYPTO_NEWS_CACHE.get(KV_KEY, { type: 'json' });
+    const existingData = await env.CRYPTO_NEWS_CACHE.get(KV_KEY_NEWS, { type: 'json' });
     if (existingData && existingData.articles) {
       // Keep existing articles (up to a reasonable limit to avoid KV size issues)
       const existingArticles = existingData.articles.slice(0, MAX_STORED_ARTICLES - newArticles.length);
@@ -274,12 +284,28 @@ async function storeInKV(env, newArticles) {
     sentimentCounts: sentimentCounts
   };
   
-  await env.CRYPTO_NEWS_CACHE.put(KV_KEY, JSON.stringify(finalData));
-  console.log(`Stored ${allArticles.length} articles in KV under key: ${KV_KEY}`);
+  // Write #1: Update full news payload
+  await env.CRYPTO_NEWS_CACHE.put(KV_KEY_NEWS, JSON.stringify(finalData));
+  console.log(`Write #1: Stored ${allArticles.length} articles in KV under key: ${KV_KEY_NEWS}`);
+  
+  // Write #2: Update ID index
+  const idArray = Array.from(allKnownIds);
+  await env.CRYPTO_NEWS_CACHE.put(
+    KV_KEY_IDS, 
+    JSON.stringify(idArray),
+    {
+      expirationTtl: 60 * 60 * 24 * 30  // 30 days TTL
+    }
+  );
+  console.log(`Write #2: Stored ${idArray.length} article IDs in index under key: ${KV_KEY_IDS}`);
+  console.log('Total KV writes this run: 2');
 }
 
 /**
- * Main scheduled event handler
+ * Main scheduled event handler with optimized three-phase pipeline
+ * Phase 1: Preparation - Read ID index from KV
+ * Phase 2: Fetch & Early Exit - Aggregate new articles, stop when hitting known article
+ * Phase 3: KV Update - Write both full payload and ID index (2 writes)
  * @param {Event} event - Scheduled event
  * @param {Object} env - Environment variables
  * @param {Object} ctx - Execution context
@@ -289,19 +315,39 @@ async function handleScheduled(event, env, ctx) {
   console.log(`Execution time: ${new Date().toISOString()}`);
   
   try {
-    // Stage 1: Aggregate articles
-    const articles = await aggregateArticles(env);
+    // Phase 1: Preparation - Read ID index
+    console.log('Phase 1: Reading ID index from KV...');
+    let knownIds = new Set();
     
-    if (articles.length === 0) {
-      console.log('No new articles to process');
+    try {
+      const idIndexData = await env.CRYPTO_NEWS_CACHE.get(KV_KEY_IDS, { type: 'json' });
+      if (idIndexData && Array.isArray(idIndexData)) {
+        knownIds = new Set(idIndexData);
+        console.log(`Loaded ${knownIds.size} known article IDs from index`);
+      } else {
+        console.log('No existing ID index found, starting fresh');
+      }
+    } catch (error) {
+      console.log('Error reading ID index, starting fresh:', error.message);
+    }
+    
+    // Phase 2: Optimized Fetch with Early Exit
+    console.log('Phase 2: Fetching articles with early-exit optimization...');
+    const newArticles = await aggregateArticles(env, knownIds);
+    
+    if (newArticles.length === 0) {
+      console.log('No new articles to process, skipping analysis and KV update');
+      console.log('=== Bitcoin News Updater Cron Job Completed (No Updates) ===');
       return;
     }
     
-    // Stage 2: Analyze sentiment
-    const analyzedArticles = await analyzeArticles(env, articles);
+    // Analyze sentiment for new articles only
+    console.log('Phase 2: Analyzing sentiment for new articles...');
+    const analyzedArticles = await analyzeArticles(env, newArticles);
     
-    // Stage 3: Store in KV
-    await storeInKV(env, analyzedArticles);
+    // Phase 3: KV Update (exactly 2 writes)
+    console.log('Phase 3: Updating KV (2 writes)...');
+    await storeInKV(env, analyzedArticles, knownIds);
     
     console.log('=== Bitcoin News Updater Cron Job Completed Successfully ===');
   } catch (error) {
