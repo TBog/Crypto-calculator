@@ -904,91 +904,6 @@ function getCachedNews() {
 }
 
 /**
- * Get currently selected news time period
- * @returns {string} Selected period ('24h', '7d', '30d')
- */
-function getSelectedNewsPeriod() {
-    const selectedBtn = document.querySelector('.news-period-btn.bg-blue-600');
-    return selectedBtn ? selectedBtn.dataset.period : '24h';
-}
-
-/**
- * Get currently selected sentiment filter
- * @returns {string} Selected sentiment ('all', 'positive', 'negative', 'neutral')
- */
-function getSelectedSentiment() {
-    const selectedBtn = document.querySelector('.news-sentiment-btn.bg-blue-600');
-    return selectedBtn ? selectedBtn.dataset.sentiment : 'all';
-}
-
-/**
- * Filter news articles by time period
- * @param {Array} articles - Array of news articles
- * @param {string} period - Time period ('24h', '7d', '30d')
- * @returns {Array} Filtered articles
- */
-function filterNewsByPeriod(articles, period) {
-    if (!articles || !Array.isArray(articles)) {
-        return [];
-    }
-    
-    const now = Date.now();
-    const periodMs = {
-        '24h': 24 * 60 * 60 * 1000,
-        '7d': 7 * 24 * 60 * 60 * 1000,
-        '30d': 30 * 24 * 60 * 60 * 1000
-    };
-    
-    const cutoffTime = now - (periodMs[period] || periodMs['24h']);
-    
-    return articles.filter(article => {
-        const articleDate = new Date(article.pubDate).getTime();
-        return articleDate >= cutoffTime;
-    });
-}
-
-/**
- * Filter news articles by sentiment
- * @param {Array} articles - Array of news articles
- * @param {string} sentiment - Sentiment filter ('all', 'positive', 'negative', 'neutral')
- * @returns {Array} Filtered articles
- */
-function filterNewsBySentiment(articles, sentiment) {
-    if (!articles || !Array.isArray(articles) || sentiment === 'all') {
-        return articles || [];
-    }
-    
-    return articles.filter(article => {
-        return article.sentiment && article.sentiment.toLowerCase() === sentiment.toLowerCase();
-    });
-}
-
-/**
- * Create sentiment badge element
- * @param {string} sentiment - Sentiment value
- * @returns {HTMLElement} Badge element
- */
-function createSentimentBadge(sentiment) {
-    const badge = document.createElement('span');
-    badge.className = 'inline-block px-2 py-0.5 text-xs font-semibold rounded-full';
-    
-    const sentimentLower = sentiment?.toLowerCase();
-    
-    if (sentimentLower === 'positive') {
-        badge.className += ' bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300';
-        badge.textContent = '📈 Positive';
-    } else if (sentimentLower === 'negative') {
-        badge.className += ' bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300';
-        badge.textContent = '📉 Negative';
-    } else {
-        badge.className += ' bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300';
-        badge.textContent = '➖ Neutral';
-    }
-    
-    return badge;
-}
-
-/**
  * Format relative time
  * @param {string} dateString - ISO date string
  * @returns {string} Formatted relative time
@@ -1011,7 +926,7 @@ function formatRelativeTime(dateString) {
 }
 
 /**
- * Display news articles grouped by sentiment
+ * Display news articles
  * @param {Array} articles - Array of news articles
  * @param {Object} cacheMetadata - Cache metadata
  */
@@ -1028,74 +943,28 @@ function displayNews(articles, cacheMetadata) {
     errorContainer.style.display = 'none';
     displayContainer.style.display = 'block';
     
-    // Apply filters
-    const period = getSelectedNewsPeriod();
-    const sentiment = getSelectedSentiment();
-    let filteredArticles = filterNewsByPeriod(articles, period);
-    filteredArticles = filterNewsBySentiment(filteredArticles, sentiment);
-    
     // Clear existing content
     newsArticles.innerHTML = '';
     
-    if (filteredArticles.length === 0) {
+    if (!articles || articles.length === 0) {
         // Create empty state message using safe DOM manipulation
         const emptyDiv = document.createElement('div');
         emptyDiv.className = 'text-center py-8 text-gray-500 dark:text-gray-400';
         
         const messageP = document.createElement('p');
         messageP.className = 'text-sm';
-        messageP.textContent = 'No articles found for the selected filters.';
+        messageP.textContent = 'No articles available at the moment.';
         emptyDiv.appendChild(messageP);
         
         const hintP = document.createElement('p');
         hintP.className = 'text-xs mt-2';
-        hintP.textContent = 'Try adjusting the time period or sentiment filter.';
+        hintP.textContent = 'Try refreshing to get the latest news.';
         emptyDiv.appendChild(hintP);
         
         newsArticles.appendChild(emptyDiv);
     } else {
-        // Group articles by sentiment
-        // Expected sentiment values from API: 'positive', 'negative', 'neutral'
-        // Any unknown sentiment values will be grouped under 'neutral'
-        const grouped = {
-            positive: [],
-            negative: [],
-            neutral: []
-        };
-        
-        const validSentiments = ['positive', 'negative', 'neutral'];
-        
-        filteredArticles.forEach(article => {
-            const sent = (article.sentiment || 'neutral').toLowerCase();
-            const targetGroup = validSentiments.includes(sent) ? sent : 'neutral';
-            grouped[targetGroup].push(article);
-        });
-        
-        // Display grouped articles
-        validSentiments.forEach(sentimentType => {
-            const articles = grouped[sentimentType];
-            if (articles.length > 0) {
-                // Create group container
-                const groupDiv = document.createElement('div');
-                groupDiv.className = 'mb-4';
-                
-                // Create header with badge and count
-                const headerDiv = document.createElement('div');
-                headerDiv.className = 'flex items-center mb-2';
-                headerDiv.appendChild(createSentimentBadge(sentimentType));
-                
-                const countSpan = document.createElement('span');
-                countSpan.className = 'ml-2 text-xs text-gray-500 dark:text-gray-400';
-                countSpan.textContent = `(${articles.length})`;
-                headerDiv.appendChild(countSpan);
-                
-                groupDiv.appendChild(headerDiv);
-                
-                // Create articles container
-                const articlesContainer = document.createElement('div');
-                articlesContainer.className = 'space-y-2';
-                
-                articles.forEach(article => {
+        // Display all articles in a simple list
+        articles.forEach(article => {
                     // Create article card
                     const articleDiv = document.createElement('div');
                     articleDiv.className = 'bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 border border-gray-200 dark:border-gray-600';
@@ -1163,14 +1032,9 @@ function displayNews(articles, cacheMetadata) {
                     footerDiv.appendChild(timeSpan);
                     
                     articleDiv.appendChild(footerDiv);
-                    articlesContainer.appendChild(articleDiv);
+                    newsArticles.appendChild(articleDiv);
                 });
-                
-                groupDiv.appendChild(articlesContainer);
-                newsArticles.appendChild(groupDiv);
             }
-        });
-    }
     
     // Update timestamp
     updateNewsTime(cacheMetadata);
@@ -2417,38 +2281,6 @@ function initEventListeners() {
 
     document.getElementById('retryNews').addEventListener('click', async function() {
         await loadNews(true);
-    });
-
-    // News period selection button handlers
-    document.querySelectorAll('.news-period-btn').forEach(button => {
-        button.addEventListener('click', function() {
-            // Update button styles
-            document.querySelectorAll('.news-period-btn').forEach(btn => {
-                btn.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
-                btn.classList.add('bg-white', 'dark:bg-gray-800', 'text-gray-700', 'dark:text-gray-300', 'border-gray-300', 'dark:border-gray-600');
-            });
-            this.classList.remove('bg-white', 'dark:bg-gray-800', 'text-gray-700', 'dark:text-gray-300', 'border-gray-300', 'dark:border-gray-600');
-            this.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
-            
-            // Refresh display with new period filter
-            refreshNewsDisplay();
-        });
-    });
-
-    // News sentiment filter button handlers
-    document.querySelectorAll('.news-sentiment-btn').forEach(button => {
-        button.addEventListener('click', function() {
-            // Update button styles
-            document.querySelectorAll('.news-sentiment-btn').forEach(btn => {
-                btn.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
-                btn.classList.add('bg-white', 'dark:bg-gray-800', 'text-gray-700', 'dark:text-gray-300', 'border-gray-300', 'dark:border-gray-600');
-            });
-            this.classList.remove('bg-white', 'dark:bg-gray-800', 'text-gray-700', 'dark:text-gray-300', 'border-gray-300', 'dark:border-gray-600');
-            this.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
-            
-            // Refresh display with new sentiment filter
-            refreshNewsDisplay();
-        });
     });
 
     // Save values and recalculate when inputs change
