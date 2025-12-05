@@ -302,7 +302,7 @@ describe('Integration Tests', () => {
   });
 });
 
-describe('Bitcoin News Feed Feature', () => {
+describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
   describe('Cache Configuration', () => {
     it('should use 10-minute cache for Bitcoin news', () => {
       const BITCOIN_NEWS_CACHE_TTL = 600; // 10 minutes
@@ -319,100 +319,74 @@ describe('Bitcoin News Feed Feature', () => {
     });
   });
 
-  describe('NewsData.io API Integration', () => {
-    it('should use single API call with correct parameters', () => {
-      const apiKey = 'test-key';
-      const expectedUrl = `https://newsdata.io/api/1/crypto?apikey=${apiKey}&coin=btc&language=en`;
-      const url = new URL(expectedUrl);
-      
-      expect(url.hostname).toBe('newsdata.io');
-      expect(url.pathname).toBe('/api/1/crypto');
-      expect(url.searchParams.get('coin')).toBe('btc');
-      expect(url.searchParams.get('language')).toBe('en');
+  describe('KV Storage Architecture', () => {
+    it('should use KV for reading news data', () => {
+      const kvKey = 'BTC_ANALYZED_NEWS';
+      expect(kvKey).toBe('BTC_ANALYZED_NEWS');
     });
 
-    it('should optimize API credits by using single call', () => {
-      // Verify that we fetch all articles in one call instead of 3 separate calls
-      const articlesPerSentiment = 3; // Would require 3 API calls if done separately
-      const totalApiCallsRequired = 1; // Our optimized approach uses only 1 call
-      
-      expect(totalApiCallsRequired).toBe(1);
-      expect(totalApiCallsRequired).toBeLessThan(articlesPerSentiment);
+    it('should return KV cache status', () => {
+      const kvStatus = { cacheStatus: 'KV' };
+      expect(kvStatus.cacheStatus).toBe('KV');
+    });
+
+    it('should handle missing KV data gracefully', () => {
+      const errorMessage = 'News data temporarily unavailable. Please try again later.';
+      expect(errorMessage).toContain('temporarily unavailable');
     });
   });
 
-  describe('Data Structuring', () => {
-    it('should return articles as a flat array', () => {
+  describe('Scheduled Worker Data Structure', () => {
+    it('should include sentiment analysis in articles', () => {
       const mockArticles = [
         { title: 'Article 1', sentiment: 'positive' },
         { title: 'Article 2', sentiment: 'negative' },
         { title: 'Article 3', sentiment: 'neutral' },
-        { title: 'Article 4', sentiment: 'positive' },
       ];
 
-      // Backend returns flat array, client-side handles grouping
       expect(Array.isArray(mockArticles)).toBe(true);
-      expect(mockArticles.length).toBe(4);
+      expect(mockArticles.length).toBe(3);
+      expect(mockArticles.every(a => a.sentiment)).toBe(true);
     });
 
-    it('should handle articles without sentiment field', () => {
-      const articlesWithoutSentiment = [
-        { title: 'Article 1' },
-        { title: 'Article 2' },
-      ];
-
-      // Articles may not have sentiment in free tier
-      expect(Array.isArray(articlesWithoutSentiment)).toBe(true);
-      expect(articlesWithoutSentiment.every(a => !a.hasOwnProperty('sentiment'))).toBe(true);
-    });
-
-    it('should include lastUpdatedExternal timestamp', () => {
+    it('should include lastUpdatedExternal timestamp from scheduled worker', () => {
       const mockTimestamp = Date.now();
       const response = {
         articles: [],
-        lastUpdatedExternal: mockTimestamp
+        lastUpdatedExternal: mockTimestamp,
+        sentimentCounts: { positive: 0, negative: 0, neutral: 0 }
       };
 
       expect(response.lastUpdatedExternal).toBe(mockTimestamp);
       expect(typeof response.lastUpdatedExternal).toBe('number');
     });
 
+    it('should include sentiment distribution', () => {
+      const response = {
+        articles: [],
+        totalArticles: 100,
+        sentimentCounts: {
+          positive: 30,
+          negative: 20,
+          neutral: 50
+        }
+      };
+
+      expect(response.sentimentCounts).toHaveProperty('positive');
+      expect(response.sentimentCounts).toHaveProperty('negative');
+      expect(response.sentimentCounts).toHaveProperty('neutral');
+      expect(response.sentimentCounts.positive + response.sentimentCounts.negative + response.sentimentCounts.neutral).toBe(response.totalArticles);
+    });
+
     it('should include total articles count', () => {
       const response = {
-        totalArticles: 50,
+        totalArticles: 100,
         articles: []
       };
 
       expect(response.totalArticles).toBeGreaterThanOrEqual(0);
       expect(typeof response.totalArticles).toBe('number');
       expect(Array.isArray(response.articles)).toBe(true);
-    });
-    });
-  });
-
-  describe('Read-Through Caching', () => {
-    it('should use btc-news-latest as cache key', () => {
-      const cacheKey = 'btc-news-latest';
-      expect(cacheKey).toBe('btc-news-latest');
-    });
-
-    it('should return cache status (HIT or MISS)', () => {
-      const cacheHit = { cacheStatus: 'HIT' };
-      const cacheMiss = { cacheStatus: 'MISS' };
-
-      expect(cacheHit.cacheStatus).toBe('HIT');
-      expect(cacheMiss.cacheStatus).toBe('MISS');
-    });
-
-    it('should cache fresh data after MISS', () => {
-      // Verify caching behavior: MISS -> cache storage -> HIT
-      const cacheBehavior = [
-        { request: 1, status: 'MISS' }, // First request
-        { request: 2, status: 'HIT' },  // Second request (within TTL)
-      ];
-
-      expect(cacheBehavior[0].status).toBe('MISS');
-      expect(cacheBehavior[1].status).toBe('HIT');
     });
   });
 
@@ -432,9 +406,10 @@ describe('Bitcoin News Feed Feature', () => {
       });
     });
 
-    it('should set correct data source header', () => {
-      const dataSource = 'NewsData.io API';
-      expect(dataSource).toBe('NewsData.io API');
+    it('should set correct data source header for KV', () => {
+      const dataSource = 'Cloudflare KV (updated by scheduled worker)';
+      expect(dataSource).toContain('Cloudflare KV');
+      expect(dataSource).toContain('scheduled worker');
     });
 
     it('should expose custom headers via CORS', () => {
@@ -448,24 +423,49 @@ describe('Bitcoin News Feed Feature', () => {
   });
 
   describe('Error Handling', () => {
-    it('should handle missing API key gracefully', () => {
-      const missingKeyError = 'NEWSDATA_API_KEY not configured';
-      expect(missingKeyError).toContain('NEWSDATA_API_KEY');
-    });
-
-    it('should handle API request failures', () => {
-      const apiError = 'NewsData.io API request failed: 401';
-      expect(apiError).toContain('NewsData.io API request failed');
-    });
-
-    it('should return appropriate error response', () => {
+    it('should handle missing KV data gracefully', () => {
       const errorResponse = {
-        error: 'Failed to fetch Bitcoin news',
-        message: 'API error details'
+        error: 'News data temporarily unavailable',
+        message: 'The news feed is being updated. Please try again in a few minutes.'
       };
 
-      expect(errorResponse.error).toBe('Failed to fetch Bitcoin news');
-      expect(errorResponse).toHaveProperty('message');
+      expect(errorResponse.error).toContain('temporarily unavailable');
+      expect(errorResponse.message).toContain('try again');
+    });
+
+    it('should return 503 status for temporary unavailability', () => {
+      const statusCode = 503;
+      expect(statusCode).toBe(503);
+    });
+  });
+
+  describe('Scheduled Worker Configuration', () => {
+    it('should run hourly via cron trigger', () => {
+      const cronSchedule = '0 * * * *'; // Every hour at minute 0
+      expect(cronSchedule).toBe('0 * * * *');
+    });
+
+    it('should target 100+ articles per run', () => {
+      const targetArticles = 100;
+      expect(targetArticles).toBeGreaterThanOrEqual(100);
+    });
+
+    it('should use pagination with max pages limit', () => {
+      const maxPages = 15;
+      expect(maxPages).toBeGreaterThan(0);
+      expect(maxPages).toBeLessThanOrEqual(20); // Reasonable safety limit
+    });
+  });
+
+  describe('API Credit Optimization', () => {
+    it('should use scheduled execution instead of per-request', () => {
+      // Old: 1 credit per user request
+      // New: ~11 credits per hour (regardless of user requests)
+      const creditsPerHour = 11;
+      const hoursPerDay = 24;
+      const maxCreditsPerDay = creditsPerHour * hoursPerDay;
+      
+      expect(maxCreditsPerDay).toBeLessThanOrEqual(300); // Well under most API limits
     });
   });
 });

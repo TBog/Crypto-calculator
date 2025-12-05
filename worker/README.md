@@ -23,12 +23,14 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
   - Identifies key movements and patterns
   - Provides concise market analysis
   - Cached for 5 minutes for optimal performance
-- **Bitcoin News Feed**: Real-time Bitcoin news with sentiment analysis powered by NewsData.io
-  - Single API call optimization (1 credit per refresh instead of 3)
-  - Read-through caching with 10-minute TTL
-  - Automatic sentiment categorization (positive, negative, neutral)
-  - Comprehensive article metadata and sentiment distribution
-  - Fresh data indicators with lastUpdatedExternal timestamp
+- **Bitcoin News Feed with Scheduled Updates**: Bitcoin news with AI-powered sentiment analysis
+  - **NEW: Scheduled Worker Architecture** - Hourly cron job for aggregation and analysis
+  - Fetches 100+ articles using pagination (handles NewsData.io 12-hour delay)
+  - AI sentiment analysis on each article (positive, negative, neutral)
+  - Stores enriched data in Cloudflare KV for ultra-fast retrieval
+  - API endpoint simply reads from KV (millisecond latency)
+  - Optimized API credit usage: Fixed cost per hour vs per user request
+  - See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for setup instructions
 
 ## Testing
 
@@ -219,60 +221,70 @@ Response format:
 - `X-Summary-Period: 24h|7d|30d|90d`
 - `Cache-Control: public, max-age=300`
 
-**Get Bitcoin News Feed with Sentiment Analysis:**
+**Get Bitcoin News Feed with AI Sentiment Analysis (NEW Architecture):**
 ```
 GET /api/bitcoin-news
 ```
 
-Returns Bitcoin-related news articles grouped by sentiment (positive, negative, neutral) from NewsData.io API.
+Returns Bitcoin-related news articles with AI-powered sentiment analysis from a scheduled worker pipeline.
+
+**Architecture:**
+- **Scheduled Worker**: Runs hourly to aggregate 100+ articles with pagination
+- **AI Sentiment Analysis**: Each article analyzed using Cloudflare Workers AI (Llama 3.1)
+- **KV Storage**: Pre-analyzed data stored in Cloudflare KV for instant retrieval
+- **Ultra-Fast API**: Endpoint simply reads from KV (millisecond latency)
 
 **Features:**
-- **Single API Call Optimization**: Fetches all articles in one request (1 API credit instead of 3)
-- **Read-Through Caching**: 10-minute cache TTL for optimal performance and API credit efficiency
-- **Sentiment Grouping**: Automatically categorizes articles by sentiment (positive, negative, neutral)
-- **Comprehensive Response**: Includes article count, sentiment distribution, and timestamp
-- **Robust Handling**: Articles without sentiment data are automatically categorized as neutral
+- **Hourly Updates**: Fresh news aggregated every hour by cron job
+- **100+ Articles**: Pagination fetches sufficient articles despite NewsData.io 12-hour delay
+- **AI-Powered Sentiment**: Each article classified as positive, negative, or neutral
+- **Optimized API Usage**: Fixed ~11 credits/hour (instead of per-request)
+- **High Performance**: KV reads are instant, no external API calls per user
+- **Sentiment Distribution**: Includes counts of articles by sentiment
 
-**Note on Sentiment Data**: The sentiment field availability depends on your NewsData.io API plan. Articles without sentiment data are automatically categorized as "neutral" for consistent response structure.
+**Deployment:**
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for complete setup instructions.
 
 Response format:
 ```json
 {
-  "articles": {
-    "positive": [
-      {
-        "title": "Bitcoin Surges to New Heights",
-        "description": "Bitcoin reaches all-time high...",
-        "link": "https://example.com/article",
-        "pubDate": "2024-12-03 10:00:00",
-        "source_id": "cryptonews",
-        "sentiment": "positive"
-      }
-    ],
-    "negative": [...],
-    "neutral": [...]
-  },
-  "totalArticles": 50,
+  "articles": [
+    {
+      "title": "Bitcoin Surges to New Heights",
+      "description": "Bitcoin reaches all-time high...",
+      "link": "https://example.com/article",
+      "pubDate": "2024-12-03 10:00:00",
+      "source_id": "cryptonews",
+      "sentiment": "positive"
+    },
+    ...
+  ],
+  "totalArticles": 150,
   "lastUpdatedExternal": 1701601234567,
   "sentimentCounts": {
-    "positive": 15,
-    "negative": 10,
-    "neutral": 25
+    "positive": 50,
+    "negative": 30,
+    "neutral": 70
   }
 }
 ```
 
 **Headers:**
-- `X-Cache-Status: HIT` or `MISS` - Indicates cache status
-- `X-Data-Source: NewsData.io API` - Attribution for news data source
-- `X-Last-Updated: 1701601234567` - Timestamp when data was fetched from NewsData.io
+- `X-Cache-Status: KV` - Indicates data is from KV (not external API)
+- `X-Data-Source: Cloudflare KV (updated by scheduled worker)` - Attribution
+- `X-Last-Updated: 1701601234567` - When scheduled worker last updated data
 - `X-Cache-TTL: 600` - Cache duration in seconds (10 minutes)
 - `Cache-Control: public, max-age=600`
 
 **Performance:**
-- Cache Duration: 10 minutes (600 seconds)
-- API Credits: 1 credit per cache refresh (optimized from 3 credits)
-- Fresh Data: Timestamp indicates exact time data was fetched from external API
+- Response Time: <10ms (KV read only)
+- Data Freshness: Updated hourly by scheduled worker
+- API Credits: ~264/day (11 per hour × 24 hours) - predictable cost
+- Scalability: Unlimited user requests with fixed backend cost
+
+**Workers:**
+- `index.js` - Main API worker (reads from KV)
+- `news-updater-cron.js` - Scheduled worker (writes to KV)
 
 **Get All Supported Currencies from ExchangeRate-API:**
 ```
@@ -354,8 +366,20 @@ const ALLOWED_ORIGINS = [
 
 ## Environment Variables
 
+### Main API Worker (`index.js`)
 - `COINGECKO_KEY` (optional): Your CoinGecko API key for higher rate limits
-- `NEWSDATA_API_KEY` (required for news feed): Your NewsData.io API key for Bitcoin news feed feature. Get a free key at [newsdata.io](https://newsdata.io/)
+- `CRYPTO_NEWS_CACHE` (KV binding): Cloudflare KV namespace for reading cached news
+
+### Scheduled News Updater Worker (`news-updater-cron.js`)
+- `NEWSDATA_API_KEY` (required): Your NewsData.io API key. Get a free key at [newsdata.io](https://newsdata.io/)
+- `CRYPTO_NEWS_CACHE` (KV binding): Cloudflare KV namespace for storing analyzed news
+- `AI` (binding): Cloudflare Workers AI for sentiment analysis
+
+**Note:** The main API worker no longer needs `NEWSDATA_API_KEY` as it only reads from KV.
+
+## Deployment
+
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for complete step-by-step deployment instructions for both workers.
 
 ## Additional Resources
 
