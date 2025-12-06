@@ -839,7 +839,7 @@ const NEWS_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 const newsState = {
     allArticles: [],
     filteredArticles: [],
-    displayedCount: 0,
+    displayedCount: 0, // Tracks the number of articles currently displayed (end index)
     articlesPerPage: 50,
     currentFilter: 'all'
 };
@@ -1106,13 +1106,13 @@ function renderNewsArticles() {
         return;
     }
     
-    // Calculate how many articles to show
+    // Calculate how many articles to show (displayedCount is the starting index)
     const articlesToShow = Math.min(
         newsState.displayedCount + newsState.articlesPerPage,
         newsState.filteredArticles.length
     );
     
-    // Render articles
+    // Render articles from 0 to articlesToShow
     for (let i = 0; i < articlesToShow; i++) {
         const article = newsState.filteredArticles[i];
         const articleDiv = createArticleElement(article);
@@ -1130,7 +1130,7 @@ function renderNewsArticles() {
         loadMoreContainer.style.display = 'none';
     }
     
-    // Update displayed count for next load
+    // Update displayed count to track where we are for next load
     newsState.displayedCount = articlesToShow;
 }
 
