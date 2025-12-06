@@ -230,7 +230,7 @@ async function analyzeArticles(env, articles) {
  * Write #2: Update ID index (BTC_ID_INDEX)
  * @param {Object} env - Environment variables
  * @param {Array} newArticles - New analyzed articles
- * @param {Set} allKnownIds - Updated set of all known IDs
+ * @param {Set} allKnownIds - Updated set of all known IDs (not used, will be rebuilt from stored articles)
  * @returns {Promise<void>}
  */
 async function storeInKV(env, newArticles, allKnownIds) {
@@ -274,16 +274,21 @@ async function storeInKV(env, newArticles, allKnownIds) {
   await env.CRYPTO_NEWS_CACHE.put(KV_KEY_NEWS, JSON.stringify(finalData));
   console.log(`Write #1: Stored ${allArticles.length} articles in KV under key: ${KV_KEY_NEWS}`);
   
-  // Write #2: Update ID index
-  const idArray = Array.from(allKnownIds);
+  // Write #2: Update ID index - MUST match the articles actually stored
+  // Extract IDs from the articles we're storing (not from allKnownIds)
+  const storedArticleIds = allArticles
+    .map(article => article.article_id || article.link)
+    .filter(id => id); // Remove any null/undefined IDs
+  
   await env.CRYPTO_NEWS_CACHE.put(
     KV_KEY_IDS, 
-    JSON.stringify(idArray),
+    JSON.stringify(storedArticleIds),
     {
       expirationTtl: ID_INDEX_TTL
     }
   );
-  console.log(`Write #2: Stored ${idArray.length} article IDs in index under key: ${KV_KEY_IDS}`);
+  console.log(`Write #2: Stored ${storedArticleIds.length} article IDs in index under key: ${KV_KEY_IDS}`);
+  console.log(`ID index now matches the ${allArticles.length} articles stored in payload`);
   console.log('Total KV writes this run: 2');
 }
 
