@@ -37,92 +37,41 @@ const PRICE_HISTORY_CACHE_TTL = 600;
 // Cache duration for Bitcoin news (5-10 minutes in seconds)
 const BITCOIN_NEWS_CACHE_TTL = 600; // 10 minutes
 
+// KV key for stored Bitcoin news (matches news-updater-cron.js)
+const KV_NEWS_KEY = 'BTC_ANALYZED_NEWS';
+
 /**
- * Fetch Bitcoin news from NewsData.io API with read-through caching
- * Uses a single API call to fetch all articles regardless of sentiment
- * @param {Object} env - Environment variables (includes NEWSDATA_API_KEY)
- * @param {Object} ctx - Execution context
+ * Fetch Bitcoin news from Cloudflare KV (populated by scheduled worker)
+ * This endpoint simply reads pre-fetched and pre-analyzed data from KV
+ * No external API calls are made, ensuring ultra-fast response times
+ * @param {Object} env - Environment variables (includes CRYPTO_NEWS_CACHE KV binding)
  * @returns {Promise<{data: Object, cacheStatus: string, lastUpdated: number}>} News data with cache status and timestamp
  */
-async function fetchBitcoinNews(env, ctx) {
-  const cacheKey = 'btc-news-latest';
-  const cache = caches.default;
-  
-  // Try to get from cache first (Read-Through Cache pattern)
-  const cacheUrl = new URL(`https://cache-internal/${cacheKey}`);
-  const cachedResponse = await cache.match(cacheUrl);
-  
-  if (cachedResponse) {
-    const cachedData = await cachedResponse.json();
-    return { 
-      data: cachedData.data, 
-      cacheStatus: 'HIT',
-      lastUpdated: cachedData.lastUpdated 
-    };
-  }
-  
-  // Cache miss - fetch from NewsData.io API
-  const apiKey = env.NEWSDATA_API_KEY;
-  if (!apiKey) {
-    throw new Error('NEWSDATA_API_KEY not configured');
-  }
-  
-  // CRITICAL: Use single API call to fetch all articles (optimized for API credits)
-  // This fetches all Bitcoin-related articles in one request, regardless of sentiment
-  // Note: NewsData.io requires API key as a query parameter per their API documentation
-  // Size parameter removed - API plan limits may vary (default is 10)
-  // Language filter ensures relevant English news articles
-  // Remove duplicates to maximize unique articles in limited free tier (10 articles)
-  const newsUrl = new URL('https://newsdata.io/api/1/crypto');
-  newsUrl.searchParams.set('apikey', apiKey);
-  newsUrl.searchParams.set('coin', 'btc');
-  newsUrl.searchParams.set('language', 'en');
-  newsUrl.searchParams.set('removeduplicate', '1');
-  
+async function fetchBitcoinNews(env) {
   try {
-    const response = await fetch(newsUrl.toString());
+    // Read from KV namespace
+    const cachedData = await env.CRYPTO_NEWS_CACHE.get(KV_NEWS_KEY, { type: 'json' });
     
-    if (!response.ok) {
-      throw new Error(`NewsData.io API request failed: ${response.status}`);
+    if (!cachedData) {
+      // KV key is missing - scheduled worker hasn't run yet or failed
+      throw new Error('News data temporarily unavailable. Please try again later.');
     }
     
-    const rawData = await response.json();
+    // Data structure from scheduled worker:
+    // {
+    //   articles: [...],
+    //   totalArticles: number,
+    //   lastUpdatedExternal: timestamp,
+    //   sentimentCounts: { positive, negative, neutral }
+    // }
     
-    // Record the exact time data was fetched from external API
-    const lastUpdated = Date.now();
-    
-    // Structure the final response with flat array of articles
-    // Note: Sentiment field may not be available in free tier plans
-    // Grouping is removed to support all plan types
-    const structuredData = {
-      articles: rawData.results || [],
-      totalArticles: rawData.totalResults || 0,
-      lastUpdatedExternal: lastUpdated // Timestamp when data was fetched from NewsData.io
-    };
-    
-    // Prepare cache response
-    const cacheData = {
-      data: structuredData,
-      lastUpdated: lastUpdated
-    };
-    
-    const cacheResponse = new Response(JSON.stringify(cacheData), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': `public, max-age=${BITCOIN_NEWS_CACHE_TTL}`
-      }
-    });
-    
-    // Cache asynchronously using waitUntil
-    ctx.waitUntil(cache.put(cacheUrl, cacheResponse));
-    
-    return { 
-      data: structuredData, 
-      cacheStatus: 'MISS',
-      lastUpdated: lastUpdated 
+    return {
+      data: cachedData,
+      cacheStatus: 'KV',
+      lastUpdated: cachedData.lastUpdatedExternal || Date.now()
     };
   } catch (error) {
-    console.error('Failed to fetch Bitcoin news:', error);
+    console.error('Failed to fetch Bitcoin news from KV:', error);
     throw error;
   }
 }
@@ -667,10 +616,10 @@ async function handleRequest(request, env, ctx) {
       }
     }
     
-    // Special endpoint for Bitcoin news feed with caching and sentiment analysis
+    // Special endpoint for Bitcoin news feed - reads from KV (populated by scheduled worker)
     if (url.pathname === '/api/bitcoin-news') {
       try {
-        const result = await fetchBitcoinNews(env, ctx);
+        const result = await fetchBitcoinNews(env);
         
         return new Response(JSON.stringify(result.data), {
           status: 200,
@@ -679,18 +628,18 @@ async function handleRequest(request, env, ctx) {
             'Content-Type': 'application/json',
             'Cache-Control': `public, max-age=${BITCOIN_NEWS_CACHE_TTL}`,
             'X-Cache-Status': result.cacheStatus,
-            'X-Data-Source': 'NewsData.io API',
+            'X-Data-Source': 'Cloudflare KV (updated by scheduled worker)',
             'X-Last-Updated': result.lastUpdated.toString(),
             'X-Cache-TTL': BITCOIN_NEWS_CACHE_TTL.toString()
           }
         });
       } catch (error) {
-        console.error('Failed to fetch Bitcoin news:', error);
+        console.error('Failed to fetch Bitcoin news from KV:', error);
         return new Response(JSON.stringify({
-          error: 'Failed to fetch Bitcoin news',
-          message: error.message
+          error: 'News data temporarily unavailable',
+          message: 'The news feed is being updated. Please try again in a few minutes.'
         }), {
-          status: 500,
+          status: 503,
           headers: {
             ...corsHeaders,
             'Content-Type': 'application/json'

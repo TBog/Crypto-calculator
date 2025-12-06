@@ -1,13 +1,19 @@
-name = "crypto-cache"
-main = "index.js"
+name = "crypto-news-updater"
+main = "news-updater-cron.js"
 compatibility_date = "2024-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# AI binding for LLM summarization
+# Cron trigger - runs every hour at the top of the hour
+# Format: "minute hour day month day-of-week"
+# "0 * * * *" = every hour at minute 0
+[triggers]
+crons = ["0 * * * *"]
+
+# AI binding for sentiment analysis
 [ai]
 binding = "AI"
 
-# KV namespace for reading cached news (written by news-updater-cron worker)
+# KV namespace for storing analyzed news
 [[kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with actual KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE"
@@ -15,13 +21,12 @@ binding = "CRYPTO_NEWS_CACHE"
 id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID_FROM_STEP_2"
 
 # Environment bindings
-# The COINGECKO_KEY should be set using: wrangler secret put COINGECKO_KEY
-# The NEWSDATA_API_KEY should be set using: wrangler secret put NEWSDATA_API_KEY (no longer needed after migration)
-# This keeps the API keys secure and out of version control
+# The NEWSDATA_API_KEY should be set using: wrangler secret put NEWSDATA_API_KEY
+# This keeps the API key secure and out of version control
 
 [env.production]
 # Production environment configuration
-# Secrets are automatically available in env.COINGECKO_KEY and env.NEWSDATA_API_KEY
+# Secrets are automatically available in env.NEWSDATA_API_KEY
 [[env.production.kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with production KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production
