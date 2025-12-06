@@ -867,6 +867,11 @@ async function fetchBitcoinNews() {
         // Use lastUpdatedExternal from data if available, otherwise use header or current time
         const fetchTime = data.lastUpdatedExternal || (lastUpdated ? parseInt(lastUpdated) : Date.now());
         
+        // Log if we had to fall back (indicates potential data structure issue)
+        if (!data.lastUpdatedExternal) {
+            console.warn('News data missing lastUpdatedExternal field, using fallback timestamp');
+        }
+        
         // Cache the news data with consistent timestamp
         const now = Date.now();
         newsCache.data = data;
