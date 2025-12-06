@@ -26,6 +26,16 @@ const MAX_PAGES = 15;
 const ID_INDEX_TTL = 60 * 60 * 24 * 30;
 
 /**
+ * Get article ID from article object
+ * Uses article_id as primary identifier, falls back to link
+ * @param {Object} article - Article object
+ * @returns {string|null} Article ID or null if not available
+ */
+function getArticleId(article) {
+  return article.article_id || article.link || null;
+}
+
+/**
  * Fetch articles from NewsData.io with pagination support
  * @param {string} apiKey - NewsData.io API key
  * @param {string|null} nextPage - Pagination token from previous response
@@ -132,7 +142,7 @@ async function aggregateArticles(env, knownIds) {
       
       // Check each article in this page
       for (const article of pageData.articles) {
-        const articleId = article.article_id || article.link;
+        const articleId = getArticleId(article);
         
         if (!articleId) {
           console.warn('Article missing ID, skipping');
@@ -230,10 +240,9 @@ async function analyzeArticles(env, articles) {
  * Write #2: Update ID index (BTC_ID_INDEX)
  * @param {Object} env - Environment variables
  * @param {Array} newArticles - New analyzed articles
- * @param {Set} allKnownIds - Updated set of all known IDs (not used, will be rebuilt from stored articles)
  * @returns {Promise<void>}
  */
-async function storeInKV(env, newArticles, allKnownIds) {
+async function storeInKV(env, newArticles) {
   const timestamp = Date.now();
   
   // Merge with existing articles to maintain history
@@ -275,9 +284,9 @@ async function storeInKV(env, newArticles, allKnownIds) {
   console.log(`Write #1: Stored ${allArticles.length} articles in KV under key: ${KV_KEY_NEWS}`);
   
   // Write #2: Update ID index - MUST match the articles actually stored
-  // Extract IDs from the articles we're storing (not from allKnownIds)
+  // Extract IDs from the articles we're storing using consistent helper function
   const storedArticleIds = allArticles
-    .map(article => article.article_id || article.link)
+    .map(article => getArticleId(article))
     .filter(id => id); // Remove any null/undefined IDs
   
   await env.CRYPTO_NEWS_CACHE.put(
@@ -338,7 +347,7 @@ async function handleScheduled(event, env, ctx) {
     
     // Phase 3: KV Update (exactly 2 writes)
     console.log('Phase 3: Updating KV (2 writes)...');
-    await storeInKV(env, analyzedArticles, knownIds);
+    await storeInKV(env, analyzedArticles);
     
     console.log('=== Bitcoin News Updater Cron Job Completed Successfully ===');
   } catch (error) {
