@@ -289,6 +289,46 @@ async function fetchBTCPrice(currency = 'usd') {
     }
 }
 
+/**
+ * Extract cache metadata from response headers
+ * @param {Response} response - Fetch API response object
+ * @returns {Object} Cache metadata with status, maxAge, and fetchTime
+ */
+function extractCacheMetadata(response) {
+    const cacheStatus = response.headers.get('X-Cache-Status');
+    const cacheControl = response.headers.get('Cache-Control');
+    const lastUpdated = response.headers.get('X-Last-Updated');
+    const cacheTTL = response.headers.get('X-Cache-TTL');
+    
+    // Parse max-age from headers
+    let maxAge = null;
+    if (cacheTTL) {
+        // Use X-Cache-TTL if available (from backend)
+        maxAge = parseInt(cacheTTL, 10);
+    } else if (cacheControl) {
+        // Fallback to parsing Cache-Control header
+        const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
+        if (maxAgeMatch) {
+            maxAge = parseInt(maxAgeMatch[1], 10);
+        }
+    }
+    
+    // Use X-Last-Updated timestamp from backend if available, otherwise use current time
+    let fetchTime = Date.now();
+    if (lastUpdated) {
+        const parsedTime = parseInt(lastUpdated, 10);
+        if (!isNaN(parsedTime)) {
+            fetchTime = parsedTime;
+        }
+    }
+    
+    return {
+        status: cacheStatus,
+        maxAge: maxAge,
+        fetchTime: fetchTime
+    };
+}
+
 // Fetch Bitcoin price chart data (last 24 hours, hourly)
 async function fetchBTCChartData(currency = 'usd') {
     const currencyLower = currency.toLowerCase();
@@ -315,25 +355,11 @@ async function fetchBTCChartData(currency = 'usd') {
         const data = await response.json();
         
         // Extract cache metadata from response headers
-        const cacheStatus = response.headers.get('X-Cache-Status');
-        const cacheControl = response.headers.get('Cache-Control');
-        
-        // Parse max-age from Cache-Control header if available
-        let maxAge = null;
-        if (cacheControl) {
-            const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
-            if (maxAgeMatch) {
-                maxAge = parseInt(maxAgeMatch[1], 10);
-            }
-        }
+        const cacheMetadata = extractCacheMetadata(response);
         
         const result = {
             data,
-            cacheMetadata: {
-                status: cacheStatus,
-                maxAge: maxAge,
-                fetchTime: Date.now()
-            }
+            cacheMetadata: cacheMetadata
         };
         
         // Cache the result
@@ -695,25 +721,11 @@ async function fetchAISummary(period = '24h') {
         const data = await response.json();
         
         // Extract cache metadata from response headers
-        const cacheStatus = response.headers.get('X-Cache-Status');
-        const cacheControl = response.headers.get('Cache-Control');
-        
-        // Parse max-age from Cache-Control header if available
-        let maxAge = null;
-        if (cacheControl) {
-            const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
-            if (maxAgeMatch) {
-                maxAge = parseInt(maxAgeMatch[1], 10);
-            }
-        }
+        const cacheMetadata = extractCacheMetadata(response);
         
         return {
             data,
-            cacheMetadata: {
-                status: cacheStatus,
-                maxAge: maxAge,
-                fetchTime: Date.now()
-            }
+            cacheMetadata: cacheMetadata
         };
     } catch (error) {
         console.error('Failed to fetch AI summary:', error);
