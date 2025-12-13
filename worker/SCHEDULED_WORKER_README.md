@@ -11,8 +11,10 @@ This scheduled worker runs hourly to aggregate and analyze Bitcoin news, storing
 │  Runs: Every hour                       │
 │                                         │
 │  1. Fetch 100+ articles (pagination)   │
-│  2. Analyze sentiment with LLM         │
-│  3. Store in KV                        │
+│  2. Fetch article content from URLs    │
+│  3. Generate AI summaries               │
+│  4. Analyze sentiment with LLM         │
+│  5. Store in KV                        │
 └─────────────────────────────────────────┘
                     │
                     ▼
@@ -34,6 +36,7 @@ This scheduled worker runs hourly to aggregate and analyze Bitcoin news, storing
 - **API Credit Optimization**: Uses API credits only once per hour (not per user request)
 - **Consistent Performance**: All users get millisecond-latency responses from KV
 - **Fresh Data**: 100+ articles with sentiment analysis, updated hourly
+- **AI-Enhanced Content**: Fetches full article content and generates concise AI summaries
 - **Reliable**: Scheduled execution ensures data is always available
 
 ## Deployment Steps
