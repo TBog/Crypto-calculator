@@ -68,6 +68,101 @@ async function fetchNewsPage(apiKey, nextPage = null) {
 }
 
 /**
+ * Fetch article content from URL
+ * @param {string} url - Article URL
+ * @returns {Promise<string|null>} Article text content or null on error
+ */
+async function fetchArticleContent(url) {
+  try {
+    // Set a timeout and user agent to avoid being blocked
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0; +http://crypto-calculator.com)'
+      },
+      // Add a timeout
+      signal: AbortSignal.timeout(10000) // 10 second timeout
+    });
+    
+    if (!response.ok) {
+      console.warn(`Failed to fetch article content: ${response.status}`);
+      return null;
+    }
+    
+    const html = await response.text();
+    
+    // Extract text from HTML - simple approach
+    // Remove script and style tags
+    let text = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+    text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+    
+    // Remove HTML tags
+    text = text.replace(/<[^>]+>/g, ' ');
+    
+    // Decode HTML entities
+    text = text.replace(/&nbsp;/g, ' ');
+    text = text.replace(/&quot;/g, '"');
+    text = text.replace(/&apos;/g, "'");
+    text = text.replace(/&amp;/g, '&');
+    text = text.replace(/&lt;/g, '<');
+    text = text.replace(/&gt;/g, '>');
+    
+    // Clean up whitespace
+    text = text.replace(/\s+/g, ' ').trim();
+    
+    // Limit to first 5000 characters to avoid token limits
+    if (text.length > 5000) {
+      text = text.substring(0, 5000);
+    }
+    
+    return text || null;
+  } catch (error) {
+    console.error(`Error fetching article content from ${url}:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Generate AI summary of article content
+ * @param {Object} env - Environment variables (includes AI binding)
+ * @param {string} title - Article title
+ * @param {string} content - Article content
+ * @returns {Promise<string|null>} AI-generated summary or null on error
+ */
+async function generateArticleSummary(env, title, content) {
+  try {
+    if (!content || content.length < 100) {
+      return null; // Not enough content to summarize
+    }
+    
+    // Use Cloudflare Workers AI to generate summary
+    const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a news summarization assistant. Provide a concise 2-3 sentence summary of the Bitcoin-related news article. Focus on the key facts and implications for Bitcoin.'
+        },
+        {
+          role: 'user',
+          content: `Title: ${title}\n\nContent: ${content}\n\nProvide a brief summary:`
+        }
+      ],
+      max_tokens: 150
+    });
+    
+    const summary = (response.response || response || '').trim();
+    
+    if (summary && summary.length > 20) {
+      return summary;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Failed to generate summary:', error);
+    return null;
+  }
+}
+
+/**
  * Analyze sentiment of an article using Cloudflare Workers AI
  * @param {Object} env - Environment variables (includes AI binding)
  * @param {Object} article - Article object to analyze
@@ -196,13 +291,13 @@ async function aggregateArticles(env, knownIds) {
 }
 
 /**
- * Analyze sentiment for all articles
+ * Analyze sentiment and generate summaries for all articles
  * @param {Object} env - Environment variables
  * @param {Array} articles - Array of articles to analyze
- * @returns {Promise<Array>} Articles with sentiment tags
+ * @returns {Promise<Array>} Articles with sentiment tags and AI summaries
  */
 async function analyzeArticles(env, articles) {
-  console.log(`Starting sentiment analysis for ${articles.length} articles...`);
+  console.log(`Starting analysis for ${articles.length} articles...`);
   
   const analyzedArticles = [];
   
@@ -210,13 +305,32 @@ async function analyzeArticles(env, articles) {
     const article = articles[i];
     
     try {
+      // Analyze sentiment (fast)
       const sentiment = await analyzeSentiment(env, article);
+      
+      // Fetch article content and generate summary (slower, may fail)
+      let aiSummary = null;
+      if (article.link) {
+        console.log(`Fetching content for article ${i + 1}: ${article.title?.substring(0, 50)}...`);
+        const content = await fetchArticleContent(article.link);
+        
+        if (content) {
+          console.log(`Generating AI summary for article ${i + 1}...`);
+          aiSummary = await generateArticleSummary(env, article.title, content);
+          
+          if (aiSummary) {
+            console.log(`✓ Summary generated for article ${i + 1}`);
+          }
+        }
+      }
+      
       analyzedArticles.push({
         ...article,
-        sentiment: sentiment
+        sentiment: sentiment,
+        ...(aiSummary && { aiSummary: aiSummary })
       });
       
-      if ((i + 1) % 10 === 0) {
+      if ((i + 1) % 5 === 0) {
         console.log(`Analyzed ${i + 1}/${articles.length} articles`);
       }
     } catch (error) {
@@ -229,7 +343,8 @@ async function analyzeArticles(env, articles) {
     }
   }
   
-  console.log(`Sentiment analysis complete: ${analyzedArticles.length} articles processed`);
+  const withSummaries = analyzedArticles.filter(a => a.aiSummary).length;
+  console.log(`Analysis complete: ${analyzedArticles.length} articles processed, ${withSummaries} with AI summaries`);
   
   return analyzedArticles;
 }
