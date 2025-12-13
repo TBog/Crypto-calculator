@@ -68,11 +68,55 @@ async function fetchNewsPage(apiKey, nextPage = null) {
 }
 
 /**
- * Fetch article content from URL
+ * HTMLRewriter handler to extract text content from HTML
+ * Uses Cloudflare's HTMLRewriter API for efficient, streaming HTML parsing
+ */
+class TextExtractor {
+  constructor() {
+    this.textChunks = [];
+    this.charCount = 0;
+    this.maxChars = 5000; // Limit to avoid token limits
+  }
+  
+  element(element) {
+    // Skip script, style, and other non-content elements
+    // These will be automatically excluded from text extraction
+  }
+  
+  text(text) {
+    // Only collect text if we haven't exceeded the limit
+    if (this.charCount < this.maxChars) {
+      const content = text.text;
+      if (content && content.trim()) {
+        this.textChunks.push(content);
+        this.charCount += content.length;
+      }
+    }
+  }
+  
+  getText() {
+    // Join all text chunks and clean up whitespace
+    let text = this.textChunks.join(' ');
+    text = text.replace(/\s+/g, ' ').trim();
+    
+    // Limit to first 5000 characters
+    if (text.length > this.maxChars) {
+      text = text.substring(0, this.maxChars);
+    }
+    
+    return text || null;
+  }
+}
+
+/**
+ * Fetch article content from URL using HTMLRewriter for parsing
  * 
  * SECURITY NOTE: The extracted text is used solely as input to AI for summary generation.
  * It is never rendered as HTML or injected into the DOM. The AI-generated summary is
  * displayed using textContent (not innerHTML) in the frontend, preventing XSS.
+ * 
+ * Uses Cloudflare's HTMLRewriter API for efficient, secure HTML parsing without regex.
+ * See: https://blog.cloudflare.com/html-parsing-1/
  * 
  * @param {string} url - Article URL
  * @returns {Promise<string|null>} Article text content or null on error
@@ -84,7 +128,6 @@ async function fetchArticleContent(url) {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0; +http://crypto-calculator.com)'
       },
-      // Add a timeout
       signal: AbortSignal.timeout(10000) // 10 second timeout
     });
     
@@ -93,63 +136,36 @@ async function fetchArticleContent(url) {
       return null;
     }
     
-    const html = await response.text();
+    // Use HTMLRewriter to parse HTML and extract text content
+    // This is more efficient and secure than regex-based parsing
+    const extractor = new TextExtractor();
     
-    // Extract text from HTML for AI processing (not for HTML display)
-    // IMPORTANT: This text is only used as input to AI, never rendered as HTML
-    // CodeQL may flag the HTML parsing, but this is safe because:
-    // 1. Text is only used for AI input (not DOM injection)
-    // 2. AI output is displayed via textContent (not innerHTML)
-    // 3. Additional < and > removal for defense in depth
-    let text = html;
+    // Create a new HTMLRewriter instance and configure it to:
+    // 1. Remove script and style tags (don't extract their content)
+    // 2. Extract text from all other elements
+    const rewriter = new HTMLRewriter()
+      .on('script', {
+        element(element) {
+          element.remove(); // Don't extract script content
+        }
+      })
+      .on('style', {
+        element(element) {
+          element.remove(); // Don't extract style content
+        }
+      })
+      .on('*', extractor); // Extract text from all other elements
     
-    // Remove script tags (multiple passes to catch malformed tags)
-    // Note: The extracted text is only used for AI input, not HTML rendering
-    for (let i = 0; i < 3; i++) {
-      // More permissive regex to catch whitespace variations in closing tags
-      text = text.replace(/<script[^>]*>[\s\S]*?<\/script[\s]*>/gi, '');
-      text = text.replace(/<script[^>]*>/gi, ''); // Remove unclosed script tags
-    }
+    // Transform the response and collect the text
+    const transformed = rewriter.transform(response);
     
-    // Remove style tags (multiple passes)
-    for (let i = 0; i < 3; i++) {
-      text = text.replace(/<style[^>]*>[\s\S]*?<\/style[\s]*>/gi, '');
-      text = text.replace(/<style[^>]*>/gi, ''); // Remove unclosed style tags
-    }
+    // Read the transformed response to trigger the HTMLRewriter
+    await transformed.arrayBuffer();
     
-    // Remove all remaining HTML tags
-    text = text.replace(/<[^>]+>/g, ' ');
+    // Get the extracted text
+    const text = extractor.getText();
     
-    // Additional safety: Remove any remaining < or > characters
-    text = text.replace(/[<>]/g, '');
-    
-    // Decode common HTML entities (basic set)
-    const entities = {
-      '&nbsp;': ' ',
-      '&quot;': '"',
-      '&apos;': "'",
-      '&#39;': "'",
-      '&amp;': '&',
-      '&lt;': '<',
-      '&gt;': '>',
-      '&mdash;': '—',
-      '&ndash;': '–',
-      '&hellip;': '…'
-    };
-    
-    for (const [entity, char] of Object.entries(entities)) {
-      text = text.replace(new RegExp(entity, 'g'), char);
-    }
-    
-    // Clean up whitespace
-    text = text.replace(/\s+/g, ' ').trim();
-    
-    // Limit to first 5000 characters to avoid token limits
-    if (text.length > 5000) {
-      text = text.substring(0, 5000);
-    }
-    
-    return text || null;
+    return text;
   } catch (error) {
     console.error(`Error fetching article content from ${url}:`, error.message);
     return null;
