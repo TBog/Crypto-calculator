@@ -75,7 +75,7 @@ class TextExtractor {
   constructor() {
     this.textChunks = [];
     this.charCount = 0;
-    this.maxChars = 5000; // Limit to avoid token limits
+    this.maxChars = 128 * 1024; // Limit to avoid token limits
   }
   
   element(element) {
@@ -99,7 +99,7 @@ class TextExtractor {
     let text = this.textChunks.join(' ');
     text = text.replace(/\s+/g, ' ').trim();
     
-    // Limit to first 5000 characters
+    // Llama 3.1 & 3.2 model instances support a full 128K context window.
     if (text.length > this.maxChars) {
       text = text.substring(0, this.maxChars);
     }
@@ -196,8 +196,7 @@ async function generateArticleSummary(env, title, content) {
       'Validation: If the webpage content does NOT match or discuss the topic in the title',
       '(e.g., wrong article, paywall, error page, or unrelated content),',
       'respond with exactly "ERROR: CONTENT_MISMATCH".',
-      'Summary: Otherwise, provide a concise 2-3 sentence summary of the Bitcoin-related news,',
-      'focusing on key facts and implications for Bitcoin.',
+      'Summary: Otherwise, provide a summary of the Bitcoin-related news, focusing on key facts and implications for Bitcoin.',
       'Format: Start your summary with the marker "SUMMARY:" followed by the actual summary text.'
     ].join(' ');
     
