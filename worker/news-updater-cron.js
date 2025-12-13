@@ -169,12 +169,26 @@ async function generateArticleSummary(env, title, content) {
       return null; // Not enough content to summarize
     }
     
+    // Error indicators for content mismatch detection
+    const MISMATCH_INDICATORS = ['ERROR:', 'CONTENT_MISMATCH', 'does not match', 'unrelated'];
+    
+    // System prompt for AI summarization with content validation
+    const systemPrompt = [
+      'You are a news summarization assistant.',
+      'Task: First verify that the webpage content matches the article title, then provide a summary.',
+      'Validation: If the webpage content does NOT match or discuss the topic in the title',
+      '(e.g., wrong article, paywall, error page, or unrelated content),',
+      'respond with exactly "ERROR: CONTENT_MISMATCH".',
+      'Summary: Otherwise, provide a concise 2-3 sentence summary of the Bitcoin-related news,',
+      'focusing on key facts and implications for Bitcoin.'
+    ].join(' ');
+    
     // Use Cloudflare Workers AI to generate summary with content validation
     const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
       messages: [
         {
           role: 'system',
-          content: 'You are a news summarization assistant. Your task is to verify that the webpage content matches the article title, then provide a summary. If the webpage content does NOT match or discuss the topic in the title (e.g., wrong article, paywall, error page, or unrelated content), respond with exactly "ERROR: CONTENT_MISMATCH". Otherwise, provide a concise 2-3 sentence summary of the Bitcoin-related news article, focusing on key facts and implications for Bitcoin.'
+          content: systemPrompt
         },
         {
           role: 'user',
@@ -189,8 +203,11 @@ async function generateArticleSummary(env, title, content) {
     const summary = (response.response || response || '').trim();
     
     // Check if AI detected content mismatch
-    if (summary.includes('ERROR:') || summary.includes('CONTENT_MISMATCH') || 
-        summary.includes('does not match') || summary.includes('unrelated')) {
+    const hasMismatch = MISMATCH_INDICATORS.some(indicator => 
+      summary.toLowerCase().includes(indicator.toLowerCase())
+    );
+    
+    if (hasMismatch) {
       console.log(`Content mismatch detected for: ${title}`);
       return null;
     }
