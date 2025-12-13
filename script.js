@@ -317,13 +317,28 @@ async function fetchBTCChartData(currency = 'usd') {
         // Extract cache metadata from response headers
         const cacheStatus = response.headers.get('X-Cache-Status');
         const cacheControl = response.headers.get('Cache-Control');
+        const lastUpdated = response.headers.get('X-Last-Updated');
+        const cacheTTL = response.headers.get('X-Cache-TTL');
         
         // Parse max-age from Cache-Control header if available
         let maxAge = null;
-        if (cacheControl) {
+        if (cacheTTL) {
+            // Use X-Cache-TTL if available (from backend)
+            maxAge = parseInt(cacheTTL, 10);
+        } else if (cacheControl) {
+            // Fallback to parsing Cache-Control header
             const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
             if (maxAgeMatch) {
                 maxAge = parseInt(maxAgeMatch[1], 10);
+            }
+        }
+        
+        // Use X-Last-Updated timestamp from backend if available, otherwise use current time
+        let fetchTime = Date.now();
+        if (lastUpdated) {
+            const parsedTime = parseInt(lastUpdated, 10);
+            if (!isNaN(parsedTime)) {
+                fetchTime = parsedTime;
             }
         }
         
@@ -332,7 +347,7 @@ async function fetchBTCChartData(currency = 'usd') {
             cacheMetadata: {
                 status: cacheStatus,
                 maxAge: maxAge,
-                fetchTime: Date.now()
+                fetchTime: fetchTime
             }
         };
         
@@ -697,13 +712,28 @@ async function fetchAISummary(period = '24h') {
         // Extract cache metadata from response headers
         const cacheStatus = response.headers.get('X-Cache-Status');
         const cacheControl = response.headers.get('Cache-Control');
+        const lastUpdated = response.headers.get('X-Last-Updated');
+        const cacheTTL = response.headers.get('X-Cache-TTL');
         
         // Parse max-age from Cache-Control header if available
         let maxAge = null;
-        if (cacheControl) {
+        if (cacheTTL) {
+            // Use X-Cache-TTL if available (from backend)
+            maxAge = parseInt(cacheTTL, 10);
+        } else if (cacheControl) {
+            // Fallback to parsing Cache-Control header
             const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
             if (maxAgeMatch) {
                 maxAge = parseInt(maxAgeMatch[1], 10);
+            }
+        }
+        
+        // Use X-Last-Updated timestamp from backend if available, otherwise use current time
+        let fetchTime = Date.now();
+        if (lastUpdated) {
+            const parsedTime = parseInt(lastUpdated, 10);
+            if (!isNaN(parsedTime)) {
+                fetchTime = parsedTime;
             }
         }
         
@@ -712,7 +742,7 @@ async function fetchAISummary(period = '24h') {
             cacheMetadata: {
                 status: cacheStatus,
                 maxAge: maxAge,
-                fetchTime: Date.now()
+                fetchTime: fetchTime
             }
         };
     } catch (error) {
