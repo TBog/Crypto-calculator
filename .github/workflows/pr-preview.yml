@@ -35,7 +35,7 @@ jobs:
         run: npm ci
 
       - name: Copy static files to `dist/`
-        run: rsync -av --delete --exclude 'worker/' --exclude 'src/' --exclude 'node_modules/' --exclude '.git/' --exclude '.github/' --exclude 'dist/' ./ dist/
+        run: rsync -av --delete --exclude 'worker/' --exclude 'src/' --exclude 'node_modules/' --exclude '.git/' --exclude '.github/' --exclude 'dist/' --exclude '.gitignore' ./ dist/
 
       - name: Build Tailwind CSS
         run: npm run build:css
