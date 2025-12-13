@@ -614,6 +614,7 @@ async function handleFetch(request, env) {
       sentiment: article.sentiment,
       pubDate: article.pubDate,
       link: article.link,
+      description: article.description,
       ...(article.aiSummary && { aiSummary: article.aiSummary })
     }));
     
