@@ -835,6 +835,35 @@ const newsCache = {
 };
 const NEWS_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
+// News pagination state
+const newsState = {
+    allArticles: [],
+    filteredArticles: [],
+    displayedCount: 0, // Tracks the number of articles currently displayed (end index)
+    articlesPerPage: 50,
+    currentFilter: 'all'
+};
+
+/**
+ * Get articles per page setting from cookie
+ * @returns {number} Articles per page
+ */
+function getArticlesPerPageSetting() {
+    const match = document.cookie.match(/articlesPerPage=(\d+)/);
+    return match ? parseInt(match[1]) : 50;
+}
+
+/**
+ * Set articles per page setting in cookie
+ * @param {number} count - Articles per page
+ */
+function setArticlesPerPageSetting(count) {
+    // Set cookie for 1 year
+    const expires = new Date();
+    expires.setFullYear(expires.getFullYear() + 1);
+    document.cookie = `articlesPerPage=${count}; expires=${expires.toUTCString()}; path=/; SameSite=Lax`;
+}
+
 /**
  * Fetch Bitcoin news from the API
  * @returns {Promise<Object>} News data with cache metadata
@@ -853,6 +882,7 @@ async function fetchBitcoinNews() {
         // Extract cache metadata from response headers
         const cacheStatus = response.headers.get('X-Cache-Status');
         const cacheControl = response.headers.get('Cache-Control');
+        const lastUpdated = response.headers.get('X-Last-Updated');
         
         // Parse max-age from Cache-Control header if available
         let maxAge = null;
@@ -863,6 +893,14 @@ async function fetchBitcoinNews() {
             }
         }
         
+        // Use lastUpdatedExternal from data if available, otherwise use header or current time
+        const fetchTime = data.lastUpdatedExternal || (lastUpdated ? parseInt(lastUpdated) : Date.now());
+        
+        // Log if we had to fall back (indicates potential data structure issue)
+        if (!data.lastUpdatedExternal) {
+            console.warn('News data missing lastUpdatedExternal field, using fallback timestamp');
+        }
+        
         // Cache the news data with consistent timestamp
         const now = Date.now();
         newsCache.data = data;
@@ -870,7 +908,8 @@ async function fetchBitcoinNews() {
         newsCache.cacheMetadata = {
             status: cacheStatus,
             maxAge: maxAge,
-            fetchTime: now
+            fetchTime: fetchTime, // This is when data was fetched from external API
+            displayTime: now // This is when we displayed it to user
         };
         
         return {
@@ -943,101 +982,272 @@ function displayNews(articles, cacheMetadata) {
     errorContainer.style.display = 'none';
     displayContainer.style.display = 'block';
     
+    // Store all articles in state
+    newsState.allArticles = articles || [];
+    newsState.displayedCount = 0;
+    
+    // Initialize articles per page from cookie
+    newsState.articlesPerPage = getArticlesPerPageSetting();
+    const articlesPerPageSelect = document.getElementById('articlesPerPage');
+    if (articlesPerPageSelect) {
+        articlesPerPageSelect.value = newsState.articlesPerPage;
+    }
+    
+    // Setup filter event listeners
+    setupNewsFilters();
+    
+    // Apply current filter and render
+    applyNewsFilter(newsState.currentFilter);
+    
+    // Update timestamp
+    updateNewsTime(cacheMetadata);
+}
+
+/**
+ * Setup news filter and pagination controls
+ */
+function setupNewsFilters() {
+    // Filter buttons
+    const filterButtons = document.querySelectorAll('.sentiment-filter');
+    filterButtons.forEach(btn => {
+        btn.onclick = function() {
+            // Remove active class from all buttons
+            filterButtons.forEach(b => b.classList.remove('active'));
+            // Add active to clicked button
+            this.classList.add('active');
+            
+            // Get filter type
+            const filterId = this.id;
+            let filter = 'all';
+            if (filterId === 'filterPositive') filter = 'positive';
+            else if (filterId === 'filterNegative') filter = 'negative';
+            else if (filterId === 'filterNeutral') filter = 'neutral';
+            
+            // Apply filter
+            applyNewsFilter(filter);
+        };
+    });
+    
+    // Articles per page dropdown
+    const articlesPerPageSelect = document.getElementById('articlesPerPage');
+    if (articlesPerPageSelect) {
+        articlesPerPageSelect.onchange = function() {
+            newsState.articlesPerPage = parseInt(this.value);
+            setArticlesPerPageSetting(newsState.articlesPerPage);
+            // Reset to show first page with new per-page count
+            newsState.displayedCount = 0;
+            renderNewsArticles();
+        };
+    }
+    
+    // Load more button
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    if (loadMoreBtn) {
+        loadMoreBtn.onclick = function() {
+            newsState.displayedCount += newsState.articlesPerPage;
+            renderNewsArticles();
+        };
+    }
+}
+
+/**
+ * Apply sentiment filter to articles
+ * @param {string} filter - Filter type: 'all', 'positive', 'negative', 'neutral'
+ */
+function applyNewsFilter(filter) {
+    newsState.currentFilter = filter;
+    
+    // Filter articles based on sentiment
+    if (filter === 'all') {
+        newsState.filteredArticles = newsState.allArticles;
+    } else {
+        newsState.filteredArticles = newsState.allArticles.filter(article => {
+            const sentiment = (article.sentiment || 'neutral').toLowerCase();
+            return sentiment === filter;
+        });
+    }
+    
+    // Reset displayed count and render
+    newsState.displayedCount = 0;
+    renderNewsArticles();
+}
+
+/**
+ * Render news articles with pagination
+ */
+function renderNewsArticles() {
+    const newsArticles = document.getElementById('newsArticles');
+    const loadMoreContainer = document.getElementById('loadMoreContainer');
+    const articlesShown = document.getElementById('articlesShown');
+    const articlesTotal = document.getElementById('articlesTotal');
+    
     // Clear existing content
     newsArticles.innerHTML = '';
     
-    if (!articles || articles.length === 0) {
-        // Create empty state message using safe DOM manipulation
+    if (!newsState.filteredArticles || newsState.filteredArticles.length === 0) {
+        // Create empty state message
         const emptyDiv = document.createElement('div');
         emptyDiv.className = 'text-center py-8 text-gray-500 dark:text-gray-400';
         
         const messageP = document.createElement('p');
         messageP.className = 'text-sm';
-        messageP.textContent = 'No articles available at the moment.';
+        messageP.textContent = newsState.currentFilter === 'all' 
+            ? 'No articles available at the moment.'
+            : `No ${newsState.currentFilter} articles found.`;
         emptyDiv.appendChild(messageP);
         
         const hintP = document.createElement('p');
         hintP.className = 'text-xs mt-2';
-        hintP.textContent = 'Try refreshing to get the latest news.';
+        hintP.textContent = 'Try a different filter or refresh to get the latest news.';
         emptyDiv.appendChild(hintP);
         
         newsArticles.appendChild(emptyDiv);
-    } else {
-        // Display all articles in a simple list
-        articles.forEach(article => {
-                    // Create article card
-                    const articleDiv = document.createElement('div');
-                    articleDiv.className = 'bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border border-gray-200 dark:border-gray-600';
-                    
-                    // Title with source icon
-                    const titleH4 = document.createElement('h4');
-                    titleH4.className = 'text-sm text-gray-800 dark:text-white mb-2 flex items-center gap-3 bg-gradient-to-r from-gray-100 to-gray-50 dark:from-gray-700 dark:to-gray-700/50 p-2 rounded';
-                    
-                    // Add source icon if available
-                    if (article.source_icon) {
-                        const iconImg = document.createElement('img');
-                        iconImg.src = article.source_icon;
-                        iconImg.alt = article.source_name || 'Source';
-                        iconImg.className = 'w-4 h-4 rounded-sm flex-shrink-0';
-                        iconImg.onerror = function() { this.style.display = 'none'; }; // Hide if image fails to load
-                        titleH4.appendChild(iconImg);
-                    }
-                    
-                    // Title text/link
-                    if (article.link) {
-                        const titleLink = document.createElement('a');
-                        titleLink.href = article.link;
-                        titleLink.target = '_blank';
-                        titleLink.rel = 'noopener noreferrer';
-                        titleLink.className = 'hover:text-blue-600 dark:hover:text-blue-400 transition flex-1';
-                        titleLink.textContent = article.title || 'Untitled';
-                        titleH4.appendChild(titleLink);
-                    } else {
-                        const titleSpan = document.createElement('span');
-                        titleSpan.className = 'flex-1';
-                        titleSpan.textContent = article.title || 'Untitled';
-                        titleH4.appendChild(titleSpan);
-                    }
-                    articleDiv.appendChild(titleH4);
-                    
-                    // Description
-                    if (article.description) {
-                        const descP = document.createElement('p');
-                        descP.className = 'text-xs text-gray-600 dark:text-gray-300 mb-2 line-clamp-2';
-                        descP.textContent = article.description;
-                        articleDiv.appendChild(descP);
-                    }
-                    
-                    // Footer (source and time)
-                    const footerDiv = document.createElement('div');
-                    footerDiv.className = 'flex items-center justify-between text-xs text-gray-500 dark:text-gray-400';
-                    
-                    // Source name with link
-                    if (article.source_url && article.source_name) {
-                        const sourceLink = document.createElement('a');
-                        sourceLink.href = article.source_url;
-                        sourceLink.target = '_blank';
-                        sourceLink.rel = 'noopener noreferrer';
-                        sourceLink.className = 'hover:text-blue-600 dark:hover:text-blue-400 transition';
-                        sourceLink.textContent = article.source_name;
-                        footerDiv.appendChild(sourceLink);
-                    } else {
-                        const sourceSpan = document.createElement('span');
-                        sourceSpan.textContent = article.source_name || 'Unknown Source';
-                        footerDiv.appendChild(sourceSpan);
-                    }
-                    
-                    const timeSpan = document.createElement('span');
-                    timeSpan.textContent = formatRelativeTime(article.pubDate);
-                    footerDiv.appendChild(timeSpan);
-                    
-                    articleDiv.appendChild(footerDiv);
-                    newsArticles.appendChild(articleDiv);
-                });
-            }
+        loadMoreContainer.style.display = 'none';
+        return;
+    }
     
-    // Update timestamp
-    updateNewsTime(cacheMetadata);
+    // Calculate how many articles to show (displayedCount is the starting index)
+    const articlesToShow = Math.min(
+        newsState.displayedCount + newsState.articlesPerPage,
+        newsState.filteredArticles.length
+    );
+    
+    // Render articles from 0 to articlesToShow
+    for (let i = 0; i < articlesToShow; i++) {
+        const article = newsState.filteredArticles[i];
+        const articleDiv = createArticleElement(article);
+        newsArticles.appendChild(articleDiv);
+    }
+    
+    // Update pagination info
+    articlesShown.textContent = articlesToShow;
+    articlesTotal.textContent = newsState.filteredArticles.length;
+    
+    // Show/hide load more button
+    if (articlesToShow < newsState.filteredArticles.length) {
+        loadMoreContainer.style.display = 'block';
+    } else {
+        loadMoreContainer.style.display = 'none';
+    }
+    
+    // Update displayed count to track where we are for next load
+    newsState.displayedCount = articlesToShow;
+}
+
+/**
+ * Create article element
+ * @param {Object} article - Article data
+ * @returns {HTMLElement} Article element
+ */
+function createArticleElement(article) {
+    // Create article card
+    const articleDiv = document.createElement('div');
+    articleDiv.className = 'bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border border-gray-200 dark:border-gray-600';
+    
+    // Add sentiment badge
+    const sentiment = (article.sentiment || 'neutral').toLowerCase();
+    let sentimentBadge = '';
+    let sentimentClass = '';
+    
+    if (sentiment === 'positive') {
+        sentimentBadge = '😊';
+        sentimentClass = 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300';
+    } else if (sentiment === 'negative') {
+        sentimentBadge = '😟';
+        sentimentClass = 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300';
+    } else {
+        sentimentBadge = '😐';
+        sentimentClass = 'bg-gray-100 dark:bg-gray-600/30 text-gray-800 dark:text-gray-300';
+    }
+    
+    const badgeSpan = document.createElement('span');
+    badgeSpan.className = `inline-block px-2 py-0.5 rounded-full text-xs font-semibold mb-2 ${sentimentClass}`;
+    badgeSpan.textContent = `${sentimentBadge} ${sentiment.charAt(0).toUpperCase() + sentiment.slice(1)}`;
+    articleDiv.appendChild(badgeSpan);
+    
+    // Title with source icon
+    const titleH4 = document.createElement('h4');
+    titleH4.className = 'text-sm text-gray-800 dark:text-white mb-2 flex items-center gap-3 bg-gradient-to-r from-gray-100 to-gray-50 dark:from-gray-700 dark:to-gray-700/50 p-2 rounded';
+    
+    // Add source icon if available
+    if (article.source_icon) {
+        const iconImg = document.createElement('img');
+        iconImg.src = article.source_icon;
+        iconImg.alt = article.source_name || 'Source';
+        iconImg.className = 'w-4 h-4 rounded-sm flex-shrink-0';
+        iconImg.onerror = function() { this.style.display = 'none'; };
+        titleH4.appendChild(iconImg);
+    }
+    
+    // Title text/link
+    if (article.link) {
+        const titleLink = document.createElement('a');
+        titleLink.href = article.link;
+        titleLink.target = '_blank';
+        titleLink.rel = 'noopener noreferrer';
+        titleLink.className = 'hover:text-blue-600 dark:hover:text-blue-400 transition flex-1';
+        titleLink.textContent = article.title || 'Untitled';
+        titleH4.appendChild(titleLink);
+    } else {
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'flex-1';
+        titleSpan.textContent = article.title || 'Untitled';
+        titleH4.appendChild(titleSpan);
+    }
+    articleDiv.appendChild(titleH4);
+    
+    // AI Summary (if available) - display with special styling
+    if (article.aiSummary) {
+        const summaryDiv = document.createElement('div');
+        summaryDiv.className = 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-400 dark:border-blue-600 pl-3 pr-2 py-2 mb-2 rounded';
+        
+        const summaryLabel = document.createElement('div');
+        summaryLabel.className = 'text-xs font-semibold text-blue-700 dark:text-blue-300 mb-1 flex items-center gap-1';
+        summaryLabel.textContent = '🤖 AI Summary';
+        summaryDiv.appendChild(summaryLabel);
+        
+        const summaryText = document.createElement('p');
+        summaryText.className = 'text-xs text-blue-900 dark:text-blue-100 leading-relaxed';
+        summaryText.textContent = article.aiSummary;
+        summaryDiv.appendChild(summaryText);
+        
+        articleDiv.appendChild(summaryDiv);
+    }
+    
+    // Description (original from NewsData.io)
+    if (article.description) {
+        const descP = document.createElement('p');
+        descP.className = 'text-xs text-gray-600 dark:text-gray-300 mb-2 line-clamp-2';
+        descP.textContent = article.description;
+        articleDiv.appendChild(descP);
+    }
+    
+    // Footer (source and time)
+    const footerDiv = document.createElement('div');
+    footerDiv.className = 'flex items-center justify-between text-xs text-gray-500 dark:text-gray-400';
+    
+    // Source name with link
+    if (article.source_url && article.source_name) {
+        const sourceLink = document.createElement('a');
+        sourceLink.href = article.source_url;
+        sourceLink.target = '_blank';
+        sourceLink.rel = 'noopener noreferrer';
+        sourceLink.className = 'hover:text-blue-600 dark:hover:text-blue-400 transition';
+        sourceLink.textContent = article.source_name;
+        footerDiv.appendChild(sourceLink);
+    } else {
+        const sourceSpan = document.createElement('span');
+        sourceSpan.textContent = article.source_name || 'Unknown Source';
+        footerDiv.appendChild(sourceSpan);
+    }
+    
+    const timeSpan = document.createElement('span');
+    timeSpan.textContent = formatRelativeTime(article.pubDate);
+    footerDiv.appendChild(timeSpan);
+    
+    articleDiv.appendChild(footerDiv);
+    
+    return articleDiv;
 }
 
 /**
@@ -1047,31 +1257,32 @@ function displayNews(articles, cacheMetadata) {
 function updateNewsTime(cacheMetadata = null) {
     const newsUpdateElement = document.getElementById('newsUpdateTime');
     if (newsUpdateElement) {
-        const now = new Date();
-        const timeString = now.toLocaleTimeString(undefined, { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            second: '2-digit'
-        });
-        
-        let displayText = `Last updated: ${timeString}`;
+        let displayText = '';
         
         // Add cache information if available
-        if (cacheMetadata) {
-            const { status, maxAge, fetchTime } = cacheMetadata;
+        if (cacheMetadata && cacheMetadata.fetchTime) {
+            const { status, fetchTime } = cacheMetadata;
             
-            if (status === 'HIT' && maxAge && fetchTime) {
-                // Calculate remaining cache time
-                const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
-                const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
-                const remainingMinutes = Math.floor(remainingSeconds / 60);
-                
-                displayText += ` (cached, expires in ${remainingMinutes}m)`;
-            } else if (status === 'MISS' && maxAge) {
-                // Fresh data from backend
-                const expiresMinutes = Math.floor(maxAge / 60);
-                displayText += ` (fresh data, cache ${expiresMinutes}m)`;
+            // Show when data was fetched from external API (by scheduled worker)
+            const fetchDate = new Date(fetchTime);
+            const timeAgo = formatRelativeTime(fetchDate.toISOString());
+            
+            if (status === 'KV') {
+                // Data is from KV, populated by scheduled worker
+                displayText = `Data refreshed ${timeAgo} (updated hourly by scheduled worker)`;
+            } else {
+                // Fallback for other cache statuses
+                displayText = `Last updated: ${timeAgo}`;
             }
+        } else {
+            // Fallback if no metadata
+            const now = new Date();
+            const timeString = now.toLocaleTimeString(undefined, { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            displayText = `Last updated: ${timeString}`;
         }
         
         newsUpdateElement.textContent = displayText;
@@ -2258,6 +2469,30 @@ function initEventListeners() {
             this.classList.remove('bg-white', 'dark:bg-gray-800', 'text-gray-700', 'dark:text-gray-300', 'border-gray-300', 'dark:border-gray-600');
             this.classList.add('bg-purple-600', 'text-white', 'border-purple-600');
         });
+    });
+
+    // Bitcoin News Feed toggle handler
+    let newsVisible = true; // Track visibility state
+    document.getElementById('toggleNews').addEventListener('click', function() {
+        newsVisible = !newsVisible;
+        const newsContent = document.querySelector('#newsSection > div:not(:first-child)');
+        const allContentDivs = Array.from(document.querySelectorAll('#newsSection > div')).slice(1); // All divs except header
+        
+        if (newsVisible) {
+            // Show news content
+            allContentDivs.forEach(div => {
+                div.style.display = '';
+            });
+            this.textContent = '[ Hide ]';
+            this.title = 'Hide news feed';
+        } else {
+            // Hide news content
+            allContentDivs.forEach(div => {
+                div.style.display = 'none';
+            });
+            this.textContent = '[ Show ]';
+            this.title = 'Show news feed';
+        }
     });
 
     // Bitcoin News Feed button handlers
