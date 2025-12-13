@@ -154,6 +154,53 @@ The worker stores data under the key `BTC_ANALYZED_NEWS` with this structure:
 }
 ```
 
+## HTTP Endpoint for Cache Statistics
+
+When accessed via HTTP (not as a scheduled job), the worker provides cache statistics in JSON format.
+
+### Accessing Cache Statistics
+
+Simply make an HTTP GET request to the worker URL:
+
+```bash
+curl https://news-updater-cron.your-subdomain.workers.dev/
+```
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "totalArticles": 150,
+  "lastUpdated": 1701234567890,
+  "lastUpdatedDate": "2024-11-29T12:34:56.789Z",
+  "sentimentCounts": {
+    "positive": 50,
+    "negative": 30,
+    "neutral": 70
+  },
+  "articleIds": ["article-id-1", "article-id-2", "..."],
+  "latestArticles": [
+    {
+      "id": "article-id-1",
+      "title": "Bitcoin Hits New High",
+      "source": "CoinDesk",
+      "sentiment": "positive",
+      "pubDate": "2024-11-29 12:00:00",
+      "link": "https://...",
+      "aiSummary": "Bitcoin reached a new all-time high today..."
+    }
+  ]
+}
+```
+
+### Use Cases
+
+- **Monitoring**: Check cache status and article counts
+- **Debugging**: Verify articles are being stored correctly
+- **Integration**: Use article IDs for deduplication
+- **Preview**: View latest 10 articles without loading all 500
+
 ## Monitoring
 
 ### View Cron Logs
