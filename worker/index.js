@@ -34,6 +34,48 @@ const SUMMARY_CACHE_TTL = 300;
 // Cache duration for price history used in summaries (10 minutes in seconds)
 const PRICE_HISTORY_CACHE_TTL = 600;
 
+// Cache duration for Bitcoin news (5-10 minutes in seconds)
+const BITCOIN_NEWS_CACHE_TTL = 600; // 10 minutes
+
+// KV key for stored Bitcoin news (matches news-updater-cron.js)
+const KV_NEWS_KEY = 'BTC_ANALYZED_NEWS';
+
+/**
+ * Fetch Bitcoin news from Cloudflare KV (populated by scheduled worker)
+ * This endpoint simply reads pre-fetched and pre-analyzed data from KV
+ * No external API calls are made, ensuring ultra-fast response times
+ * @param {Object} env - Environment variables (includes CRYPTO_NEWS_CACHE KV binding)
+ * @returns {Promise<{data: Object, cacheStatus: string, lastUpdated: number}>} News data with cache status and timestamp
+ */
+async function fetchBitcoinNews(env) {
+  try {
+    // Read from KV namespace
+    const cachedData = await env.CRYPTO_NEWS_CACHE.get(KV_NEWS_KEY, { type: 'json' });
+    
+    if (!cachedData) {
+      // KV key is missing - scheduled worker hasn't run yet or failed
+      throw new Error('News data temporarily unavailable. Please try again later.');
+    }
+    
+    // Data structure from scheduled worker:
+    // {
+    //   articles: [...],
+    //   totalArticles: number,
+    //   lastUpdatedExternal: timestamp,
+    //   sentimentCounts: { positive, negative, neutral }
+    // }
+    
+    return {
+      data: cachedData,
+      cacheStatus: 'KV',
+      lastUpdated: cachedData.lastUpdatedExternal || Date.now()
+    };
+  } catch (error) {
+    console.error('Failed to fetch Bitcoin news from KV:', error);
+    throw error;
+  }
+}
+
 /**
  * Generic function to fetch data from CoinGecko API with caching
  * @param {string} endpoint - CoinGecko API endpoint (e.g., '/api/v3/simple/supported_vs_currencies')
@@ -318,23 +360,11 @@ function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
   const highTimeFormatted = new Date(highTime).toISOString();
   const lowTimeFormatted = new Date(lowTime).toISOString();
   
-  let dataSummary = "|date time|price(USD)|\n|---|---|\n";
-  
-  // Set maximum number of samples
-  const targetSamples = 90 * 4;
+  // Create hourly summary (sample every few hours for brevity)
+  // Adjust sample size based on period length to keep input context manageable
+  const targetSamples = prices.length > 200 ? 8 : 12; // Fewer samples for longer periods
+  let hourlySummary = "Price points:\n";
   const sampleInterval = Math.max(1, Math.floor(prices.length / targetSamples));
-
-  // Simple sample of data
-
-  /**
-   * Split the data into evenly sized chunks.
-   * For each chunk:
-   * Computes avg, max, and min.
-   * Compares the current chunk's average to the previous chunk's average.
-   * Chooses the max if the average is rising, min if falling.
-   * Outputs one representative sample per chunk, tagged with its timestamp.
-   */
-  let prevValue = null;
   for (let i = 0; i < prices.length; i += sampleInterval) {
     const chunk = prices.slice(i, i + sampleInterval);
     if (chunk.length === 0) continue;
@@ -448,7 +478,7 @@ async function generatePriceSummary(env, ctx, period = '24h') {
           content: priceText
         }
       ],
-      max_tokens: 512  // Increased from default 256 to prevent truncation for longer periods
+      max_tokens: 1024  // Increased from default 256 to prevent truncation for longer periods
     });
     
     const summary = {
@@ -531,7 +561,7 @@ async function handleRequest(request, env, ctx) {
     'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400', // 24 hours
-    'Access-Control-Expose-Headers': 'X-Cache-Status, X-Currency-Converted, X-Conversion-Warning, X-Exchange-Rate, X-Data-Source-Price, X-Data-Source-Exchange, Cache-Control',
+    'Access-Control-Expose-Headers': 'X-Cache-Status, X-Currency-Converted, X-Conversion-Warning, X-Exchange-Rate, X-Data-Source-Price, X-Data-Source-Exchange, X-Data-Source, X-Last-Updated, X-Cache-TTL, Cache-Control',
   };
 
   // Handle CORS preflight requests
@@ -628,6 +658,38 @@ async function handleRequest(request, env, ctx) {
           message: error.message
         }), {
           status: 500,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json'
+          }
+        });
+      }
+    }
+    
+    // Special endpoint for Bitcoin news feed - reads from KV (populated by scheduled worker)
+    if (url.pathname === '/api/bitcoin-news') {
+      try {
+        const result = await fetchBitcoinNews(env);
+        
+        return new Response(JSON.stringify(result.data), {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'application/json',
+            'Cache-Control': `public, max-age=${BITCOIN_NEWS_CACHE_TTL}`,
+            'X-Cache-Status': result.cacheStatus,
+            'X-Data-Source': 'Cloudflare KV (updated by scheduled worker)',
+            'X-Last-Updated': result.lastUpdated.toString(),
+            'X-Cache-TTL': BITCOIN_NEWS_CACHE_TTL.toString()
+          }
+        });
+      } catch (error) {
+        console.error('Failed to fetch Bitcoin news from KV:', error);
+        return new Response(JSON.stringify({
+          error: 'News data temporarily unavailable',
+          message: 'The news feed is being updated. Please try again in a few minutes.'
+        }), {
+          status: 503,
           headers: {
             ...corsHeaders,
             'Content-Type': 'application/json'

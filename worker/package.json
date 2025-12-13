@@ -1,0 +1,29 @@
+{
+  "name": "crypto-cache-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker for CoinGecko API proxy with AI-powered summaries",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.0",
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "vitest": "^2.1.8",
+    "wrangler": "^3.90.0"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "bitcoin",
+    "crypto",
+    "api",
+    "ai"
+  ],
+  "author": "TBog",
+  "license": "MIT"
+}
