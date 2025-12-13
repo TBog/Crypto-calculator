@@ -193,20 +193,19 @@ async function generateArticleSummary(env, title, content) {
         },
         {
           role: 'user',
-          content: `Article Title: ${title}\n\nWebpage Content: ${content}\n\nFirst, verify the content matches the title. If it does not match, respond with "ERROR: CONTENT_MISMATCH". If it matches, provide a brief summary:`
+          content: `Article Title: ${title}\n\nWebpage Content: ${content}\n\nFirst, verify the content matches the title. If it does not match, respond with "ERROR: CONTENT_MISMATCH". If it matches, provide a summary:`
         }
       ],
-      max_tokens: 150
+      max_tokens: 4096
     });
     
     // Extract summary from response
     // Workers AI returns different formats: {response: "text"} or just "text"
     const summary = (response.response || response || '').trim();
     
-    // Check if AI detected content mismatch
-    // Look for structured error indicators to avoid false positives from words like "unrelated" in summaries
+    // Check if AI detected content mismatch; look for the AI requested error indicators
     const hasMismatch = MISMATCH_INDICATORS.some(indicator => 
-      summary.toLowerCase().includes(indicator.toLowerCase())
+      summary.toUpperCase().includes(indicator.toUpperCase())
     );
     
     if (hasMismatch) {
