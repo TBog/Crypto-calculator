@@ -37,6 +37,7 @@ This scheduled worker runs hourly to aggregate and analyze Bitcoin news, storing
 - **Consistent Performance**: All users get millisecond-latency responses from KV
 - **Fresh Data**: 100+ articles with sentiment analysis, updated hourly
 - **AI-Enhanced Content**: Fetches full article content and generates concise AI summaries
+- **Content Validation**: AI validates that webpage content matches article title before generating summary
 - **Reliable**: Scheduled execution ensures data is always available
 
 ## Deployment Steps

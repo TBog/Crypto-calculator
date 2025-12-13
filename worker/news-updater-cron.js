@@ -157,11 +157,11 @@ async function fetchArticleContent(url) {
 }
 
 /**
- * Generate AI summary of article content
+ * Generate AI summary of article content with validation
  * @param {Object} env - Environment variables (includes AI binding)
  * @param {string} title - Article title
  * @param {string} content - Article content
- * @returns {Promise<string|null>} AI-generated summary or null on error
+ * @returns {Promise<string|null>} AI-generated summary or null if content doesn't match title
  */
 async function generateArticleSummary(env, title, content) {
   try {
@@ -169,16 +169,16 @@ async function generateArticleSummary(env, title, content) {
       return null; // Not enough content to summarize
     }
     
-    // Use Cloudflare Workers AI to generate summary
+    // Use Cloudflare Workers AI to generate summary with content validation
     const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
       messages: [
         {
           role: 'system',
-          content: 'You are a news summarization assistant. Provide a concise 2-3 sentence summary of the Bitcoin-related news article. Focus on the key facts and implications for Bitcoin.'
+          content: 'You are a news summarization assistant. Your task is to verify that the webpage content matches the article title, then provide a summary. If the webpage content does NOT match or discuss the topic in the title (e.g., wrong article, paywall, error page, or unrelated content), respond with exactly "ERROR: CONTENT_MISMATCH". Otherwise, provide a concise 2-3 sentence summary of the Bitcoin-related news article, focusing on key facts and implications for Bitcoin.'
         },
         {
           role: 'user',
-          content: `Title: ${title}\n\nContent: ${content}\n\nProvide a brief summary:`
+          content: `Article Title: ${title}\n\nWebpage Content: ${content}\n\nFirst, verify the content matches the title. If it does not match, respond with "ERROR: CONTENT_MISMATCH". If it matches, provide a brief summary:`
         }
       ],
       max_tokens: 150
@@ -187,6 +187,13 @@ async function generateArticleSummary(env, title, content) {
     // Extract summary from response
     // Workers AI returns different formats: {response: "text"} or just "text"
     const summary = (response.response || response || '').trim();
+    
+    // Check if AI detected content mismatch
+    if (summary.includes('ERROR:') || summary.includes('CONTENT_MISMATCH') || 
+        summary.includes('does not match') || summary.includes('unrelated')) {
+      console.log(`Content mismatch detected for: ${title}`);
+      return null;
+    }
     
     if (summary && summary.length > 20) {
       return summary;
