@@ -710,6 +710,16 @@ async function handleRequest(request, env, ctx) {
         newResponse.headers.set(key, value);
       });
       newResponse.headers.set('X-Cache-Status', 'HIT');
+      
+      // Add cache metadata headers
+      // X-Last-Updated should already be in the cached response from when it was stored
+      // X-Cache-TTL is the TTL value (600 seconds for chart data)
+      if (!newResponse.headers.has('X-Last-Updated')) {
+        // Fallback if header is missing - use current time (shouldn't happen with new code)
+        newResponse.headers.set('X-Last-Updated', Date.now().toString());
+      }
+      newResponse.headers.set('X-Cache-TTL', '600');
+      
       return newResponse;
     }
 
@@ -789,6 +799,10 @@ async function handleRequest(request, env, ctx) {
     
     // Add cache status header
     response.headers.set('X-Cache-Status', 'MISS');
+    
+    // Add cache metadata headers for fresh data
+    response.headers.set('X-Last-Updated', Date.now().toString());
+    response.headers.set('X-Cache-TTL', '600');
     
     // Set proper content type only for JSON responses
     if (responseData) {
