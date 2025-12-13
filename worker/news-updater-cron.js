@@ -532,9 +532,95 @@ async function handleScheduled(event, env, ctx) {
   }
 }
 
+/**
+ * Handle HTTP fetch requests to provide cache statistics
+ * When called via HTTP (not scheduled), returns JSON with cache info:
+ * - Number of articles stored
+ * - List of article IDs
+ * - Latest 10 articles
+ * @param {Request} request - HTTP request
+ * @param {Object} env - Environment variables
+ * @returns {Promise<Response>} JSON response with cache statistics
+ */
+async function handleFetch(request, env) {
+  try {
+    // Read both KV keys
+    const [newsData, idIndexData] = await Promise.all([
+      env.CRYPTO_NEWS_CACHE.get(KV_KEY_NEWS, { type: 'json' }),
+      env.CRYPTO_NEWS_CACHE.get(KV_KEY_IDS, { type: 'json' })
+    ]);
+    
+    if (!newsData || !newsData.articles) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'No cached articles found',
+        totalArticles: 0,
+        articleIds: [],
+        latestArticles: []
+      }), {
+        status: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+    
+    // Prepare response data
+    const articleIds = idIndexData && Array.isArray(idIndexData) ? idIndexData : [];
+    const latestArticles = newsData.articles.slice(0, 10).map(article => ({
+      id: getArticleId(article),
+      title: article.title,
+      source: article.source_name || article.source_id,
+      sentiment: article.sentiment,
+      pubDate: article.pubDate,
+      link: article.link,
+      ...(article.aiSummary && { aiSummary: article.aiSummary })
+    }));
+    
+    const response = {
+      success: true,
+      totalArticles: newsData.totalArticles || newsData.articles.length,
+      lastUpdated: newsData.lastUpdatedExternal,
+      lastUpdatedDate: new Date(newsData.lastUpdatedExternal).toISOString(),
+      sentimentCounts: newsData.sentimentCounts || { positive: 0, negative: 0, neutral: 0 },
+      articleIds: articleIds,
+      latestArticles: latestArticles
+    };
+    
+    return new Response(JSON.stringify(response, null, 2), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching cache statistics:', error);
+    return new Response(JSON.stringify({
+      success: false,
+      error: error.message,
+      totalArticles: 0,
+      articleIds: [],
+      latestArticles: []
+    }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  }
+}
+
 export default {
   async scheduled(event, env, ctx) {
     // Use waitUntil to ensure the job completes even if it takes time
     ctx.waitUntil(handleScheduled(event, env, ctx));
+  },
+  
+  async fetch(request, env, ctx) {
+    // Handle HTTP requests to provide cache statistics
+    return handleFetch(request, env);
   }
 };
