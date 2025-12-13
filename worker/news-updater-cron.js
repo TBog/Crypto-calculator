@@ -170,7 +170,8 @@ async function generateArticleSummary(env, title, content) {
     }
     
     // Error indicators for content mismatch detection
-    const MISMATCH_INDICATORS = ['ERROR:', 'CONTENT_MISMATCH', 'does not match', 'unrelated'];
+    // Only check for structured error messages to avoid false positives
+    const MISMATCH_INDICATORS = ['ERROR:', 'CONTENT_MISMATCH'];
     
     // System prompt for AI summarization with content validation
     const systemPrompt = [
@@ -203,6 +204,7 @@ async function generateArticleSummary(env, title, content) {
     const summary = (response.response || response || '').trim();
     
     // Check if AI detected content mismatch
+    // Look for structured error indicators to avoid false positives from words like "unrelated" in summaries
     const hasMismatch = MISMATCH_INDICATORS.some(indicator => 
       summary.toLowerCase().includes(indicator.toLowerCase())
     );
