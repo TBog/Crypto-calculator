@@ -181,7 +181,8 @@ async function generateArticleSummary(env, title, content) {
       '(e.g., wrong article, paywall, error page, or unrelated content),',
       'respond with exactly "ERROR: CONTENT_MISMATCH".',
       'Summary: Otherwise, provide a concise 2-3 sentence summary of the Bitcoin-related news,',
-      'focusing on key facts and implications for Bitcoin.'
+      'focusing on key facts and implications for Bitcoin.',
+      'Format: Start your summary with the marker "SUMMARY:" followed by the actual summary text.'
     ].join(' ');
     
     // Use Cloudflare Workers AI to generate summary with content validation
@@ -193,7 +194,7 @@ async function generateArticleSummary(env, title, content) {
         },
         {
           role: 'user',
-          content: `Article Title: ${title}\n\nWebpage Content: ${content}\n\nFirst, verify the content matches the title. If it does not match, respond with "ERROR: CONTENT_MISMATCH". If it matches, provide a summary:`
+          content: `Article Title: ${title}\n\nWebpage Content: ${content}\n\nFirst, verify the content matches the title. If it does not match, respond with "ERROR: CONTENT_MISMATCH". If it matches, provide a summary starting with "SUMMARY:" followed by your summary:`
         }
       ],
       max_tokens: 4096
@@ -201,17 +202,40 @@ async function generateArticleSummary(env, title, content) {
     
     // Extract summary from response
     // Workers AI returns different formats: {response: "text"} or just "text"
-    const summary = (response.response || response || '').trim();
+    let fullResponse = (response.response || response || '').trim();
     
     // Check if AI detected content mismatch; look for the AI requested error indicators
     const hasMismatch = MISMATCH_INDICATORS.some(indicator => 
-      summary.toUpperCase().includes(indicator.toUpperCase())
+      fullResponse.toUpperCase().includes(indicator.toUpperCase())
     );
     
     if (hasMismatch) {
       console.log(`Content mismatch detected for: ${title}`);
       return null;
     }
+    
+    // Extract only the summary portion after the SUMMARY: marker
+    let summary = fullResponse;
+    const summaryMarkerIndex = fullResponse.toUpperCase().indexOf('SUMMARY:');
+    if (summaryMarkerIndex !== -1) {
+      // Extract text after "SUMMARY:" marker
+      summary = fullResponse.substring(summaryMarkerIndex + 8).trim();
+    } else {
+      // If no marker found, try to remove common confirmation phrases from the beginning
+      // Remove phrases like "The webpage content matches..." or "Here's a summary..."
+      const confirmationPatterns = [
+        /^The webpage content matches[^.]*\.\s*/i,
+        /^This article discusses[^.]*\.\s*/i,
+        /^Here'?s?\s+(a\s+)?(2-3\s+sentence\s+)?summary[^:]*:\s*/i,
+        /^Summary:\s*/i
+      ];
+      
+      for (const pattern of confirmationPatterns) {
+        summary = summary.replace(pattern, '');
+      }
+    }
+    
+    summary = summary.trim();
     
     if (summary && summary.length > 20) {
       return summary;
