@@ -1203,7 +1203,7 @@ function createArticleElement(article) {
         
         const summaryLabel = document.createElement('div');
         summaryLabel.className = 'text-xs font-semibold text-blue-700 dark:text-blue-300 mb-1 flex items-center gap-1';
-        summaryLabel.innerHTML = '🤖 AI Summary';
+        summaryLabel.textContent = '🤖 AI Summary';
         summaryDiv.appendChild(summaryLabel);
         
         const summaryText = document.createElement('p');
