@@ -295,6 +295,15 @@ async function fetchBTCPrice(currency = 'usd') {
  * @returns {Object} Cache metadata with status, maxAge, and fetchTime
  */
 function extractCacheMetadata(response) {
+    // Guard clause: ensure response and headers exist
+    if (!response || !response.headers) {
+        return {
+            status: null,
+            maxAge: null,
+            fetchTime: Date.now()
+        };
+    }
+    
     const cacheStatus = response.headers.get('X-Cache-Status');
     const cacheControl = response.headers.get('Cache-Control');
     const lastUpdated = response.headers.get('X-Last-Updated');
@@ -304,7 +313,10 @@ function extractCacheMetadata(response) {
     let maxAge = null;
     if (cacheTTL) {
         // Use X-Cache-TTL if available (from backend)
-        maxAge = parseInt(cacheTTL, 10);
+        const parsedTTL = parseInt(cacheTTL, 10);
+        if (!isNaN(parsedTTL)) {
+            maxAge = parsedTTL;
+        }
     } else if (cacheControl) {
         // Fallback to parsing Cache-Control header
         const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
