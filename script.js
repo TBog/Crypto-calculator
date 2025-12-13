@@ -2513,6 +2513,30 @@ function initEventListeners() {
         });
     });
 
+    // Bitcoin News Feed toggle handler
+    let newsVisible = true; // Track visibility state
+    document.getElementById('toggleNews').addEventListener('click', function() {
+        newsVisible = !newsVisible;
+        const newsContent = document.querySelector('#newsSection > div:not(:first-child)');
+        const allContentDivs = Array.from(document.querySelectorAll('#newsSection > div')).slice(1); // All divs except header
+        
+        if (newsVisible) {
+            // Show news content
+            allContentDivs.forEach(div => {
+                div.style.display = '';
+            });
+            this.textContent = '[ Hide ]';
+            this.title = 'Hide news feed';
+        } else {
+            // Hide news content
+            allContentDivs.forEach(div => {
+                div.style.display = 'none';
+            });
+            this.textContent = '[ Show ]';
+            this.title = 'Show news feed';
+        }
+    });
+
     // Bitcoin News Feed button handlers
     document.getElementById('loadNews').addEventListener('click', async function() {
         await loadNews(false);
