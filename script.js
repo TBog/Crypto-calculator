@@ -675,45 +675,51 @@ async function initPriceChart(currency = 'usd') {
  * Update the last update timestamp display
  * @param {Object} cacheMetadata - Optional cache metadata from backend
  */
-function updateLastUpdateTime(cacheMetadata = null) {
+function updateLastUpdateTime(cacheMetadata) {
     const lastUpdateElement = document.getElementById('lastUpdateTime');
-    if (lastUpdateElement) {
-        // Use fetchTime from metadata if available, otherwise use current time
-        const timestamp = (cacheMetadata && cacheMetadata.fetchTime) ? cacheMetadata.fetchTime : Date.now();
-        const timeDate = new Date(timestamp);
-        const timeString = timeDate.toLocaleTimeString(undefined, { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            second: '2-digit'
-        });
-        
-        let displayText = `Last updated: ${timeString}`;
-        
-        // Add cache information if available
-        if (cacheMetadata) {
-            const { status, maxAge, fetchTime } = cacheMetadata;
-            
-            if (status === 'HIT' && maxAge && fetchTime) {
-                // Calculate when the data was originally cached
-                // For cache HIT, the data could be anywhere from 0 to maxAge seconds old
-                // We show this as a helpful indicator
-                const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
-                const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
-                const remainingMinutes = Math.floor(remainingSeconds / 60);
-                const remainingSecondsDisplay = remainingSeconds % 60;
-                
-                displayText += ` (cached, expires in ${remainingMinutes}m ${remainingSecondsDisplay}s)`;
-            } else if (status === 'MISS' && maxAge) {
-                // Fresh data from backend
-                const expiresMinutes = Math.floor(maxAge / 60);
-                displayText += ` (fresh data, cache ${expiresMinutes}m)`;
-            } else if (status === 'public-api') {
-                displayText += ` (direct API)`;
-            }
-        }
-        
-        lastUpdateElement.textContent = displayText;
+    if (!lastUpdateElement) return;
+    
+    // Ensure cacheMetadata has default values if not provided
+    if (!cacheMetadata) {
+        cacheMetadata = {
+            status: null,
+            maxAge: null,
+            fetchTime: Date.now()
+        };
     }
+    
+    // Use fetchTime from metadata for display
+    const timeDate = new Date(cacheMetadata.fetchTime);
+    const timeString = timeDate.toLocaleTimeString(undefined, { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    
+    let displayText = `Last updated: ${timeString}`;
+    
+    // Add cache information
+    const { status, maxAge, fetchTime } = cacheMetadata;
+    
+    if (status === 'HIT' && maxAge && fetchTime) {
+        // Calculate when the data was originally cached
+        // For cache HIT, the data could be anywhere from 0 to maxAge seconds old
+        // We show this as a helpful indicator
+        const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
+        const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
+        const remainingMinutes = Math.floor(remainingSeconds / 60);
+        const remainingSecondsDisplay = remainingSeconds % 60;
+        
+        displayText += ` (cached, expires in ${remainingMinutes}m ${remainingSecondsDisplay}s)`;
+    } else if (status === 'MISS' && maxAge) {
+        // Fresh data from backend
+        const expiresMinutes = Math.floor(maxAge / 60);
+        displayText += ` (fresh data, cache ${expiresMinutes}m)`;
+    } else if (status === 'public-api') {
+        displayText += ` (direct API)`;
+    }
+    
+    lastUpdateElement.textContent = displayText;
 }
 
 /**
@@ -749,41 +755,47 @@ async function fetchAISummary(period = '24h') {
  * Update the AI summary display time and cache information
  * @param {Object} cacheMetadata - Cache metadata from backend
  */
-function updateSummaryTime(cacheMetadata = null) {
+function updateSummaryTime(cacheMetadata) {
     const summaryUpdateElement = document.getElementById('summaryUpdateTime');
-    if (summaryUpdateElement) {
-        // Use fetchTime from metadata if available, otherwise use current time
-        const timestamp = (cacheMetadata && cacheMetadata.fetchTime) ? cacheMetadata.fetchTime : Date.now();
-        const timeDate = new Date(timestamp);
-        const timeString = timeDate.toLocaleTimeString(undefined, { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            second: '2-digit'
-        });
-        
-        let displayText = `Analysis generated: ${timeString}`;
-        
-        // Add cache information if available
-        if (cacheMetadata) {
-            const { status, maxAge, fetchTime } = cacheMetadata;
-            
-            if (status === 'HIT' && maxAge && fetchTime) {
-                // Calculate remaining cache time
-                const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
-                const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
-                const remainingMinutes = Math.floor(remainingSeconds / 60);
-                const remainingSecondsDisplay = remainingSeconds % 60;
-                
-                displayText += ` (cached, expires in ${remainingMinutes}m ${remainingSecondsDisplay}s)`;
-            } else if (status === 'MISS' && maxAge) {
-                // Fresh data from backend
-                const expiresMinutes = Math.floor(maxAge / 60);
-                displayText += ` (fresh analysis, cache ${expiresMinutes}m)`;
-            }
-        }
-        
-        summaryUpdateElement.textContent = displayText;
+    if (!summaryUpdateElement) return;
+    
+    // Ensure cacheMetadata has default values if not provided
+    if (!cacheMetadata) {
+        cacheMetadata = {
+            status: null,
+            maxAge: null,
+            fetchTime: Date.now()
+        };
     }
+    
+    // Use fetchTime from metadata for display
+    const timeDate = new Date(cacheMetadata.fetchTime);
+    const timeString = timeDate.toLocaleTimeString(undefined, { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    
+    let displayText = `Analysis generated: ${timeString}`;
+    
+    // Add cache information
+    const { status, maxAge, fetchTime } = cacheMetadata;
+    
+    if (status === 'HIT' && maxAge && fetchTime) {
+        // Calculate remaining cache time
+        const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
+        const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
+        const remainingMinutes = Math.floor(remainingSeconds / 60);
+        const remainingSecondsDisplay = remainingSeconds % 60;
+        
+        displayText += ` (cached, expires in ${remainingMinutes}m ${remainingSecondsDisplay}s)`;
+    } else if (status === 'MISS' && maxAge) {
+        // Fresh data from backend
+        const expiresMinutes = Math.floor(maxAge / 60);
+        displayText += ` (fresh analysis, cache ${expiresMinutes}m)`;
+    }
+    
+    summaryUpdateElement.textContent = displayText;
 }
 
 /**
