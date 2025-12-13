@@ -1196,7 +1196,25 @@ function createArticleElement(article) {
     }
     articleDiv.appendChild(titleH4);
     
-    // Description
+    // AI Summary (if available) - display with special styling
+    if (article.aiSummary) {
+        const summaryDiv = document.createElement('div');
+        summaryDiv.className = 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-400 dark:border-blue-600 pl-3 pr-2 py-2 mb-2 rounded';
+        
+        const summaryLabel = document.createElement('div');
+        summaryLabel.className = 'text-xs font-semibold text-blue-700 dark:text-blue-300 mb-1 flex items-center gap-1';
+        summaryLabel.textContent = '🤖 AI Summary';
+        summaryDiv.appendChild(summaryLabel);
+        
+        const summaryText = document.createElement('p');
+        summaryText.className = 'text-xs text-blue-900 dark:text-blue-100 leading-relaxed';
+        summaryText.textContent = article.aiSummary;
+        summaryDiv.appendChild(summaryText);
+        
+        articleDiv.appendChild(summaryDiv);
+    }
+    
+    // Description (original from NewsData.io)
     if (article.description) {
         const descP = document.createElement('p');
         descP.className = 'text-xs text-gray-600 dark:text-gray-300 mb-2 line-clamp-2';
