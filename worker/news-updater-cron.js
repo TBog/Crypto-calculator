@@ -98,13 +98,23 @@ async function fetchArticleContent(url) {
     // Remove HTML tags
     text = text.replace(/<[^>]+>/g, ' ');
     
-    // Decode HTML entities
-    text = text.replace(/&nbsp;/g, ' ');
-    text = text.replace(/&quot;/g, '"');
-    text = text.replace(/&apos;/g, "'");
-    text = text.replace(/&amp;/g, '&');
-    text = text.replace(/&lt;/g, '<');
-    text = text.replace(/&gt;/g, '>');
+    // Decode common HTML entities (basic set)
+    const entities = {
+      '&nbsp;': ' ',
+      '&quot;': '"',
+      '&apos;': "'",
+      '&#39;': "'",
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&mdash;': '—',
+      '&ndash;': '–',
+      '&hellip;': '…'
+    };
+    
+    for (const [entity, char] of Object.entries(entities)) {
+      text = text.replace(new RegExp(entity, 'g'), char);
+    }
     
     // Clean up whitespace
     text = text.replace(/\s+/g, ' ').trim();
@@ -149,6 +159,8 @@ async function generateArticleSummary(env, title, content) {
       max_tokens: 150
     });
     
+    // Extract summary from response
+    // Workers AI returns different formats: {response: "text"} or just "text"
     const summary = (response.response || response || '').trim();
     
     if (summary && summary.length > 20) {
@@ -311,15 +323,13 @@ async function analyzeArticles(env, articles) {
       // Fetch article content and generate summary (slower, may fail)
       let aiSummary = null;
       if (article.link) {
-        console.log(`Fetching content for article ${i + 1}: ${article.title?.substring(0, 50)}...`);
         const content = await fetchArticleContent(article.link);
         
         if (content) {
-          console.log(`Generating AI summary for article ${i + 1}...`);
           aiSummary = await generateArticleSummary(env, article.title, content);
           
-          if (aiSummary) {
-            console.log(`✓ Summary generated for article ${i + 1}`);
+          if (aiSummary && (i + 1) % 5 === 0) {
+            console.log(`Generated ${analyzedArticles.filter(a => a.aiSummary).length} AI summaries so far`);
           }
         }
       }
