@@ -640,8 +640,10 @@ async function initPriceChart(currency = 'usd') {
 function updateLastUpdateTime(cacheMetadata = null) {
     const lastUpdateElement = document.getElementById('lastUpdateTime');
     if (lastUpdateElement) {
-        const now = new Date();
-        const timeString = now.toLocaleTimeString(undefined, { 
+        // Use fetchTime from metadata if available, otherwise use current time
+        const timestamp = (cacheMetadata && cacheMetadata.fetchTime) ? cacheMetadata.fetchTime : Date.now();
+        const timeDate = new Date(timestamp);
+        const timeString = timeDate.toLocaleTimeString(undefined, { 
             hour: '2-digit', 
             minute: '2-digit',
             second: '2-digit'
@@ -726,8 +728,10 @@ async function fetchAISummary(period = '24h') {
 function updateSummaryTime(cacheMetadata = null) {
     const summaryUpdateElement = document.getElementById('summaryUpdateTime');
     if (summaryUpdateElement) {
-        const now = new Date();
-        const timeString = now.toLocaleTimeString(undefined, { 
+        // Use fetchTime from metadata if available, otherwise use current time
+        const timestamp = (cacheMetadata && cacheMetadata.fetchTime) ? cacheMetadata.fetchTime : Date.now();
+        const timeDate = new Date(timestamp);
+        const timeString = timeDate.toLocaleTimeString(undefined, { 
             hour: '2-digit', 
             minute: '2-digit',
             second: '2-digit'
