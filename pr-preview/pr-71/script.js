@@ -673,20 +673,11 @@ async function initPriceChart(currency = 'usd') {
 
 /**
  * Update the last update timestamp display
- * @param {Object} cacheMetadata - Optional cache metadata from backend
+ * @param {Object} cacheMetadata - Cache metadata from backend (required)
  */
 function updateLastUpdateTime(cacheMetadata) {
     const lastUpdateElement = document.getElementById('lastUpdateTime');
     if (!lastUpdateElement) return;
-    
-    // Ensure cacheMetadata has default values if not provided
-    if (!cacheMetadata) {
-        cacheMetadata = {
-            status: null,
-            maxAge: null,
-            fetchTime: Date.now()
-        };
-    }
     
     // Use fetchTime from metadata for display
     const timeDate = new Date(cacheMetadata.fetchTime);
@@ -753,20 +744,11 @@ async function fetchAISummary(period = '24h') {
 
 /**
  * Update the AI summary display time and cache information
- * @param {Object} cacheMetadata - Cache metadata from backend
+ * @param {Object} cacheMetadata - Cache metadata from backend (required)
  */
 function updateSummaryTime(cacheMetadata) {
     const summaryUpdateElement = document.getElementById('summaryUpdateTime');
     if (!summaryUpdateElement) return;
-    
-    // Ensure cacheMetadata has default values if not provided
-    if (!cacheMetadata) {
-        cacheMetadata = {
-            status: null,
-            maxAge: null,
-            fetchTime: Date.now()
-        };
-    }
     
     // Use fetchTime from metadata for display
     const timeDate = new Date(cacheMetadata.fetchTime);
@@ -2444,8 +2426,8 @@ function initEventListeners() {
             document.getElementById('sellPrice').value = formatPrice(newPrice);
             // Add the new price point to the chart (partial update)
             addPricePointToChart(newPrice);
-            // Update timestamp
-            updateLastUpdateTime();
+            // Update timestamp with default metadata (no cache info for WebSocket updates)
+            updateLastUpdateTime(extractCacheMetadata(null));
         }
         // Recalculate if results are visible
         if (areResultsVisible()) {
@@ -2478,7 +2460,7 @@ function initEventListeners() {
         if (result && result.cacheMetadata) {
             updateLastUpdateTime(result.cacheMetadata);
         } else {
-            updateLastUpdateTime();
+            updateLastUpdateTime(extractCacheMetadata(null));
         }
     });
 
@@ -2833,8 +2815,8 @@ window.addEventListener('load', async function() {
     // Initialize the price chart with the selected currency
     const currency = document.getElementById('currency').value;
     await initPriceChart(currency);
-    // Update the last update timestamp
-    updateLastUpdateTime();
+    // Update the last update timestamp with default metadata (initial load)
+    updateLastUpdateTime(extractCacheMetadata(null));
     // Load auto-refresh preference
     loadAutoRefreshPreference();
     // Do not calculate on initial load - wait for user interaction
