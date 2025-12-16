@@ -10,7 +10,7 @@ A beautiful, real-time cryptocurrency profit calculator with live Bitcoin price 
 ### Core Calculator Features
 - **Real-time Price Fetching**: Automatically fetches current Bitcoin prices from CoinGecko API
 - **Multi-Currency Support**: Calculate profits in 160+ different currencies from around the world
-- **Transparent Data Attribution**: Clear attribution for all data sources (CoinGecko, ExchangeRate-API, NewsData.io)
+- **Transparent Data Attribution**: Clear attribution for all data sources (CoinGecko, ExchangeRate-API, NewsData.io, Cloudflare Workers AI)
 - **Exchange Rate Warnings**: Automatic notifications when approximate exchange rates are used
 - **Transaction Fee Calculation**: Accounts for both buy and sell fees
 - **Animated Results**: Smooth, eye-catching animations when displaying calculation results
@@ -151,7 +151,7 @@ npx http-server -p 8000
 - **Price Data**: CoinGecko API for real-time Bitcoin prices
 - **Exchange Rates**: ExchangeRate-API for currency conversions
 - **News Data**: NewsData.io API for Bitcoin news articles
-- **AI Processing**: Cloudflare Workers AI (Llama 3.1 8B Instruct) for:
+- **AI Processing**: Cloudflare Workers AI (@cf/meta/llama-3.1-8b-instruct) for:
   - Market trend analysis
   - News sentiment classification
 - **Markdown Rendering**: Custom markdown parser for AI summaries
