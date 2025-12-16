@@ -289,6 +289,58 @@ async function fetchBTCPrice(currency = 'usd') {
     }
 }
 
+/**
+ * Extract cache metadata from response headers
+ * @param {Response} response - Fetch API response object
+ * @returns {Object} Cache metadata with status, maxAge, and fetchTime
+ */
+function extractCacheMetadata(response) {
+    // Guard clause: ensure response and headers exist
+    if (!response || !response.headers) {
+        return {
+            status: null,
+            maxAge: null,
+            fetchTime: Date.now()
+        };
+    }
+    
+    const cacheStatus = response.headers.get('X-Cache-Status');
+    const cacheControl = response.headers.get('Cache-Control');
+    const lastUpdated = response.headers.get('X-Last-Updated');
+    const cacheTTL = response.headers.get('X-Cache-TTL');
+    
+    // Parse max-age from headers
+    let maxAge = null;
+    if (cacheTTL) {
+        // Use X-Cache-TTL if available (from backend)
+        const parsedTTL = parseInt(cacheTTL, 10);
+        if (!isNaN(parsedTTL)) {
+            maxAge = parsedTTL;
+        }
+    } else if (cacheControl) {
+        // Fallback to parsing Cache-Control header
+        const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
+        if (maxAgeMatch) {
+            maxAge = parseInt(maxAgeMatch[1], 10);
+        }
+    }
+    
+    // Use X-Last-Updated timestamp from backend if available, otherwise use current time
+    let fetchTime = Date.now();
+    if (lastUpdated) {
+        const parsedTime = parseInt(lastUpdated, 10);
+        if (!isNaN(parsedTime)) {
+            fetchTime = parsedTime;
+        }
+    }
+    
+    return {
+        status: cacheStatus,
+        maxAge: maxAge,
+        fetchTime: fetchTime
+    };
+}
+
 // Fetch Bitcoin price chart data (last 24 hours, hourly)
 async function fetchBTCChartData(currency = 'usd') {
     const currencyLower = currency.toLowerCase();
@@ -315,25 +367,11 @@ async function fetchBTCChartData(currency = 'usd') {
         const data = await response.json();
         
         // Extract cache metadata from response headers
-        const cacheStatus = response.headers.get('X-Cache-Status');
-        const cacheControl = response.headers.get('Cache-Control');
-        
-        // Parse max-age from Cache-Control header if available
-        let maxAge = null;
-        if (cacheControl) {
-            const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
-            if (maxAgeMatch) {
-                maxAge = parseInt(maxAgeMatch[1], 10);
-            }
-        }
+        const cacheMetadata = extractCacheMetadata(response);
         
         const result = {
             data,
-            cacheMetadata: {
-                status: cacheStatus,
-                maxAge: maxAge,
-                fetchTime: Date.now()
-            }
+            cacheMetadata: cacheMetadata
         };
         
         // Cache the result
@@ -635,44 +673,44 @@ async function initPriceChart(currency = 'usd') {
 
 /**
  * Update the last update timestamp display
- * @param {Object} cacheMetadata - Optional cache metadata from backend
+ * @param {Object} cacheMetadata - Cache metadata from backend (required)
  */
-function updateLastUpdateTime(cacheMetadata = null) {
+function updateLastUpdateTime(cacheMetadata) {
     const lastUpdateElement = document.getElementById('lastUpdateTime');
-    if (lastUpdateElement) {
-        const now = new Date();
-        const timeString = now.toLocaleTimeString(undefined, { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            second: '2-digit'
-        });
+    if (!lastUpdateElement) return;
+    
+    // Use fetchTime from metadata for display
+    const timeDate = new Date(cacheMetadata.fetchTime);
+    const timeString = timeDate.toLocaleTimeString(undefined, { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    
+    let displayText = `Last updated: ${timeString}`;
+    
+    // Add cache information
+    const { status, maxAge, fetchTime } = cacheMetadata;
+    
+    if (status === 'HIT' && maxAge && fetchTime) {
+        // Calculate when the data was originally cached
+        // For cache HIT, the data could be anywhere from 0 to maxAge seconds old
+        // We show this as a helpful indicator
+        const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
+        const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
+        const remainingMinutes = Math.floor(remainingSeconds / 60);
+        const remainingSecondsDisplay = remainingSeconds % 60;
         
-        let displayText = `Last updated: ${timeString}`;
-        
-        // Add cache information if available
-        if (cacheMetadata) {
-            const { status, maxAge, fetchTime } = cacheMetadata;
-            
-            if (status === 'HIT' && maxAge && fetchTime) {
-                // Calculate when the data was originally cached
-                // For cache HIT, the data could be anywhere from 0 to maxAge seconds old
-                // We show this as a helpful indicator
-                const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
-                const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
-                const remainingMinutes = Math.floor(remainingSeconds / 60);
-                
-                displayText += ` (cached, expires in ${remainingMinutes}m)`;
-            } else if (status === 'MISS' && maxAge) {
-                // Fresh data from backend
-                const expiresMinutes = Math.floor(maxAge / 60);
-                displayText += ` (fresh data, cache ${expiresMinutes}m)`;
-            } else if (status === 'public-api') {
-                displayText += ` (direct API)`;
-            }
-        }
-        
-        lastUpdateElement.textContent = displayText;
+        displayText += ` (cached, expires in ${remainingMinutes}m ${remainingSecondsDisplay}s)`;
+    } else if (status === 'MISS' && maxAge) {
+        // Fresh data from backend
+        const expiresMinutes = Math.floor(maxAge / 60);
+        displayText += ` (fresh data, cache ${expiresMinutes}m)`;
+    } else if (status === 'public-api') {
+        displayText += ` (direct API)`;
     }
+    
+    lastUpdateElement.textContent = displayText;
 }
 
 /**
@@ -692,25 +730,11 @@ async function fetchAISummary(period = '24h') {
         const data = await response.json();
         
         // Extract cache metadata from response headers
-        const cacheStatus = response.headers.get('X-Cache-Status');
-        const cacheControl = response.headers.get('Cache-Control');
-        
-        // Parse max-age from Cache-Control header if available
-        let maxAge = null;
-        if (cacheControl) {
-            const maxAgeMatch = cacheControl.match(/max-age=(\d+)/);
-            if (maxAgeMatch) {
-                maxAge = parseInt(maxAgeMatch[1], 10);
-            }
-        }
+        const cacheMetadata = extractCacheMetadata(response);
         
         return {
             data,
-            cacheMetadata: {
-                status: cacheStatus,
-                maxAge: maxAge,
-                fetchTime: Date.now()
-            }
+            cacheMetadata: cacheMetadata
         };
     } catch (error) {
         console.error('Failed to fetch AI summary:', error);
@@ -720,40 +744,40 @@ async function fetchAISummary(period = '24h') {
 
 /**
  * Update the AI summary display time and cache information
- * @param {Object} cacheMetadata - Cache metadata from backend
+ * @param {Object} cacheMetadata - Cache metadata from backend (required)
  */
-function updateSummaryTime(cacheMetadata = null) {
+function updateSummaryTime(cacheMetadata) {
     const summaryUpdateElement = document.getElementById('summaryUpdateTime');
-    if (summaryUpdateElement) {
-        const now = new Date();
-        const timeString = now.toLocaleTimeString(undefined, { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            second: '2-digit'
-        });
+    if (!summaryUpdateElement) return;
+    
+    // Use fetchTime from metadata for display
+    const timeDate = new Date(cacheMetadata.fetchTime);
+    const timeString = timeDate.toLocaleTimeString(undefined, { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        second: '2-digit'
+    });
+    
+    let displayText = `Analysis generated: ${timeString}`;
+    
+    // Add cache information
+    const { status, maxAge, fetchTime } = cacheMetadata;
+    
+    if (status === 'HIT' && maxAge && fetchTime) {
+        // Calculate remaining cache time
+        const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
+        const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
+        const remainingMinutes = Math.floor(remainingSeconds / 60);
+        const remainingSecondsDisplay = remainingSeconds % 60;
         
-        let displayText = `Analysis generated: ${timeString}`;
-        
-        // Add cache information if available
-        if (cacheMetadata) {
-            const { status, maxAge, fetchTime } = cacheMetadata;
-            
-            if (status === 'HIT' && maxAge && fetchTime) {
-                // Calculate remaining cache time
-                const cacheAgeSeconds = Math.floor((Date.now() - fetchTime) / 1000);
-                const remainingSeconds = Math.max(0, maxAge - cacheAgeSeconds);
-                const remainingMinutes = Math.floor(remainingSeconds / 60);
-                
-                displayText += ` (cached, expires in ${remainingMinutes}m)`;
-            } else if (status === 'MISS' && maxAge) {
-                // Fresh data from backend
-                const expiresMinutes = Math.floor(maxAge / 60);
-                displayText += ` (fresh analysis, cache ${expiresMinutes}m)`;
-            }
-        }
-        
-        summaryUpdateElement.textContent = displayText;
+        displayText += ` (cached, expires in ${remainingMinutes}m ${remainingSecondsDisplay}s)`;
+    } else if (status === 'MISS' && maxAge) {
+        // Fresh data from backend
+        const expiresMinutes = Math.floor(maxAge / 60);
+        displayText += ` (fresh analysis, cache ${expiresMinutes}m)`;
     }
+    
+    summaryUpdateElement.textContent = displayText;
 }
 
 /**
@@ -2402,8 +2426,8 @@ function initEventListeners() {
             document.getElementById('sellPrice').value = formatPrice(newPrice);
             // Add the new price point to the chart (partial update)
             addPricePointToChart(newPrice);
-            // Update timestamp
-            updateLastUpdateTime();
+            // Update timestamp with default metadata (no cache info for WebSocket updates)
+            updateLastUpdateTime(extractCacheMetadata(null));
         }
         // Recalculate if results are visible
         if (areResultsVisible()) {
@@ -2436,7 +2460,7 @@ function initEventListeners() {
         if (result && result.cacheMetadata) {
             updateLastUpdateTime(result.cacheMetadata);
         } else {
-            updateLastUpdateTime();
+            updateLastUpdateTime(extractCacheMetadata(null));
         }
     });
 
@@ -2791,8 +2815,8 @@ window.addEventListener('load', async function() {
     // Initialize the price chart with the selected currency
     const currency = document.getElementById('currency').value;
     await initPriceChart(currency);
-    // Update the last update timestamp
-    updateLastUpdateTime();
+    // Update the last update timestamp with default metadata (initial load)
+    updateLastUpdateTime(extractCacheMetadata(null));
     // Load auto-refresh preference
     loadAutoRefreshPreference();
     // Do not calculate on initial load - wait for user interaction
