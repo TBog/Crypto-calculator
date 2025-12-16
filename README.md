@@ -7,16 +7,47 @@ A beautiful, real-time cryptocurrency profit calculator with live Bitcoin price 
 
 ## ✨ Features
 
+### Core Calculator Features
 - **Real-time Price Fetching**: Automatically fetches current Bitcoin prices from CoinGecko API
 - **Multi-Currency Support**: Calculate profits in 160+ different currencies from around the world
-- **Transparent Data Attribution**: Clear attribution for all data sources (CoinGecko and ExchangeRate-API)
+- **Transparent Data Attribution**: Clear attribution for all data sources (CoinGecko, ExchangeRate-API, NewsData.io)
 - **Exchange Rate Warnings**: Automatic notifications when approximate exchange rates are used
 - **Transaction Fee Calculation**: Accounts for both buy and sell fees
 - **Animated Results**: Smooth, eye-catching animations when displaying calculation results
+
+### Advanced Features
+- **Historical Price Chart**: Interactive 24-hour Bitcoin price chart with zoom and pan capabilities
+  - Built with Chart.js
+  - Mouse wheel or pinch to zoom
+  - Click and drag to pan
+  - Double-click to reset view
+- **AI-Powered Market Analysis**: Get intelligent market summaries powered by Cloudflare Workers AI
+  - Multiple time periods: 24 hours, 7 days, 30 days, 90 days
+  - Natural language analysis of price trends and movements
+  - Cached for optimal performance
+- **Bitcoin News Feed**: Real-time Bitcoin news with AI sentiment analysis
+  - Hourly updates via scheduled Cloudflare Worker
+  - AI-powered sentiment classification (positive, negative, neutral)
+  - Filter by sentiment and customize articles per page
+  - Smart pagination with early-exit optimization
+- **Transaction Management**: Save and track your Bitcoin transactions
+  - Save transaction details (investment, buy price, coins)
+  - View current profit/loss for saved transactions
+  - Calculate break-even sell prices
+  - Export and import transaction history
+- **Data Portability**: Full control over your data
+  - Share your data as a code
+  - Download data as a file
+  - Import data from code or file
+  - GDPR-compliant data management
+
+### User Experience
+- **Dark Mode**: Toggle between light and dark themes with smooth transitions
+- **Auto-Refresh**: Automatic updates every 5 minutes for price, chart, and news
 - **Responsive Design**: Works perfectly on desktop, tablet, and mobile devices
-- **Edge Caching**: Uses Cloudflare Workers for fast, cached API responses
 - **Clean UI**: Built with Tailwind CSS for a modern, professional look
 - **GDPR Compliant**: Cookie consent management for data storage
+- **Edge Caching**: Uses Cloudflare Workers for fast, cached API responses
 
 ## 🚀 Demo
 
@@ -42,6 +73,7 @@ The calculator supports **160+ currencies** from around the world, including:
 
 ## 🛠️ Usage
 
+### Basic Calculation
 1. **Enter Investment Amount**: The total amount you plan to invest
 2. **Enter Buy Price**: The price at which you're buying Bitcoin
 3. **Enter Sell Price**: The price at which you plan to sell (or click refresh to get current price)
@@ -55,6 +87,25 @@ The calculator will show you:
 - Gross and net sale amounts
 - Total fees paid
 - **Net profit or loss** (highlighted in green for profit, red for loss)
+
+### Advanced Features Usage
+
+**Save Transactions**: Click "Save Transaction" to store your calculation for future reference. Saved transactions show:
+- Current profit/loss based on latest Bitcoin price
+- Break-even sell price
+- Option to manage individual transactions
+
+**View Price History**: The chart automatically displays 24-hour Bitcoin price trends. Use mouse wheel to zoom, drag to pan, and double-click to reset.
+
+**Get AI Analysis**: Click "✨ Get AI Summary" to receive an intelligent analysis of Bitcoin price trends. Choose different time periods (24h, 7d, 30d, 90d) for varied insights.
+
+**Browse News**: The news feed provides the latest Bitcoin articles with sentiment indicators. Filter by positive, negative, or neutral sentiment, and adjust articles per page.
+
+**Enable Auto-Refresh**: Toggle the auto-refresh switch to automatically update price, chart, and news every 5 minutes.
+
+**Dark Mode**: Click the theme toggle button (sun/moon icon) to switch between light and dark modes.
+
+**Export/Import Data**: Use the Share, Download, or Import buttons in the cookie consent banner to manage your saved data.
 
 ## 💻 Local Development
 
@@ -93,9 +144,19 @@ npx http-server -p 8000
 - **Frontend**: Pure HTML, CSS (Tailwind CSS), and JavaScript
 - **Styling**: Tailwind CSS v3 with PostCSS and Autoprefixer
 - **Build Tool**: Tailwind CLI for CSS generation
+- **Charting**: Chart.js v4 with plugins:
+  - chartjs-adapter-date-fns for time scales
+  - chartjs-plugin-zoom for interactive zoom/pan
+  - Hammer.js for touch gestures
 - **Price Data**: CoinGecko API for real-time Bitcoin prices
 - **Exchange Rates**: ExchangeRate-API for currency conversions
+- **News Data**: NewsData.io API for Bitcoin news articles
+- **AI Processing**: Cloudflare Workers AI (Llama 3.1 8B Instruct) for:
+  - Market trend analysis
+  - News sentiment classification
+- **Markdown Rendering**: Custom markdown parser for AI summaries
 - **Caching**: Cloudflare Workers for API proxy and edge caching
+- **Storage**: Browser localStorage for user preferences and transaction history
 - **Hosting**: GitHub Pages (static hosting)
 - **Build Process**: Automated CSS building via GitHub Actions
 
@@ -113,6 +174,16 @@ The calculator transparently credits all data sources:
    - Automatic conversion from USD to target currency
    - Updated hourly with caching for performance
 
+3. **Bitcoin News**: Provided by [NewsData.io](https://newsdata.io/)
+   - Real-time Bitcoin news aggregation
+   - Multiple trusted sources
+   - Hourly updates via scheduled worker
+
+4. **AI Analysis**: Powered by [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/)
+   - Market trend summaries
+   - Sentiment analysis for news articles
+   - Edge-native processing
+
 When currency conversion is performed, the calculator displays:
 - Clear attribution to both data sources
 - A warning that exchange rates are approximate
@@ -120,7 +191,46 @@ When currency conversion is performed, the calculator displays:
 
 ## 🌐 Cloudflare Worker Setup
 
-This project includes a Cloudflare Worker for API caching and CORS handling. See the [worker/README.md](worker/README.md) for detailed deployment instructions.
+This project includes Cloudflare Workers for API caching, CORS handling, AI-powered analysis, and news aggregation. The worker provides:
+
+### Main Features
+- **API Proxy & Caching**: Efficient caching of CoinGecko API responses
+- **Currency Conversion**: Automatic conversion for 160+ currencies not natively supported by CoinGecko
+- **AI Market Analysis**: Natural language summaries of Bitcoin price trends (24h, 7d, 30d, 90d)
+- **Bitcoin News Feed**: Scheduled worker with AI sentiment analysis
+  - Hourly updates via cron job
+  - Early-exit pagination for efficiency
+  - Sentiment classification (positive, negative, neutral)
+  - Maintains up to 500 articles
+- **Origin Validation**: Secure access control
+- **CORS Support**: Proper headers for cross-origin requests
+
+### Deployment
+
+For detailed deployment instructions, see:
+- [worker/README.md](worker/README.md) - General worker deployment guide
+- [worker/DEPLOYMENT_GUIDE.md](worker/DEPLOYMENT_GUIDE.md) - Complete step-by-step setup for both workers
+
+**Quick Overview:**
+1. Install Wrangler CLI: `npm install -g wrangler`
+2. Login to Cloudflare: `wrangler login`
+3. Deploy workers from the `worker/` directory
+4. Set required secrets:
+   - `COINGECKO_KEY` (optional, for higher rate limits)
+   - `NEWSDATA_API_KEY` (required for news feed)
+5. Create and bind KV namespace for news caching
+6. Set up scheduled cron job for news updates
+
+### Testing
+
+The worker includes a comprehensive test suite:
+```bash
+cd worker
+npm install
+npm test
+```
+
+See [worker/TEST_README.md](worker/TEST_README.md) for detailed testing documentation.
 
 ## 🔍 PR Preview Deployments
 
@@ -155,6 +265,9 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 
 - Bitcoin price data provided by [CoinGecko API](https://www.coingecko.com/)
 - Exchange rate data provided by [ExchangeRate-API](https://www.exchangerate-api.com/)
+- Bitcoin news provided by [NewsData.io](https://newsdata.io/)
+- AI analysis powered by [Cloudflare Workers AI](https://developers.cloudflare.com/workers-ai/)
+- Charts rendered with [Chart.js](https://www.chartjs.org/)
 - UI styled with [Tailwind CSS](https://tailwindcss.com/)
 - Hosted on [GitHub Pages](https://pages.github.com/)
 
