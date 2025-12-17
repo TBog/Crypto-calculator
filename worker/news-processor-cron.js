@@ -51,20 +51,51 @@ function getArticleId(article) {
 
 /**
  * HTMLRewriter handler to extract text content from HTML
+ * Optimized to skip headers, footers, menus, and other non-content elements
+ * to reduce Cloudflare neuron usage
  */
 class TextExtractor {
   constructor() {
     this.textChunks = [];
     this.charCount = 0;
     this.maxChars = MAX_CONTENT_CHARS;
+    this.skipDepth = 0; // Track depth of skipped elements
   }
   
   element(element) {
-    // Skip script, style, and other non-content elements
+    // Skip non-content elements to reduce neuron usage
+    const tagName = element.tagName.toLowerCase();
+    const skipTags = [
+      'nav', 'header', 'footer', 'aside', 'menu',
+      'form', 'button', 'input', 'select', 'textarea',
+      'iframe', 'noscript', 'svg', 'canvas'
+    ];
+    
+    // Check for common ad/menu class names and IDs
+    const className = element.getAttribute('class') || '';
+    const id = element.getAttribute('id') || '';
+    const skipPatterns = [
+      'nav', 'menu', 'header', 'footer', 'sidebar', 'aside',
+      'advertisement', 'ad-', 'promo', 'banner', 'widget',
+      'share', 'social', 'comment', 'related', 'recommend'
+    ];
+    
+    const hasSkipPattern = skipPatterns.some(pattern => 
+      className.toLowerCase().includes(pattern) || 
+      id.toLowerCase().includes(pattern)
+    );
+    
+    if (skipTags.includes(tagName) || hasSkipPattern) {
+      this.skipDepth++;
+      element.onEndTag(() => {
+        this.skipDepth--;
+      });
+    }
   }
   
   text(text) {
-    if (this.charCount < this.maxChars) {
+    // Only extract text if we're not inside a skipped element
+    if (this.skipDepth === 0 && this.charCount < this.maxChars) {
       const content = text.text;
       if (content && content.trim()) {
         this.textChunks.push(content);
