@@ -347,9 +347,12 @@ async function aggregateArticles(env, knownIds) {
         
         // Early exit: If we hit a known article, stop immediately
         if (knownIds.has(articleId)) {
-          console.log(`Early exit triggered: Found known article "${article.title?.substring(0, 50)}..."`);
-          earlyExitTriggered = true;
-          break;
+          if (!earlyExitTriggered)
+          {
+            console.log(`Early exit triggered: Found known article "${article.title?.substring(0, 50)}..."`);
+            earlyExitTriggered = true;
+          }
+          continue;
         }
         
         // Add new article to collection
@@ -392,60 +395,28 @@ async function aggregateArticles(env, knownIds) {
 }
 
 /**
- * Analyze sentiment and generate summaries for all articles
- * @param {Object} env - Environment variables
- * @param {Array} articles - Array of articles to analyze
- * @returns {Promise<Array>} Articles with sentiment tags and AI summaries
+ * Mark articles as needing processing
+ * Instead of processing all articles immediately (which hits subrequest limits),
+ * we mark them with flags indicating what processing is needed.
+ * A separate cron worker will process them incrementally.
+ * 
+ * @param {Array} articles - Array of articles to mark for processing
+ * @returns {Promise<Array>} Articles marked with processing flags
  */
-async function analyzeArticles(env, articles) {
-  console.log(`Starting analysis for ${articles.length} articles...`);
+async function markArticlesForProcessing(articles) {
+  console.log(`Marking ${articles.length} articles for processing...`);
   
-  const analyzedArticles = [];
+  const markedArticles = articles.map(article => ({
+    ...article,
+    // Postprocessing flags (set to true for tasks that need to be done)
+    needsSentiment: true,      // Needs sentiment analysis
+    needsSummary: true,        // Needs AI summary generation
+    // contentTimeout not set initially (only set if fetch times out)
+    queuedAt: Date.now()       // Timestamp for tracking
+  }));
   
-  for (let i = 0; i < articles.length; i++) {
-    const article = articles[i];
-    
-    try {
-      // Analyze sentiment (fast)
-      const sentiment = await analyzeSentiment(env, article);
-      
-      // Fetch article content and generate summary (slower, may fail)
-      let aiSummary = null;
-      if (article.link) {
-        const content = await fetchArticleContent(article.link);
-        
-        if (content) {
-          aiSummary = await generateArticleSummary(env, article.title, content);
-          
-          if (aiSummary && (i + 1) % 5 === 0) {
-            console.log(`Generated ${analyzedArticles.filter(a => a.aiSummary).length} AI summaries so far`);
-          }
-        }
-      }
-      
-      analyzedArticles.push({
-        ...article,
-        sentiment: sentiment,
-        ...(aiSummary && { aiSummary: aiSummary })
-      });
-      
-      if ((i + 1) % 5 === 0) {
-        console.log(`Analyzed ${i + 1}/${articles.length} articles`);
-      }
-    } catch (error) {
-      console.error(`Error analyzing article ${i + 1}:`, error);
-      // Include article with neutral sentiment on error
-      analyzedArticles.push({
-        ...article,
-        sentiment: 'neutral'
-      });
-    }
-  }
-  
-  const withSummaries = analyzedArticles.filter(a => a.aiSummary).length;
-  console.log(`Analysis complete: ${analyzedArticles.length} articles processed, ${withSummaries} with AI summaries`);
-  
-  return analyzedArticles;
+  console.log(`Marked ${markedArticles.length} articles for AI processing`);
+  return markedArticles;
 }
 
 /**
@@ -482,8 +453,11 @@ async function storeInKV(env, newArticles) {
   };
   
   allArticles.forEach(article => {
-    const sentiment = article.sentiment || 'neutral';
-    sentimentCounts[sentiment] = (sentimentCounts[sentiment] || 0) + 1;
+    const sentiment = article.sentiment;
+    // Only count if sentiment is a string value (not true flag for pending processing)
+    if (typeof sentiment === 'string' && ['positive', 'negative', 'neutral'].includes(sentiment)) {
+      sentimentCounts[sentiment] = (sentimentCounts[sentiment] || 0) + 1;
+    }
   });
   
   const finalData = {
@@ -511,8 +485,6 @@ async function storeInKV(env, newArticles) {
     }
   );
   console.log(`Write #2: Stored ${storedArticleIds.length} article IDs in index under key: ${KV_KEY_IDS}`);
-  console.log(`ID index now matches the ${allArticles.length} articles stored in payload`);
-  console.log('Total KV writes this run: 2');
 }
 
 /**
@@ -555,15 +527,17 @@ async function handleScheduled(event, env, ctx) {
       return;
     }
     
-    // Analyze sentiment for new articles only
-    console.log('Phase 2: Analyzing sentiment for new articles...');
-    const analyzedArticles = await analyzeArticles(env, newArticles);
+    // Phase 2: Mark articles for later processing
+    // This avoids hitting subrequest limits in the producer
+    console.log('Phase 2: Marking articles for AI processing...');
+    const markedArticles = await markArticlesForProcessing(newArticles);
     
     // Phase 3: KV Update (exactly 2 writes)
     console.log('Phase 3: Updating KV (2 writes)...');
-    await storeInKV(env, analyzedArticles);
+    await storeInKV(env, markedArticles);
     
     console.log('=== Bitcoin News Updater Cron Job Completed Successfully ===');
+    console.log(`Queued ${newArticles.length} articles for AI processing by consumer worker`);
   } catch (error) {
     console.error('=== Bitcoin News Updater Cron Job Failed ===');
     console.error('Error:', error);

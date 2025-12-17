@@ -1,19 +1,33 @@
-# Deployment Guide: Scheduled Worker Architecture
+# Deployment Guide: KV-Based Article Processing Architecture
 
-This guide walks you through deploying the new scheduled worker architecture for Bitcoin news aggregation.
+This guide walks you through deploying the KV-based article processing architecture for Bitcoin news aggregation with AI analysis.
 
 ## Overview
 
-The new architecture consists of two Cloudflare Workers:
+The architecture consists of three Cloudflare Workers to solve the "Too many subrequests" error:
 
-1. **News Updater Worker** (`news-updater-cron.js`) - Scheduled worker that runs hourly
-2. **Main API Worker** (`index.js`) - Public API endpoint that reads from KV
+1. **News Updater Worker** (`news-updater-cron.js`) - Producer: Fetches articles hourly and marks them for processing
+2. **News Processor Worker** (`news-processor-cron.js`) - Consumer: Processes 5 articles every 10 minutes with AI
+3. **Main API Worker** (`index.js`) - Public API endpoint that reads from KV
+
+This architecture uses **Cloudflare KV as a "todo list"** to enable incremental processing while staying within the FREE tier's 50 subrequest limit.
 
 ## Prerequisites
 
-- Cloudflare account with Workers enabled
+- Cloudflare account with Workers enabled (FREE tier is sufficient)
 - Wrangler CLI installed (`npm install -g wrangler`)
 - NewsData.io API key ([get one here](https://newsdata.io/))
+
+## Architecture Diagram
+
+```
+Producer (hourly)         Consumer (every 10 min)      API (on-demand)
+     │                           │                          │
+     ├─ Fetch articles           ├─ Read KV                 ├─ Read KV
+     ├─ Mark with flags          ├─ Process 5 articles      └─ Return JSON
+     └─ Store in KV              └─ Update KV                   (<10ms)
+         (~11 SR)                    (~15 SR)
+```
 
 ## Step-by-Step Deployment
 
@@ -48,7 +62,7 @@ Add the following to your configuration file in your kv_namespaces array:
 
 ### Step 3: Update Wrangler Configurations
 
-#### For News Updater Worker
+#### For News Updater Worker (Producer)
 
 Edit `wrangler-news-updater.toml` and replace the namespace ID:
 
@@ -58,6 +72,16 @@ binding = "CRYPTO_NEWS_CACHE"
 id = "YOUR_NAMESPACE_ID_HERE"  # Replace with the ID from Step 2
 ```
 
+#### For News Processor Worker (Consumer)
+
+Edit `wrangler-news-processor.toml` and replace the namespace ID:
+
+```toml
+[[kv_namespaces]]
+binding = "CRYPTO_NEWS_CACHE"
+id = "YOUR_NAMESPACE_ID_HERE"  # Replace with the SAME ID from Step 2
+```
+
 #### For Main API Worker
 
 Edit `wrangler.toml` and replace the namespace ID:
@@ -65,8 +89,10 @@ Edit `wrangler.toml` and replace the namespace ID:
 ```toml
 [[kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
-id = "YOUR_NAMESPACE_ID_HERE"  # Replace with the same ID from Step 2
+id = "YOUR_NAMESPACE_ID_HERE"  # Replace with the SAME ID from Step 2
 ```
+
+**Important:** All three workers must use the SAME KV namespace ID.
 
 ### Step 4: Create Production KV Namespace (Optional)
 
@@ -76,9 +102,9 @@ If deploying to production environment:
 wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production
 ```
 
-Update the production namespace IDs in both config files under `[[env.production.kv_namespaces]]`.
+Update the production namespace IDs in all three config files under `[[env.production.kv_namespaces]]`.
 
-### Step 5: Deploy the News Updater Worker
+### Step 5: Deploy the News Updater Worker (Producer)
 
 ```bash
 wrangler deploy --config wrangler-news-updater.toml
@@ -95,23 +121,30 @@ Published crypto-news-updater (x.xx sec)
 Current Deployment ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-### Step 6: Set NewsData.io API Key for News Updater
+### Step 6: Set NewsData.io API Key for Producer
 
 ```bash
 wrangler secret put NEWSDATA_API_KEY --config wrangler-news-updater.toml
 ```
 
-**Prompt:** Enter your NewsData.io API key when prompted. Get a free key at [newsdata.io](https://newsdata.io/).
+When prompted, paste your NewsData.io API key and press Enter.
 
-### Step 7: Verify Scheduled Worker Configuration
-
-Check that the cron trigger is properly configured:
+### Step 7: Deploy the News Processor Worker (Consumer)
 
 ```bash
-wrangler deployments list --config wrangler-news-updater.toml
+wrangler deploy --config wrangler-news-processor.toml
 ```
 
-You should see your deployment with the cron schedule `0 * * * *` (hourly).
+**Expected output:**
+```
+⛅️ wrangler 3.x.x
+-------------------
+Total Upload: xx.xx KiB / gzip: xx.xx KiB
+Uploaded crypto-news-processor (x.xx sec)
+Published crypto-news-processor (x.xx sec)
+  https://crypto-news-processor.YOUR_SUBDOMAIN.workers.dev
+Current Deployment ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
 
 ### Step 8: Deploy the Main API Worker
 
@@ -123,49 +156,120 @@ wrangler deploy
 
 ### Step 9: Verify Deployment
 
-#### Check KV Storage
+#### Check Cron Triggers
 
-Wait up to 1 hour for the scheduled worker to run, then verify data is stored:
-
-```bash
-wrangler kv:key list --binding CRYPTO_NEWS_CACHE --config wrangler-news-updater.toml
-```
-
-You should see the key `BTC_ANALYZED_NEWS` in the list.
-
-#### View Stored Data
+Verify both cron jobs are configured:
 
 ```bash
-wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrangler-news-updater.toml
+# Producer (runs hourly)
+wrangler deployments list --config wrangler-news-updater.toml
+
+# Consumer (runs every 10 minutes)
+wrangler deployments list --config wrangler-news-processor.toml
 ```
 
-This will output the stored JSON data.
+You should see cron schedules:
+- Producer: `0 * * * *` (hourly)
+- Consumer: `*/10 * * * *` (every 10 minutes)
 
-#### Monitor Scheduled Worker Logs
+#### Monitor Initial Processing
+
+Monitor the producer worker logs:
 
 ```bash
 wrangler tail --config wrangler-news-updater.toml
 ```
 
-Leave this running and wait for the next hour. You should see logs like:
+Wait for the next hour. You should see logs like:
 ```
 === Bitcoin News Updater Cron Job Started ===
-Execution time: 2024-12-05T15:00:00.000Z
-Starting article aggregation...
-Fetching page 1...
-...
+Phase 1: Reading ID index from KV...
+Phase 2: Fetching articles with early-exit optimization...
+Phase 2: Marking articles for AI processing...
+Phase 3: Updating KV (2 writes)...
+Queued 50 articles for AI processing by consumer worker
 === Bitcoin News Updater Cron Job Completed Successfully ===
+```
+
+#### Monitor Consumer Processing
+
+In a separate terminal, monitor the consumer worker:
+
+```bash
+wrangler tail --config wrangler-news-processor.toml
+```
+
+You should see logs every 10 minutes:
+```
+=== Bitcoin News Processor Cron Job Started ===
+Step 1: Reading articles from KV...
+Step 2: Finding articles that need processing...
+Found 50 articles needing processing
+Processing 5 articles this run...
+Processing article 1/5: "Bitcoin rises..."
+  Sentiment: positive
+  AI Summary: Generated (243 chars)
+  ✓ Article updated in KV
+...
+Processed: 5 articles
+Remaining: 45 articles (will process in next run)
+=== Bitcoin News Processor Cron Job Completed Successfully ===
+```
+
+#### Check KV Storage
+
+Verify data is being stored:
+
+```bash
+wrangler kv:key list --binding CRYPTO_NEWS_CACHE --config wrangler-news-updater.toml
+```
+
+You should see keys like `BTC_ANALYZED_NEWS` and `BTC_ID_INDEX`.
+
+#### View Stored Articles
+
+```bash
+wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrangler-news-updater.toml | jq '.articles[0]'
+```
+
+You should see article data with postprocessing flags:
+```json
+{
+  "article_id": "abc123",
+  "title": "Bitcoin...",
+  "needsSentiment": false,
+  "needsSummary": false,
+  "sentiment": "positive",
+  "aiSummary": "...",
+  "processedAt": 1702834890
+}
 ```
 
 #### Test the API Endpoint
 
-Once the scheduled worker has run, test the API endpoint:
+Once processing has started, test the API endpoint:
 
 ```bash
 curl https://crypto-cache.YOUR_SUBDOMAIN.workers.dev/api/bitcoin-news
 ```
 
-You should receive a JSON response with articles, sentimentCounts, and lastUpdatedExternal timestamp.
+You should receive a JSON response with articles (some may still be pending processing):
+```json
+{
+  "success": true,
+  "totalArticles": 50,
+  "sentimentCounts": {"positive": 15, "negative": 5, "neutral": 20},
+  "articles": [...]
+}
+```
+
+#### Test On-Demand Processing (Optional)
+
+You can manually process a specific article:
+
+```bash
+curl "https://crypto-news-processor.YOUR_SUBDOMAIN.workers.dev/process?articleId=ARTICLE_ID"
+```
 
 ### Step 10: Update Frontend Configuration
 
@@ -180,7 +284,9 @@ Verify it matches your deployed worker URL.
 
 ## Manual Testing (Optional)
 
-To manually trigger the scheduled worker for testing (without waiting for the cron):
+### Trigger Producer Manually
+
+To manually trigger the producer for testing (without waiting for cron):
 
 ```bash
 wrangler dev --config wrangler-news-updater.toml --test-scheduled
@@ -188,13 +294,26 @@ wrangler dev --config wrangler-news-updater.toml --test-scheduled
 
 This will run the worker immediately in development mode.
 
+### Trigger Consumer Manually
+
+To test the consumer worker:
+
+```bash
+wrangler dev --config wrangler-news-processor.toml --test-scheduled
+```
+
 ## Monitoring
 
 ### View Real-Time Logs
 
-For the scheduled worker:
+For the producer worker:
 ```bash
 wrangler tail --config wrangler-news-updater.toml
+```
+
+For the consumer worker:
+```bash
+wrangler tail --config wrangler-news-processor.toml
 ```
 
 For the main API worker:
@@ -268,16 +387,37 @@ wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrang
 
 ## Configuration Options
 
-### Adjust Cron Schedule
+### Adjust Producer Schedule
 
 Edit `wrangler-news-updater.toml`:
 
 ```toml
 [triggers]
 crons = ["0 * * * *"]  # Every hour (default)
-# crons = ["0 */2 * * *"]  # Every 2 hours
+# crons = ["0 */2 * * *"]  # Every 2 hours (recommended for free tier)
 # crons = ["0 */6 * * *"]  # Every 6 hours
 # crons = ["0 0 * * *"]    # Once per day at midnight
+```
+
+### Adjust Consumer Schedule
+
+Edit `wrangler-news-processor.toml`:
+
+```toml
+[triggers]
+crons = ["*/10 * * * *"]  # Every 10 minutes (default)
+# crons = ["*/5 * * * *"]   # Every 5 minutes (faster processing)
+# crons = ["*/15 * * * *"]  # Every 15 minutes (slower processing)
+```
+
+### Adjust Processing Batch Size
+
+Edit `news-processor-cron.js`:
+
+```javascript
+const MAX_ARTICLES_PER_RUN = 5;  // Articles processed per run (default)
+// const MAX_ARTICLES_PER_RUN = 10;  # Faster processing (30 subrequests - still safe)
+// const MAX_ARTICLES_PER_RUN = 3;   # Safer for very slow networks
 ```
 
 ### Adjust Article Limits
@@ -285,8 +425,8 @@ crons = ["0 * * * *"]  # Every hour (default)
 Edit `news-updater-cron.js`:
 
 ```javascript
-const TARGET_ARTICLES = 100;  // Target number of new articles
-const MAX_PAGES = 15;         // Maximum pagination pages
+const MAX_STORED_ARTICLES = 500;  // Maximum articles in KV
+const MAX_PAGES = 15;             // Maximum pagination pages
 ```
 
 ## Cost Estimates
@@ -295,22 +435,35 @@ const MAX_PAGES = 15;         // Maximum pagination pages
 
 **⚠️ IMPORTANT: The default hourly schedule may exceed the free tier limit.**
 
-With hourly cron (default):
-- ~5-11 credits per run (depending on pagination)
-- 24 runs/day = 120-264 credits/day
-- **⚠️ Maximum usage (264 credits) EXCEEDS the 200 credit free tier limit**
-- **Recommendation**: Use 2-hour schedule for free tier (see below)
+With hourly producer (default):
+- ~11 credits per run (pagination to fetch articles)
+- 24 runs/day = 264 credits/day
+- **⚠️ EXCEEDS the 200 credit free tier limit**
+- **Recommendation**: Use 2-hour schedule for free tier
 
-With 2-hour cron (recommended for free tier):
-- 12 runs/day = 60-132 credits/day
+With 2-hour producer schedule (recommended for free tier):
+- 12 runs/day = 132 credits/day
 - **✅ Fits comfortably within free tier limits**
-- Still provides fresh data every 2 hours
+- Articles still updated every 2 hours
+- Consumer continues processing every 10 minutes
 
 To use 2-hour schedule, edit `wrangler-news-updater.toml`:
 ```toml
 [triggers]
 crons = ["0 */2 * * *"]  # Every 2 hours instead of hourly
 ```
+
+### Cloudflare Workers & KV (FREE Tier)
+
+**All services used are FREE tier compatible:**
+
+- Producer: ~11 subrequests per run (well under 50 limit)
+- Consumer: ~15 subrequests per run (well under 50 limit)
+- KV Writes: 48 (producer) + 720 (consumer) = 768/day (under 1000 limit)
+- KV Reads: Minimal (only by workers, not counted toward user limits)
+- Cron Triggers: Unlimited on free tier
+
+**Total Cost: $0/month**
 
 ### Cloudflare Workers (Free Tier)
 

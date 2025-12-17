@@ -24,15 +24,16 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
   - Provides concise market analysis
   - Cached for 5 minutes for optimal performance
 - **Bitcoin News Feed with Scheduled Updates**: Bitcoin news with AI-powered sentiment analysis
-  - **NEW: Optimized Scheduled Worker** - Hourly cron job with early-exit pagination
+  - **NEW: Queue-Based Architecture** - Solves "Too many subrequests" error
+  - Three-worker system: Producer (scheduled) → Queue → Consumer (AI processing)
+  - Each article processed in separate worker invocation with fresh subrequest budget
+  - Cloudflare Workers AI sentiment analysis and content summarization
   - Early-exit optimization: Stops fetching when hitting known articles
-  - Cloudflare Workers AI sentiment analysis (positive, negative, neutral)
   - Two-key KV structure: ID index for deduplication + full payload for API
-  - Exactly 2 KV writes per run (48/day total)
-  - Maintains up to 500 articles with sentiment tags
+  - Maintains up to 500 articles with sentiment tags and AI summaries
   - API endpoint reads from KV (millisecond latency)
-  - Optimized for free tier: Minimal API credits and KV operations
-  - See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for setup instructions
+  - Scales to process unlimited articles without hitting subrequest limits
+  - See [QUEUE_DEPLOYMENT_GUIDE.md](./QUEUE_DEPLOYMENT_GUIDE.md) for setup instructions
 
 ## Testing
 

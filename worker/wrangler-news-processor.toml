@@ -1,0 +1,31 @@
+name = "crypto-news-processor"
+main = "news-processor-cron.js"
+compatibility_date = "2024-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cron trigger - runs every 10 minutes
+# Format: "minute hour day month day-of-week"
+# "*/10 * * * *" = every 10 minutes
+[triggers]
+crons = ["*/10 * * * *"]
+
+# AI binding for sentiment analysis and summarization
+[ai]
+binding = "AI"
+
+# KV namespace for reading and updating articles
+[[kv_namespaces]]
+binding = "CRYPTO_NEWS_CACHE"
+# Replace with actual KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE"
+# Must be the SAME namespace as used by news-updater-cron
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID_FROM_STEP_2"
+
+# Environment bindings
+# No API keys needed - this worker only reads from KV and calls AI
+
+[env.production]
+# Production environment configuration
+[[env.production.kv_namespaces]]
+binding = "CRYPTO_NEWS_CACHE"
+# Replace with production KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production
+id = "REPLACE_WITH_YOUR_PRODUCTION_KV_NAMESPACE_ID"
