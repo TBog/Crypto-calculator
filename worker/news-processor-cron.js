@@ -266,6 +266,8 @@ async function processArticle(env, article) {
   }
   
   // Process AI summary if flag is true OR if we're retrying after contentTimeout
+  // contentTimeout flag is set when fetch(article.link) times out or fails
+  // This allows us to retry the fetch in the next run instead of giving up
   if (article.needsSummary === true || article.contentTimeout === true) {
     if (article.link) {
       try {

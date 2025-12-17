@@ -526,7 +526,7 @@ async function handleScheduled(event, env, ctx) {
       return;
     }
     
-    // Mark articles for later processing instead of processing now
+    // Phase 2: Mark articles for later processing
     // This avoids hitting subrequest limits in the producer
     console.log('Phase 2: Marking articles for AI processing...');
     const markedArticles = await markArticlesForProcessing(newArticles);
