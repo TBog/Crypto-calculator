@@ -72,7 +72,7 @@ By extracting only main article content and skipping navigation, headers, footer
 - **Better summaries**: AI focuses on actual article content, not site navigation
 
 ## Testing
-A validation test (`/tmp/test-text-extraction.js`) confirms:
+The implementation logic was validated to ensure:
 - ✅ Normal content is extracted correctly
 - ✅ Navigation elements are skipped
 - ✅ Header elements are skipped
