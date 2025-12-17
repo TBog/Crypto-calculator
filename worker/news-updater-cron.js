@@ -166,7 +166,11 @@ async function queueArticlesForProcessing(env, articles) {
   console.log(`Queueing ${articles.length} articles for asynchronous processing...`);
   
   // Send articles to queue in batches to avoid hitting queue limits
-  const BATCH_SIZE = 100; // Cloudflare Queues support batching
+  // Batch size of 100 is chosen based on:
+  // - Cloudflare Queues default batch limit (100 messages)
+  // - Balance between throughput and memory usage
+  // - Allows efficient queuing without overwhelming the queue service
+  const BATCH_SIZE = 100;
   let queuedCount = 0;
   
   for (let i = 0; i < articles.length; i += BATCH_SIZE) {

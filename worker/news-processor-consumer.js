@@ -305,7 +305,23 @@ async function queue(batch, env) {
           await env.CRYPTO_NEWS_CACHE.put(KV_KEY_NEWS, JSON.stringify(existingData));
           console.log(`Updated article in KV: ${article.title?.substring(0, 50)}...`);
         } else {
-          console.warn(`Article not found in KV: ${articleId}`);
+          console.warn(`Article not found in KV (may have been removed): ${articleId}`);
+          // Article was queued but not found in KV - this could happen if:
+          // 1. KV write failed in producer
+          // 2. Article was removed/expired from KV
+          // Store as new entry to preserve enriched data
+          const newData = {
+            articles: [enrichedArticle],
+            totalArticles: 1,
+            lastUpdatedExternal: Date.now(),
+            sentimentCounts: {
+              positive: enrichedArticle.sentiment === 'positive' ? 1 : 0,
+              negative: enrichedArticle.sentiment === 'negative' ? 1 : 0,
+              neutral: enrichedArticle.sentiment === 'neutral' ? 1 : 0
+            }
+          };
+          await env.CRYPTO_NEWS_CACHE.put(KV_KEY_NEWS, JSON.stringify(newData));
+          console.log(`Stored as new entry in KV: ${article.title?.substring(0, 50)}...`);
         }
       } else {
         console.warn('No existing data in KV to update');
@@ -315,7 +331,7 @@ async function queue(batch, env) {
       message.ack();
       
     } catch (error) {
-      console.error('Error processing article:', error);
+      console.error(`Error processing article "${article.title?.substring(0, 50)}..." (ID: ${getArticleId(article)}):`, error);
       // Retry the message (don't ack it)
       message.retry();
     }
