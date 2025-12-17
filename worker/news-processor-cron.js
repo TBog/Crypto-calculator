@@ -38,7 +38,7 @@ const KV_KEY_IDS = 'BTC_ID_INDEX';
 const MAX_ARTICLES_PER_RUN = 5;
 
 // Maximum characters to extract from webpage (128KB limit for AI context)
-const MAX_CONTENT_CHARS = 64 * 1024;
+const MAX_CONTENT_CHARS = 10 * 1024;
 
 /**
  * Get article ID from article object
@@ -169,7 +169,7 @@ async function generateArticleSummary(env, title, content) {
           content: `Article Title: ${title}\n\nWebpage Content: ${content}\n\nFirst, verify the content matches the title. If it does not match, respond with "ERROR: CONTENT_MISMATCH". If it matches, provide a summary starting with "SUMMARY:" followed by your summary:`
         }
       ],
-      max_tokens: 4096
+      max_tokens: 1024
     });
     
     let fullResponse = (response.response || response || '').trim();
