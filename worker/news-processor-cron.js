@@ -55,6 +55,20 @@ function getArticleId(article) {
  * to reduce Cloudflare neuron usage
  */
 class TextExtractor {
+  // Static arrays to avoid recreation on each element call
+  static SKIP_TAGS = [
+    'nav', 'header', 'footer', 'aside', 'menu',
+    'form', 'button', 'input', 'select', 'textarea',
+    'iframe', 'noscript', 'svg', 'canvas'
+    // Note: 'script' and 'style' are handled separately via element.remove() in HTMLRewriter
+  ];
+  
+  static SKIP_PATTERNS = [
+    'nav', 'menu', 'header', 'footer', 'sidebar', 'aside',
+    'advertisement', 'ad-', 'promo', 'banner', 'widget',
+    'share', 'social', 'comment', 'related', 'recommend'
+  ];
+  
   constructor() {
     this.textChunks = [];
     this.charCount = 0;
@@ -65,27 +79,17 @@ class TextExtractor {
   element(element) {
     // Skip non-content elements to reduce neuron usage
     const tagName = element.tagName.toLowerCase();
-    const skipTags = [
-      'nav', 'header', 'footer', 'aside', 'menu',
-      'form', 'button', 'input', 'select', 'textarea',
-      'iframe', 'noscript', 'svg', 'canvas'
-    ];
     
     // Check for common ad/menu class names and IDs
     const className = element.getAttribute('class') || '';
     const id = element.getAttribute('id') || '';
-    const skipPatterns = [
-      'nav', 'menu', 'header', 'footer', 'sidebar', 'aside',
-      'advertisement', 'ad-', 'promo', 'banner', 'widget',
-      'share', 'social', 'comment', 'related', 'recommend'
-    ];
     
-    const hasSkipPattern = skipPatterns.some(pattern => 
+    const hasSkipPattern = TextExtractor.SKIP_PATTERNS.some(pattern => 
       className.toLowerCase().includes(pattern) || 
       id.toLowerCase().includes(pattern)
     );
     
-    if (skipTags.includes(tagName) || hasSkipPattern) {
+    if (TextExtractor.SKIP_TAGS.includes(tagName) || hasSkipPattern) {
       this.skipDepth++;
       element.onEndTag(() => {
         this.skipDepth--;
