@@ -7,8 +7,8 @@
  * 3. Update each article in KV after processing (incremental writes for reliability)
  * 
  * Postprocessing flags:
- * - sentiment: true → needs sentiment analysis
- * - aiSummary: true → needs AI summary generation
+ * - needsSentiment: true → needs sentiment analysis
+ * - needsSummary: true → needs AI summary generation
  * - contentTimeout: true → previous fetch timed out, retry this run
  * 
  * This approach solves the "Too many subrequests" error by:
@@ -239,8 +239,8 @@ async function analyzeSentiment(env, article) {
 /**
  * Process a single article with AI analysis
  * Checks postprocessing flags and processes accordingly:
- * - sentiment: true → needs sentiment analysis
- * - aiSummary: true → needs AI summary generation
+ * - needsSentiment: true → needs sentiment analysis
+ * - needsSummary: true → needs AI summary generation
  * - contentTimeout: true → previous fetch timed out, retry
  * 
  * @param {Object} env - Environment variables
@@ -252,10 +252,11 @@ async function processArticle(env, article) {
   let needsUpdate = false;
   
   // Process sentiment if flag is true
-  if (article.sentiment === true) {
+  if (article.needsSentiment === true) {
     try {
       const sentimentResult = await analyzeSentiment(env, article);
-      updates.sentiment = sentimentResult;  // Replace flag with actual sentiment value
+      updates.sentiment = sentimentResult;  // Set actual sentiment value
+      updates.needsSentiment = false;       // Clear the flag
       needsUpdate = true;
       console.log(`  Sentiment: ${sentimentResult}`);
     } catch (error) {
@@ -265,7 +266,7 @@ async function processArticle(env, article) {
   }
   
   // Process AI summary if flag is true OR if we're retrying after contentTimeout
-  if (article.aiSummary === true || article.contentTimeout === true) {
+  if (article.needsSummary === true || article.contentTimeout === true) {
     if (article.link) {
       try {
         const content = await fetchArticleContent(article.link);
@@ -274,20 +275,21 @@ async function processArticle(env, article) {
           const summary = await generateArticleSummary(env, article.title, content);
           
           if (summary) {
-            updates.aiSummary = summary;  // Replace flag with actual summary text
+            updates.aiSummary = summary;         // Set actual summary text
+            updates.needsSummary = false;        // Clear the flag
             updates.contentTimeout = undefined;  // Clear timeout flag if it was set
             needsUpdate = true;
             console.log(`  AI Summary: Generated (${summary.length} chars)`);
           } else {
             console.log(`  AI Summary: Content mismatch or too short`);
             // Set flag to false (don't retry - content doesn't match)
-            updates.aiSummary = false;
+            updates.needsSummary = false;
             updates.contentTimeout = undefined;
             needsUpdate = true;
           }
         } else {
           console.log(`  AI Summary: Failed to fetch content`);
-          // Keep aiSummary flag, but mark as timeout for retry
+          // Keep needsSummary flag, but mark as timeout for retry
           updates.contentTimeout = true;
           needsUpdate = true;
         }
@@ -300,7 +302,7 @@ async function processArticle(env, article) {
     } else {
       console.log(`  AI Summary: No link available`);
       // No link, set flag to false (can't process)
-      updates.aiSummary = false;
+      updates.needsSummary = false;
       needsUpdate = true;
     }
   }
@@ -337,7 +339,7 @@ async function handleScheduled(event, env, ctx) {
     // Step 2: Find articles that need processing (in reverse chronological order - newest first)
     console.log('Step 2: Finding articles that need processing...');
     const pendingArticles = newsData.articles.filter(article => 
-      article.sentiment === true || article.aiSummary === true || article.contentTimeout === true
+      article.needsSentiment === true || article.needsSummary === true || article.contentTimeout === true
     );
     
     if (pendingArticles.length === 0) {

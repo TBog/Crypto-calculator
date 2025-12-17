@@ -406,10 +406,10 @@ async function markArticlesForProcessing(articles) {
   const markedArticles = articles.map(article => ({
     ...article,
     // Postprocessing flags (set to true for tasks that need to be done)
-    sentiment: true,           // Needs sentiment analysis
-    aiSummary: true,          // Needs AI summary generation
+    needsSentiment: true,      // Needs sentiment analysis
+    needsSummary: true,        // Needs AI summary generation
     // contentTimeout not set initially (only set if fetch times out)
-    queuedAt: Date.now()      // Timestamp for tracking
+    queuedAt: Date.now()       // Timestamp for tracking
   }));
   
   console.log(`Marked ${markedArticles.length} articles for AI processing`);
