@@ -9,9 +9,11 @@ compatibility_flags = ["nodejs_compat"]
 [triggers]
 crons = ["0 * * * *"]
 
-# AI binding for sentiment analysis
-[ai]
-binding = "AI"
+# Queue producer binding
+# This worker sends articles to the queue for processing
+[[queues.producers]]
+queue = "crypto-article-queue"
+binding = "ARTICLE_QUEUE"
 
 # KV namespace for storing analyzed news
 [[kv_namespaces]]
@@ -27,6 +29,10 @@ id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID_FROM_STEP_2"
 [env.production]
 # Production environment configuration
 # Secrets are automatically available in env.NEWSDATA_API_KEY
+[[env.production.queues.producers]]
+queue = "crypto-article-queue"
+binding = "ARTICLE_QUEUE"
+
 [[env.production.kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with production KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production

@@ -67,245 +67,6 @@ async function fetchNewsPage(apiKey, nextPage = null) {
   };
 }
 
-/**
- * HTMLRewriter handler to extract text content from HTML
- * Uses Cloudflare's HTMLRewriter API for efficient, streaming HTML parsing
- */
-class TextExtractor {
-  constructor() {
-    this.textChunks = [];
-    this.charCount = 0;
-    this.maxChars = 128 * 1024; // Limit to avoid token limits
-  }
-  
-  element(element) {
-    // Skip script, style, and other non-content elements
-    // These will be automatically excluded from text extraction
-  }
-  
-  text(text) {
-    // Only collect text if we haven't exceeded the limit
-    if (this.charCount < this.maxChars) {
-      const content = text.text;
-      if (content && content.trim()) {
-        this.textChunks.push(content);
-        this.charCount += content.length;
-      }
-    }
-  }
-  
-  getText() {
-    // Join all text chunks and clean up whitespace
-    let text = this.textChunks.join(' ');
-    text = text.replace(/\s+/g, ' ').trim();
-    
-    // Llama 3.1 & 3.2 model instances support a full 128K context window.
-    if (text.length > this.maxChars) {
-      text = text.substring(0, this.maxChars);
-    }
-    
-    return text || null;
-  }
-}
-
-/**
- * Fetch article content from URL using HTMLRewriter for parsing
- * 
- * SECURITY NOTE: The extracted text is used solely as input to AI for summary generation.
- * It is never rendered as HTML or injected into the DOM. The AI-generated summary is
- * displayed using textContent (not innerHTML) in the frontend, preventing XSS.
- * 
- * Uses Cloudflare's HTMLRewriter API for efficient, secure HTML parsing without regex.
- * See: https://blog.cloudflare.com/html-parsing-1/
- * 
- * @param {string} url - Article URL
- * @returns {Promise<string|null>} Article text content or null on error
- */
-async function fetchArticleContent(url) {
-  try {
-    // Set a timeout and user agent to avoid being blocked
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; NewsBot/1.0; +http://crypto-calculator.com)'
-      },
-      signal: AbortSignal.timeout(10000) // 10 second timeout
-    });
-    
-    if (!response.ok) {
-      console.warn(`Failed to fetch article content: ${response.status}`);
-      return null;
-    }
-    
-    // Use HTMLRewriter to parse HTML and extract text content
-    // This is more efficient and secure than regex-based parsing
-    const extractor = new TextExtractor();
-    
-    // Create a new HTMLRewriter instance and configure it to:
-    // 1. Remove script and style tags (don't extract their content)
-    // 2. Extract text from all other elements
-    const rewriter = new HTMLRewriter()
-      .on('script', {
-        element(element) {
-          element.remove(); // Don't extract script content
-        }
-      })
-      .on('style', {
-        element(element) {
-          element.remove(); // Don't extract style content
-        }
-      })
-      .on('*', extractor); // Extract text from all other elements
-    
-    // Transform the response and collect the text
-    const transformed = rewriter.transform(response);
-    
-    // Read the transformed response to trigger the HTMLRewriter
-    await transformed.arrayBuffer();
-    
-    // Get the extracted text
-    const text = extractor.getText();
-    
-    return text;
-  } catch (error) {
-    console.error(`Error fetching article content from ${url}:`, error.message);
-    return null;
-  }
-}
-
-/**
- * Generate AI summary of article content with validation
- * @param {Object} env - Environment variables (includes AI binding)
- * @param {string} title - Article title
- * @param {string} content - Article content
- * @returns {Promise<string|null>} AI-generated summary or null if content doesn't match title
- */
-async function generateArticleSummary(env, title, content) {
-  try {
-    if (!content || content.length < 100) {
-      return null; // Not enough content to summarize
-    }
-    
-    // Error indicators for content mismatch detection
-    // Only check for structured error messages to avoid false positives
-    const MISMATCH_INDICATORS = ['ERROR:', 'CONTENT_MISMATCH'];
-    
-    // System prompt for AI summarization with content validation
-    const systemPrompt = [
-      'You are a news summarization assistant.',
-      'Task: First verify that the webpage content matches the article title, then provide a summary.',
-      'Validation: If the webpage content does NOT match or discuss the topic in the title',
-      '(e.g., wrong article, paywall, error page, or unrelated content),',
-      'respond with exactly "ERROR: CONTENT_MISMATCH".',
-      'Summary: Otherwise, provide a summary of the Bitcoin-related news, focusing on key facts and implications for Bitcoin.',
-      'Format: Start your summary with the marker "SUMMARY:" followed by the actual summary text.'
-    ].join(' ');
-    
-    // Use Cloudflare Workers AI to generate summary with content validation
-    const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompt
-        },
-        {
-          role: 'user',
-          content: `Article Title: ${title}\n\nWebpage Content: ${content}\n\nFirst, verify the content matches the title. If it does not match, respond with "ERROR: CONTENT_MISMATCH". If it matches, provide a summary starting with "SUMMARY:" followed by your summary:`
-        }
-      ],
-      max_tokens: 4096
-    });
-    
-    // Extract summary from response
-    // Workers AI returns different formats: {response: "text"} or just "text"
-    let fullResponse = (response.response || response || '').trim();
-    
-    // Check if AI detected content mismatch; look for the AI requested error indicators
-    const hasMismatch = MISMATCH_INDICATORS.some(indicator => 
-      fullResponse.toUpperCase().includes(indicator.toUpperCase())
-    );
-    
-    if (hasMismatch) {
-      console.log(`Content mismatch detected for: ${title}`);
-      return null;
-    }
-    
-    // Extract only the summary portion after the SUMMARY: marker
-    let summary = fullResponse;
-    const summaryMarkerIndex = fullResponse.toUpperCase().indexOf('SUMMARY:');
-    if (summaryMarkerIndex !== -1) {
-      // Extract text after "SUMMARY:" marker
-      summary = fullResponse.substring(summaryMarkerIndex + 8).trim();
-    } else {
-      // If no marker found, try to remove common confirmation phrases from the beginning
-      // Remove phrases like "The webpage content matches..." or "Here's a summary..."
-      const confirmationPatterns = [
-        /^The webpage content matches[^.]*\.\s*/i,
-        /^This article discusses[^.]*\.\s*/i,
-        /^Here'?s?\s+(a\s+)?(2-3\s+sentence\s+)?summary[^:]*:\s*/i,
-        /^Summary:\s*/i
-      ];
-      
-      for (const pattern of confirmationPatterns) {
-        summary = summary.replace(pattern, '');
-      }
-    }
-    
-    summary = summary.trim();
-    
-    if (summary && summary.length > 20) {
-      return summary;
-    }
-    
-    return null;
-  } catch (error) {
-    console.error('Failed to generate summary:', error);
-    return null;
-  }
-}
-
-/**
- * Analyze sentiment of an article using Cloudflare Workers AI
- * @param {Object} env - Environment variables (includes AI binding)
- * @param {Object} article - Article object to analyze
- * @returns {Promise<string>} Sentiment classification (positive, negative, neutral)
- */
-async function analyzeSentiment(env, article) {
-  try {
-    // Construct prompt from article title and description
-    const text = `${article.title || ''}. ${article.description || ''}`;
-    
-    // Use Cloudflare Workers AI to classify sentiment
-    const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a sentiment analysis assistant. Classify the sentiment of the provided Bitcoin-related news article as exactly one word: "positive", "negative", or "neutral". Only respond with that single word.'
-        },
-        {
-          role: 'user',
-          content: text
-        }
-      ],
-      max_tokens: 10
-    });
-    
-    // Extract sentiment from response
-    const sentiment = (response.response || response || '').trim().toLowerCase();
-    
-    // Validate and normalize sentiment
-    if (sentiment.includes('positive')) {
-      return 'positive';
-    } else if (sentiment.includes('negative')) {
-      return 'negative';
-    } else {
-      return 'neutral';
-    }
-  } catch (error) {
-    console.error('Failed to analyze sentiment:', error);
-    // Default to neutral on error
-    return 'neutral';
-  }
-}
 
 /**
  * Fetch and aggregate articles with early-exit optimization
@@ -392,60 +153,51 @@ async function aggregateArticles(env, knownIds) {
 }
 
 /**
- * Analyze sentiment and generate summaries for all articles
- * @param {Object} env - Environment variables
- * @param {Array} articles - Array of articles to analyze
- * @returns {Promise<Array>} Articles with sentiment tags and AI summaries
+ * Queue articles for asynchronous processing
+ * Instead of analyzing articles in this worker (which hits subrequest limits),
+ * we push them to a Cloudflare Queue where each article is processed independently
+ * with its own fresh subrequest budget.
+ * 
+ * @param {Object} env - Environment variables (includes ARTICLE_QUEUE binding)
+ * @param {Array} articles - Array of articles to queue for processing
+ * @returns {Promise<Array>} Articles as-is (without sentiment/summary - added by consumer)
  */
-async function analyzeArticles(env, articles) {
-  console.log(`Starting analysis for ${articles.length} articles...`);
+async function queueArticlesForProcessing(env, articles) {
+  console.log(`Queueing ${articles.length} articles for asynchronous processing...`);
   
-  const analyzedArticles = [];
+  // Send articles to queue in batches to avoid hitting queue limits
+  const BATCH_SIZE = 100; // Cloudflare Queues support batching
+  let queuedCount = 0;
   
-  for (let i = 0; i < articles.length; i++) {
-    const article = articles[i];
+  for (let i = 0; i < articles.length; i += BATCH_SIZE) {
+    const batch = articles.slice(i, i + BATCH_SIZE);
     
     try {
-      // Analyze sentiment (fast)
-      const sentiment = await analyzeSentiment(env, article);
+      // Send batch to queue
+      await env.ARTICLE_QUEUE.sendBatch(
+        batch.map(article => ({
+          body: article
+        }))
+      );
       
-      // Fetch article content and generate summary (slower, may fail)
-      let aiSummary = null;
-      if (article.link) {
-        const content = await fetchArticleContent(article.link);
-        
-        if (content) {
-          aiSummary = await generateArticleSummary(env, article.title, content);
-          
-          if (aiSummary && (i + 1) % 5 === 0) {
-            console.log(`Generated ${analyzedArticles.filter(a => a.aiSummary).length} AI summaries so far`);
-          }
-        }
-      }
-      
-      analyzedArticles.push({
-        ...article,
-        sentiment: sentiment,
-        ...(aiSummary && { aiSummary: aiSummary })
-      });
-      
-      if ((i + 1) % 5 === 0) {
-        console.log(`Analyzed ${i + 1}/${articles.length} articles`);
-      }
+      queuedCount += batch.length;
+      console.log(`Queued batch: ${queuedCount}/${articles.length} articles`);
     } catch (error) {
-      console.error(`Error analyzing article ${i + 1}:`, error);
-      // Include article with neutral sentiment on error
-      analyzedArticles.push({
-        ...article,
-        sentiment: 'neutral'
-      });
+      console.error(`Error queueing batch at index ${i}:`, error);
+      // Continue with next batch even if one fails
     }
   }
   
-  const withSummaries = analyzedArticles.filter(a => a.aiSummary).length;
-  console.log(`Analysis complete: ${analyzedArticles.length} articles processed, ${withSummaries} with AI summaries`);
+  console.log(`Successfully queued ${queuedCount} articles for processing`);
+  console.log('Note: Articles will be enriched with sentiment and AI summaries by the consumer worker');
   
-  return analyzedArticles;
+  // Return articles as-is without sentiment/summary
+  // The consumer worker will update them in KV as they're processed
+  return articles.map(article => ({
+    ...article,
+    sentiment: 'pending',  // Placeholder until consumer processes it
+    queuedAt: Date.now()
+  }));
 }
 
 /**
@@ -516,10 +268,14 @@ async function storeInKV(env, newArticles) {
 }
 
 /**
- * Main scheduled event handler with optimized three-phase pipeline
+ * Main scheduled event handler with queue-based architecture
  * Phase 1: Preparation - Read ID index from KV
  * Phase 2: Fetch & Early Exit - Aggregate new articles, stop when hitting known article
- * Phase 3: KV Update - Write both full payload and ID index (2 writes)
+ * Phase 3: Queue articles for processing - Send to Cloudflare Queue
+ * Phase 4: Store articles in KV - Articles initially stored with "pending" sentiment
+ * 
+ * Note: The consumer worker will update articles with sentiment and AI summaries asynchronously
+ * 
  * @param {Event} event - Scheduled event
  * @param {Object} env - Environment variables
  * @param {Object} ctx - Execution context
@@ -550,20 +306,22 @@ async function handleScheduled(event, env, ctx) {
     const newArticles = await aggregateArticles(env, knownIds);
     
     if (newArticles.length === 0) {
-      console.log('No new articles to process, skipping analysis and KV update');
+      console.log('No new articles to process');
       console.log('=== Bitcoin News Updater Cron Job Completed (No Updates) ===');
       return;
     }
     
-    // Analyze sentiment for new articles only
-    console.log('Phase 2: Analyzing sentiment for new articles...');
-    const analyzedArticles = await analyzeArticles(env, newArticles);
+    // Phase 3: Queue articles for asynchronous processing
+    console.log('Phase 3: Queueing articles for AI processing...');
+    const queuedArticles = await queueArticlesForProcessing(env, newArticles);
     
-    // Phase 3: KV Update (exactly 2 writes)
-    console.log('Phase 3: Updating KV (2 writes)...');
-    await storeInKV(env, analyzedArticles);
+    // Phase 4: Store articles in KV with "pending" sentiment
+    // The consumer worker will update them with actual sentiment and AI summaries
+    console.log('Phase 4: Storing articles in KV (pending AI enrichment)...');
+    await storeInKV(env, queuedArticles);
     
     console.log('=== Bitcoin News Updater Cron Job Completed Successfully ===');
+    console.log(`Queued ${newArticles.length} articles for AI processing`);
   } catch (error) {
     console.error('=== Bitcoin News Updater Cron Job Failed ===');
     console.error('Error:', error);
