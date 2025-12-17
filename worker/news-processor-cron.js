@@ -10,6 +10,13 @@
  * - needsSentiment: true → needs sentiment analysis
  * - needsSummary: true → needs AI summary generation
  * - contentTimeout: true → previous fetch timed out, retry this run
+ * - summaryError: string → reason why summary failed (for debugging)
+ * 
+ * Summary error reasons:
+ * - "content_mismatch" → webpage doesn't match article title
+ * - "fetch_failed" → failed to fetch content
+ * - "no_link" → article has no URL
+ * - "error: <msg>" → AI generation error (token limits, API errors, etc.)
  * 
  * This approach solves the "Too many subrequests" error by:
  * - Processing articles in small batches (5 at a time)
@@ -123,12 +130,16 @@ async function fetchArticleContent(url) {
  * @param {string} title - Article title
  * @param {string} content - Article content
  * @returns {Promise<string|null>} AI-generated summary or null if content doesn't match title
+ * @throws {Error} With detailed message if AI processing fails
  */
 async function generateArticleSummary(env, title, content) {
   try {
     if (!content || content.length < 100) {
       return null;
     }
+    
+    // Log content length for debugging token issues
+    console.log(`  Content length: ${content.length} chars (~${Math.ceil(content.length / 4)} tokens)`);
     
     const MISMATCH_INDICATORS = ['ERROR:', 'CONTENT_MISMATCH'];
     
@@ -192,8 +203,10 @@ async function generateArticleSummary(env, title, content) {
     
     return null;
   } catch (error) {
-    console.error('Failed to generate summary:', error);
-    return null;
+    // Re-throw with more context about what failed
+    const errorMsg = error.message || String(error);
+    console.error('Failed to generate summary:', errorMsg);
+    throw new Error(`AI_generation_failed: ${errorMsg}`);
   }
 }
 
@@ -280,6 +293,7 @@ async function processArticle(env, article) {
             updates.aiSummary = summary;         // Set actual summary text
             updates.needsSummary = false;        // Clear the flag
             updates.contentTimeout = undefined;  // Clear timeout flag if it was set
+            updates.summaryError = undefined;    // Clear any previous error
             needsUpdate = true;
             console.log(`  AI Summary: Generated (${summary.length} chars)`);
           } else {
@@ -287,24 +301,29 @@ async function processArticle(env, article) {
             // Set flag to false (don't retry - content doesn't match)
             updates.needsSummary = false;
             updates.contentTimeout = undefined;
+            updates.summaryError = 'content_mismatch';  // Store reason for failure
             needsUpdate = true;
           }
         } else {
           console.log(`  AI Summary: Failed to fetch content`);
           // Keep needsSummary flag, but mark as timeout for retry
           updates.contentTimeout = true;
+          updates.summaryError = 'fetch_failed';  // Store reason for failure
           needsUpdate = true;
         }
       } catch (error) {
         console.error(`  Failed summary generation:`, error.message);
         // Set contentTimeout flag so we can retry next run
         updates.contentTimeout = true;
+        // Store detailed error reason for diagnosis
+        updates.summaryError = `error: ${error.message.substring(0, 100)}`;
         needsUpdate = true;
       }
     } else {
       console.log(`  AI Summary: No link available`);
       // No link, set flag to false (can't process)
       updates.needsSummary = false;
+      updates.summaryError = 'no_link';  // Store reason for failure
       needsUpdate = true;
     }
   }

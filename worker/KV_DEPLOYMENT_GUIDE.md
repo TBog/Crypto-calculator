@@ -43,11 +43,31 @@ Articles are marked with boolean flags indicating needed processing:
 - **`needsSentiment: true`** - Needs sentiment analysis
 - **`needsSummary: true`** - Needs AI summary generation
 - **`contentTimeout: true`** - Previous fetch timed out, retry this run
+- **`summaryError: string`** - Reason why summary generation failed (for debugging)
 
 After processing, flags are updated:
 - `needsSentiment: false` and `sentiment: 'positive' | 'negative' | 'neutral'`
 - `needsSummary: false` and `aiSummary: "text of summary"` (or left as true to retry)
 - `contentTimeout: undefined` (cleared after successful fetch)
+- `summaryError: undefined` (cleared after successful summary generation)
+
+### Summary Error Reasons
+
+The `summaryError` field helps diagnose why summary generation failed:
+
+- `content_mismatch` - Webpage content doesn't match article title (paywall, wrong article, etc.)
+- `fetch_failed` - Failed to fetch article content from URL
+- `no_link` - Article has no URL to fetch
+- `error: <message>` - AI generation error (token limits, API errors, etc.)
+
+Example:
+```json
+{
+  "needsSummary": true,
+  "contentTimeout": true,
+  "summaryError": "error: context length exceeded"
+}
+```
 
 ## Prerequisites
 
@@ -282,10 +302,34 @@ const MAX_ARTICLES_PER_RUN = 3;  // Reduce from 5
 
 **Symptoms**: Articles permanently stuck with `contentTimeout: true`
 
-**Solution**: Article URL may be permanently unreachable
-- Check logs to see which URLs are timing out
-- These articles will be retried each run
-- Consider manually setting `needsSummary: false` for permanently broken URLs
+**Solution**: Check the `summaryError` field for diagnosis
+```bash
+# Get articles and filter by error type
+wrangler kv:key get BTC_ANALYZED_NEWS \
+  --binding CRYPTO_NEWS_CACHE \
+  --config wrangler-news-updater.toml | \
+  jq '.articles[] | select(.summaryError != null) | {title, summaryError}'
+```
+
+**Common Issues**:
+
+1. **`summaryError: "error: context length exceeded"`**
+   - Content is too long for AI model
+   - Solution: Increase MAX_CONTENT_CHARS or add better HTML filtering
+
+2. **`summaryError: "content_mismatch"`**
+   - Webpage content doesn't match article title
+   - Common with paywalls, login pages, error pages
+   - These won't retry (needsSummary set to false)
+
+3. **`summaryError: "fetch_failed"`**
+   - Failed to fetch content from URL
+   - Will retry on next run (contentTimeout: true)
+   - Check if URL is accessible
+
+4. **`summaryError: "no_link"`**
+   - Article has no URL
+   - Can't generate summary (needsSummary set to false)
 
 ## Cost Analysis
 
