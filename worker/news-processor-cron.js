@@ -38,7 +38,7 @@ const KV_KEY_IDS = 'BTC_ID_INDEX';
 const MAX_ARTICLES_PER_RUN = 5;
 
 // Maximum characters to extract from webpage (128KB limit for AI context)
-const MAX_CONTENT_CHARS = 128 * 1024;
+const MAX_CONTENT_CHARS = 64 * 1024;
 
 /**
  * Get article ID from article object
@@ -269,8 +269,11 @@ async function processArticle(env, article) {
   const updates = { ...article };
   let needsUpdate = false;
   
+  const needsSentiment = article.needsSentiment ?? true;
+  const needsSummary = article.needsSummary ?? true;
+
   // Process sentiment if flag is true
-  if (article.needsSentiment === true) {
+  if (needsSentiment === true) {
     try {
       const sentimentResult = await analyzeSentiment(env, article);
       updates.sentiment = sentimentResult;  // Set actual sentiment value
@@ -288,7 +291,7 @@ async function processArticle(env, article) {
   // This allows us to retry the fetch in the next run instead of giving up
   const shouldRetry = article.contentTimeout && article.contentTimeout < 5;
   
-  if (article.needsSummary === true || shouldRetry) {
+  if (needsSummary === true || shouldRetry) {
     if (article.link) {
       try {
         const content = await fetchArticleContent(article.link);
@@ -363,9 +366,8 @@ async function processArticle(env, article) {
  * Main scheduled event handler for processing pending articles
  * @param {Event} event - Scheduled event
  * @param {Object} env - Environment variables
- * @param {Object} ctx - Execution context
  */
-async function handleScheduled(event, env, ctx) {
+async function handleScheduled(event, env) {
   console.log('=== Bitcoin News Processor Cron Job Started ===');
   console.log(`Execution time: ${new Date().toISOString()}`);
   
@@ -383,8 +385,8 @@ async function handleScheduled(event, env, ctx) {
     // Step 2: Find articles that need processing (in reverse chronological order - newest first)
     console.log('Step 2: Finding articles that need processing...');
     const pendingArticles = newsData.articles.filter(article => 
-      article.needsSentiment === true || 
-      article.needsSummary === true || 
+      (article.needsSentiment ?? true) || 
+      (article.needsSummary ?? true) || 
       (article.contentTimeout && article.contentTimeout < 5)  // Retry if timeout count < 5
     );
     
@@ -539,8 +541,8 @@ async function handleFetch(request, env) {
     const article = newsData.articles[articleIndex];
     
     // Check if article needs processing
-    const needsProcessing = article.needsSentiment === true || 
-                           article.needsSummary === true || 
+    const needsProcessing = (article.needsSentiment ?? true) || 
+                           (article.needsSummary ?? true) || 
                            (article.contentTimeout && article.contentTimeout < 5);
     
     if (!needsProcessing) {
@@ -615,10 +617,10 @@ async function handleFetch(request, env) {
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(handleScheduled(event, env, ctx));
+    ctx.waitUntil(handleScheduled(event, env));
   },
   
   async fetch(request, env, ctx) {
-    return handleFetch(request, env, ctx);
+    return handleFetch(request, env);
   }
 };
