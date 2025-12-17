@@ -289,10 +289,16 @@ curl "https://crypto-news-processor.YOUR-SUBDOMAIN.workers.dev/process?articleId
   "success": true,
   "message": "Article processed successfully",
   "article": {
-    "id": "abc123",
+    "article_id": "abc123",
     "title": "Bitcoin rises to new high",
+    "description": "Bitcoin price surges...",
+    "link": "https://example.com/article",
+    "pubDate": "2024-01-01T12:00:00Z",
+    "source_name": "CoinDesk",
     "sentiment": "positive",
-    "hasSummary": true,
+    "aiSummary": "Bitcoin has reached...",
+    "needsSentiment": false,
+    "needsSummary": false,
     "summaryError": null,
     "contentTimeout": 0,
     "processedAt": 1702834890

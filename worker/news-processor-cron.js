@@ -547,14 +547,7 @@ async function handleFetch(request, env) {
       return new Response(JSON.stringify({
         success: true,
         message: 'Article already processed',
-        article: {
-          id: getArticleId(article),
-          title: article.title,
-          sentiment: article.sentiment,
-          hasSummary: !!article.aiSummary,
-          summaryError: article.summaryError,
-          contentTimeout: article.contentTimeout
-        }
+        article: article
       }), {
         status: 200,
         headers: {
@@ -596,15 +589,7 @@ async function handleFetch(request, env) {
     return new Response(JSON.stringify({
       success: true,
       message: 'Article processed successfully',
-      article: {
-        id: getArticleId(updatedArticle),
-        title: updatedArticle.title,
-        sentiment: updatedArticle.sentiment,
-        hasSummary: !!updatedArticle.aiSummary,
-        summaryError: updatedArticle.summaryError,
-        contentTimeout: updatedArticle.contentTimeout,
-        processedAt: updatedArticle.processedAt
-      }
+      article: updatedArticle
     }), {
       status: 200,
       headers: {
