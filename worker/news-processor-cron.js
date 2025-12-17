@@ -6,6 +6,11 @@
  * 2. Process up to 5 articles per run (to stay within subrequest limits)
  * 3. Update each article in KV after processing (incremental writes for reliability)
  * 
+ * Also supports on-demand processing via HTTP GET:
+ * - URL: GET /process?articleId=<id>
+ * - Processes a specific article immediately
+ * - Returns processing result as JSON
+ * 
  * Postprocessing flags:
  * - needsSentiment: true → needs sentiment analysis
  * - needsSummary: true → needs AI summary generation
@@ -456,8 +461,179 @@ async function handleScheduled(event, env, ctx) {
   }
 }
 
+/**
+ * Handle HTTP GET requests to process a specific article on demand
+ * URL: /process?articleId=<id>
+ * 
+ * @param {Request} request - HTTP request
+ * @param {Object} env - Environment variables
+ * @returns {Promise<Response>} JSON response with processing result
+ */
+async function handleFetch(request, env) {
+  try {
+    // Only allow GET requests
+    if (request.method !== 'GET') {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Method not allowed. Use GET with ?articleId=<id> parameter'
+      }), {
+        status: 405,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+    
+    // Parse URL and get articleId parameter
+    const url = new URL(request.url);
+    const articleId = url.searchParams.get('articleId');
+    
+    if (!articleId) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Missing articleId parameter. Use ?articleId=<id>'
+      }), {
+        status: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+    
+    console.log(`Processing on-demand request for article: ${articleId}`);
+    
+    // Read articles from KV
+    const newsData = await env.CRYPTO_NEWS_CACHE.get(KV_KEY_NEWS, { type: 'json' });
+    
+    if (!newsData || !newsData.articles) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'No articles found in KV'
+      }), {
+        status: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+    
+    // Find the article by ID
+    const articleIndex = newsData.articles.findIndex(a => getArticleId(a) === articleId);
+    
+    if (articleIndex === -1) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: `Article not found with ID: ${articleId}`
+      }), {
+        status: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+    
+    const article = newsData.articles[articleIndex];
+    
+    // Check if article needs processing
+    const needsProcessing = article.needsSentiment === true || 
+                           article.needsSummary === true || 
+                           (article.contentTimeout && article.contentTimeout < 5);
+    
+    if (!needsProcessing) {
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'Article already processed',
+        article: {
+          id: getArticleId(article),
+          title: article.title,
+          sentiment: article.sentiment,
+          hasSummary: !!article.aiSummary,
+          summaryError: article.summaryError,
+          contentTimeout: article.contentTimeout
+        }
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+    
+    // Process the article
+    console.log(`Processing article: "${article.title?.substring(0, 50)}..."`);
+    const updatedArticle = await processArticle(env, article);
+    
+    // Update article in KV
+    newsData.articles[articleIndex] = updatedArticle;
+    
+    // Recalculate sentiment counts
+    const sentimentCounts = {
+      positive: 0,
+      negative: 0,
+      neutral: 0
+    };
+    
+    newsData.articles.forEach(a => {
+      const s = a.sentiment;
+      if (typeof s === 'string' && ['positive', 'negative', 'neutral'].includes(s)) {
+        sentimentCounts[s] = (sentimentCounts[s] || 0) + 1;
+      }
+    });
+    
+    newsData.sentimentCounts = sentimentCounts;
+    newsData.lastUpdatedExternal = Date.now();
+    
+    // Write back to KV
+    await env.CRYPTO_NEWS_CACHE.put(KV_KEY_NEWS, JSON.stringify(newsData));
+    
+    console.log(`Article processed and updated in KV`);
+    
+    return new Response(JSON.stringify({
+      success: true,
+      message: 'Article processed successfully',
+      article: {
+        id: getArticleId(updatedArticle),
+        title: updatedArticle.title,
+        sentiment: updatedArticle.sentiment,
+        hasSummary: !!updatedArticle.aiSummary,
+        summaryError: updatedArticle.summaryError,
+        contentTimeout: updatedArticle.contentTimeout,
+        processedAt: updatedArticle.processedAt
+      }
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error processing on-demand request:', error);
+    return new Response(JSON.stringify({
+      success: false,
+      error: error.message || 'Internal server error'
+    }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  }
+}
+
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(handleScheduled(event, env, ctx));
+  },
+  
+  async fetch(request, env, ctx) {
+    return handleFetch(request, env, ctx);
   }
 };

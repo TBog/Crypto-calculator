@@ -153,6 +153,31 @@ wrangler deployments list --config wrangler-news-processor.toml
 
 You should see both workers deployed with cron triggers.
 
+### Test On-Demand Processing
+
+The consumer worker also supports on-demand processing via HTTP:
+
+```bash
+# Get your worker URL from deployment
+WORKER_URL="https://crypto-news-processor.YOUR-SUBDOMAIN.workers.dev"
+
+# Process a specific article by ID
+curl "${WORKER_URL}/process?articleId=ARTICLE_ID_HERE"
+
+# Example response:
+# {
+#   "success": true,
+#   "message": "Article processed successfully",
+#   "article": {
+#     "id": "abc123",
+#     "title": "Bitcoin rises...",
+#     "sentiment": "positive",
+#     "hasSummary": true,
+#     "processedAt": 1702834890
+#   }
+# }
+```
+
 ### Monitor Worker Logs
 
 ```bash
@@ -242,6 +267,50 @@ const MAX_ARTICLES_PER_RUN = 5;  // Default
 ```
 
 ## Monitoring
+
+### On-Demand Processing
+
+You can manually trigger processing for a specific article:
+
+```bash
+# Get article ID from KV
+ARTICLE_ID=$(wrangler kv:key get BTC_ANALYZED_NEWS \
+  --binding CRYPTO_NEWS_CACHE \
+  --config wrangler-news-updater.toml | \
+  jq -r '.articles[0] | .article_id // .link')
+
+# Trigger on-demand processing
+curl "https://crypto-news-processor.YOUR-SUBDOMAIN.workers.dev/process?articleId=${ARTICLE_ID}"
+```
+
+**Response Format**:
+```json
+{
+  "success": true,
+  "message": "Article processed successfully",
+  "article": {
+    "id": "abc123",
+    "title": "Bitcoin rises to new high",
+    "sentiment": "positive",
+    "hasSummary": true,
+    "summaryError": null,
+    "contentTimeout": 0,
+    "processedAt": 1702834890
+  }
+}
+```
+
+**Error Responses**:
+- `400`: Missing articleId parameter
+- `404`: Article not found
+- `405`: Method not allowed (use GET)
+- `500`: Processing error
+
+**Use Cases**:
+- Manually retry articles that hit max retries
+- Test processing for new articles immediately
+- Debug specific article issues
+- Priority processing for important articles
 
 ### Key Metrics
 
