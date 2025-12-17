@@ -27,6 +27,11 @@
  * - Processing articles in small batches (5 at a time)
  * - Running frequently (every 10 minutes) to keep articles up-to-date
  * - Using free KV storage instead of paid Queues
+ * 
+ * Neuron Budget Optimization:
+ * - Content extraction skips headers, footers, navigation, ads, and sidebars
+ * - Only main article content is sent to AI for summarization
+ * - Reduces neuron usage by 50-70%, maximizing daily 10,000 neuron budget on Free Tier
  */
 
 // KV keys (must match news-updater-cron.js)
