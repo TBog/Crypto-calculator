@@ -347,9 +347,12 @@ async function aggregateArticles(env, knownIds) {
         
         // Early exit: If we hit a known article, stop immediately
         if (knownIds.has(articleId)) {
-          console.log(`Early exit triggered: Found known article "${article.title?.substring(0, 50)}..."`);
-          earlyExitTriggered = true;
-          break;
+          if (!earlyExitTriggered)
+          {
+            console.log(`Early exit triggered: Found known article "${article.title?.substring(0, 50)}..."`);
+            earlyExitTriggered = true;
+          }
+          continue;
         }
         
         // Add new article to collection
@@ -482,8 +485,6 @@ async function storeInKV(env, newArticles) {
     }
   );
   console.log(`Write #2: Stored ${storedArticleIds.length} article IDs in index under key: ${KV_KEY_IDS}`);
-  console.log(`ID index now matches the ${allArticles.length} articles stored in payload`);
-  console.log('Total KV writes this run: 2');
 }
 
 /**
