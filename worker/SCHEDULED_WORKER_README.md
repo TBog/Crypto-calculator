@@ -1,284 +1,258 @@
-# Bitcoin News Updater - Scheduled Worker
+# Bitcoin News Processing - KV-Based Architecture
 
-This scheduled worker runs hourly to aggregate and analyze Bitcoin news, storing the results in Cloudflare KV for fast retrieval by the main API worker.
+This document describes the KV-based "todo list" architecture for Bitcoin news aggregation and AI analysis, which solves the "Too many subrequests" error while maintaining FREE tier compatibility.
 
-## Architecture
+## Architecture Overview
 
-### New Architecture (Scheduled Worker)
+The system uses **three Cloudflare Workers** to process Bitcoin news articles:
+
+1. **Producer** (`news-updater-cron.js`) - Fetches articles hourly and marks them for processing
+2. **Consumer** (`news-processor-cron.js`) - Processes 5 articles every 10 minutes with AI
+3. **API** (`index.js`) - Serves enriched articles to users
+
+### Why This Architecture?
+
+**Problem**: Processing 100 articles × 3 subrequests = 300 subrequests → Exceeds 50 limit ❌
+
+**Solution**: Split processing across multiple cron runs:
+- Producer: 11 subrequests (fetch only)
+- Consumer: 15 subrequests (5 articles × 3) per run
+- Each run stays under 50 limit ✅
+
+## Data Flow
+
 ```
 ┌─────────────────────────────────────────┐
-│  Scheduled Worker (Cron Job)           │
+│  Producer Worker                        │
+│  (news-updater-cron.js)                │
 │  Runs: Every hour                       │
 │                                         │
-│  1. Fetch 100+ articles (pagination)   │
-│  2. Fetch article content from URLs    │
-│  3. Generate AI summaries               │
-│  4. Analyze sentiment with LLM         │
-│  5. Store in KV                        │
+│  1. Fetch 100+ articles from API       │
+│  2. Mark with processing flags:        │
+│     - needsSentiment: true             │
+│     - needsSummary: true               │
+│  3. Store in KV                        │
+│  (~11 subrequests)                     │
 └─────────────────────────────────────────┘
                     │
                     ▼
          ┌──────────────────┐
          │  Cloudflare KV   │
-         │  BTC_ANALYZED_   │
-         │      NEWS        │
+         │  "Todo List"     │
+         │                  │
+         │  Articles with   │
+         │  pending flags   │
          └──────────────────┘
                     │
                     ▼
+┌─────────────────────────────────────────┐
+│  Consumer Worker                        │
+│  (news-processor-cron.js)               │
+│  Runs: Every 10 minutes                 │
+│                                         │
+│  1. Read articles from KV               │
+│  2. Filter articles with flags          │
+│  3. Process 5 articles:                 │
+│     - Analyze sentiment (AI)            │
+│     - Fetch article content             │
+│     - Generate AI summary               │
+│  4. Update KV after EACH article        │
+│  (~15 subrequests per run)             │
+└─────────────────────────────────────────┘
+                    │
+                    ▼
          ┌──────────────────┐
-         │  API Endpoint    │
-         │  (Read KV only)  │
-         │  Ultra-fast!     │
+         │  Updated KV      │
+         │                  │
+         │  Enriched        │
+         │  articles        │
          └──────────────────┘
+                    │
+                    ▼
+          ┌──────────────────┐
+          │  API Worker      │
+          │  (index.js)      │
+          │                  │
+          │  Read KV only    │
+          │  <10ms response  │
+          └──────────────────┘
 ```
 
-### Benefits
-- **API Credit Optimization**: Uses API credits only once per hour (not per user request)
-- **Consistent Performance**: All users get millisecond-latency responses from KV
-- **Fresh Data**: 100+ articles with sentiment analysis, updated hourly
-- **AI-Enhanced Content**: Fetches full article content and generates concise AI summaries
-- **Content Validation**: AI validates that webpage content matches article title before generating summary
-- **Reliable**: Scheduled execution ensures data is always available
+## Key Features
 
-## Deployment Steps
+### Postprocessing Flags
 
-### 1. Create Cloudflare KV Namespace
+Articles are stored in KV with boolean flags:
+- `needsSentiment: true` → Needs sentiment analysis
+- `needsSummary: true` → Needs AI summary generation
+- `contentTimeout: integer` → Failed fetch attempts (retry if < 5)
+- `summaryError: string` → Diagnostic error information
 
-First, create a KV namespace for storing the news data:
+### Incremental Processing
 
+- Consumer processes 5 articles per run (every 10 minutes)
+- KV updated after EACH article (not at end of batch)
+- If error occurs, already-processed articles are saved
+- ~3 hours to process 100 articles (acceptable trade-off for FREE tier)
+
+### Automatic Retry Logic
+
+- Failed articles tracked with `contentTimeout` counter
+- Retry up to 5 times before giving up
+- `summaryError` field stores diagnostic info:
+  - `"fetch_failed (attempt 3/5)"` - Network/timeout issues
+  - `"content_mismatch"` - Paywall/wrong content
+  - `"error: <msg> (attempt 2/5)"` - AI processing errors
+
+### On-Demand Processing
+
+Consumer worker also supports HTTP requests:
 ```bash
-cd worker
-wrangler kv:namespace create "CRYPTO_NEWS_CACHE"
+GET /process?articleId=<id>
 ```
 
-This will output a namespace ID. Copy this ID and update both wrangler config files:
-- `wrangler-news-updater.toml`: Update `id` under `[[kv_namespaces]]`
-- `wrangler.toml`: Update `id` under `[[kv_namespaces]]`
+Returns full article JSON with processing status.
 
-For production environment, also create a production namespace:
+## Benefits
+
+✅ **FREE Tier Compatible**
+- No paid Cloudflare Queues needed
+- All processing uses free KV storage
+- Cron triggers are free
+- Workers AI included in free tier
+
+✅ **Solves Subrequest Limit**
+- Producer: 11 subrequests (well under 50)
+- Consumer: 15 subrequests per run (well under 50)
+- Scales to unlimited articles
+
+✅ **Resilient to Errors**
+- Incremental KV writes preserve progress
+- Automatic retry with attempt counting
+- Diagnostic error tracking
+- Dead articles stop retrying after 5 failures
+
+✅ **Fast User Experience**
+- API reads from KV (<10ms response)
+- Users see content immediately (mix of pending/processed)
+- Newest articles processed first
+
+## Deployment
+
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for step-by-step deployment instructions.
+
+Quick start:
 ```bash
-wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production
-```
-
-Update the production IDs in both config files under `[[env.production.kv_namespaces]]`.
-
-### 2. Deploy the Scheduled Worker
-
-Deploy the news updater worker with its cron configuration:
-
-```bash
+# Deploy producer
 wrangler deploy --config wrangler-news-updater.toml
-```
-
-### 3. Set API Key Secret
-
-Set the NewsData.io API key for the scheduled worker:
-
-```bash
 wrangler secret put NEWSDATA_API_KEY --config wrangler-news-updater.toml
-```
 
-When prompted, enter your NewsData.io API key.
+# Deploy consumer
+wrangler deploy --config wrangler-news-processor.toml
 
-### 4. Deploy the Main API Worker
-
-Deploy the updated main worker that reads from KV:
-
-```bash
+# Deploy API
 wrangler deploy
 ```
 
-Note: The main worker no longer needs the NEWSDATA_API_KEY since it only reads from KV.
+## Monitoring
 
-### 5. Verify Deployment
-
-Check the scheduled worker's cron triggers:
-
-```bash
-wrangler deployments list --config wrangler-news-updater.toml
-```
-
-Monitor the scheduled worker's logs:
-
+### Producer Logs
 ```bash
 wrangler tail --config wrangler-news-updater.toml
 ```
 
-You should see logs every hour when the cron job runs.
+Look for:
+- "Queued X articles for AI processing"
+- "Phase 3: Updating KV (2 writes)..."
+
+### Consumer Logs
+```bash
+wrangler tail --config wrangler-news-processor.toml
+```
+
+Look for:
+- "Processing 5 articles this run..."
+- "Processed: 5 articles"
+- "Remaining: X articles"
+
+### Check Article Status
+```bash
+wrangler kv:key get BTC_ANALYZED_NEWS \
+  --binding CRYPTO_NEWS_CACHE \
+  --config wrangler-news-updater.toml | \
+  jq '.articles[0] | {title, needsSentiment, needsSummary, sentiment}'
+```
 
 ## Configuration
 
-### Cron Schedule
+### Adjust Processing Speed
 
-The worker is configured to run every hour at the top of the hour:
-
+**Producer frequency** (edit `wrangler-news-updater.toml`):
 ```toml
-[triggers]
-crons = ["0 * * * *"]
+crons = ["0 * * * *"]    # Every hour (default, may exceed API credits)
+crons = ["0 */2 * * *"]  # Every 2 hours (recommended for free tier)
 ```
 
-You can adjust this schedule in `wrangler-news-updater.toml`. For example:
-- `"0 */2 * * *"` - Every 2 hours
-- `"0 */6 * * *"` - Every 6 hours
-- `"*/30 * * * *"` - Every 30 minutes (higher API usage)
-
-### Article Limits
-
-In `news-updater-cron.js`:
-- `TARGET_ARTICLES = 100` - Target number of new articles to fetch
-- `MAX_PAGES = 15` - Maximum pagination pages (safety limit)
-
-### KV Storage
-
-The worker stores data under the key `BTC_ANALYZED_NEWS` with this structure:
-
-```json
-{
-  "articles": [
-    {
-      "title": "...",
-      "description": "...",
-      "link": "...",
-      "pubDate": "...",
-      "source_id": "...",
-      "sentiment": "positive|negative|neutral"
-    }
-  ],
-  "totalArticles": 150,
-  "lastUpdatedExternal": 1701234567890,
-  "sentimentCounts": {
-    "positive": 50,
-    "negative": 30,
-    "neutral": 70
-  }
-}
+**Consumer frequency** (edit `wrangler-news-processor.toml`):
+```toml
+crons = ["*/10 * * * *"]  # Every 10 minutes (default)
+crons = ["*/5 * * * *"]   # Every 5 minutes (faster)
 ```
 
-## HTTP Endpoint for Cache Statistics
-
-When accessed via HTTP (not as a scheduled job), the worker provides cache statistics in JSON format.
-
-### Accessing Cache Statistics
-
-Simply make an HTTP GET request to the worker URL:
-
-```bash
-curl https://news-updater-cron.your-subdomain.workers.dev/
+**Batch size** (edit `news-processor-cron.js`):
+```javascript
+const MAX_ARTICLES_PER_RUN = 5;   # Default
+const MAX_ARTICLES_PER_RUN = 10;  # Faster (30 SR - still safe)
 ```
 
-### Response Format
+## Cost Analysis
 
-```json
-{
-  "success": true,
-  "totalArticles": 150,
-  "lastUpdated": 1701234567890,
-  "lastUpdatedDate": "2024-11-29T12:34:56.789Z",
-  "sentimentCounts": {
-    "positive": 50,
-    "negative": 30,
-    "neutral": 70
-  },
-  "articleIds": ["article-id-1", "article-id-2", "..."],
-  "latestArticles": [
-    {
-      "id": "article-id-1",
-      "title": "Bitcoin Hits New High",
-      "source": "CoinDesk",
-      "sentiment": "positive",
-      "pubDate": "2024-11-29 12:00:00",
-      "link": "https://...",
-      "aiSummary": "Bitcoin reached a new all-time high today..."
-    }
-  ]
-}
-```
+### FREE Tier Usage
 
-### Use Cases
+**NewsData.io API:**
+- Hourly: 264 credits/day ⚠️ (exceeds 200 limit)
+- Every 2 hours: 132 credits/day ✅ (within limit)
 
-- **Monitoring**: Check cache status and article counts
-- **Debugging**: Verify articles are being stored correctly
-- **Integration**: Use article IDs for deduplication
-- **Preview**: View latest 10 articles without loading all 500
+**Cloudflare:**
+- KV Writes: 768/day (under 1000 limit) ✅
+- Subrequests: < 50 per run ✅
+- Cron triggers: Unlimited ✅
 
-## Monitoring
-
-### View Cron Logs
-
-```bash
-wrangler tail --config wrangler-news-updater.toml
-```
-
-### Check KV Storage
-
-```bash
-# List all keys
-wrangler kv:key list --binding CRYPTO_NEWS_CACHE --config wrangler-news-updater.toml
-
-# Get the stored news data
-wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrangler-news-updater.toml
-```
-
-### Manual Trigger (Testing)
-
-To manually trigger the scheduled worker for testing:
-
-```bash
-wrangler dev --config wrangler-news-updater.toml --test-scheduled
-```
-
-## API Credit Usage
-
-With the old architecture (on-demand):
-- Every user request = 1 API credit
-- 1000 requests/day = 1000 credits/day
-
-With the new architecture (scheduled):
-- 1 cron execution = ~5-11 API credits (depending on pagination)
-- Running hourly = ~132-264 credits/day (11 credits × 24 hours)
-- **Savings**: Supports unlimited user requests with fixed API cost
+**Total Cost: $0/month**
 
 ## Troubleshooting
 
-### Worker not running on schedule
+### Articles Stuck with Flags
 
-1. Check deployments: `wrangler deployments list --config wrangler-news-updater.toml`
-2. Verify cron triggers are configured in wrangler-news-updater.toml
-3. Check worker logs for errors: `wrangler tail --config wrangler-news-updater.toml`
+Check `summaryError` field:
+```bash
+wrangler kv:key get BTC_ANALYZED_NEWS \
+  --binding CRYPTO_NEWS_CACHE \
+  --config wrangler-news-updater.toml | \
+  jq '.articles[] | select(.needsSummary == true) | {title, summaryError, contentTimeout}'
+```
 
-### API endpoint returning "temporarily unavailable"
+### Too Many Pending Articles
 
-This means KV is empty. Possible causes:
-1. Scheduled worker hasn't run yet (wait up to 1 hour for first run)
-2. Scheduled worker failed (check logs)
-3. API key not set (use `wrangler secret put NEWSDATA_API_KEY`)
+- Check consumer is running: `wrangler tail --config wrangler-news-processor.toml`
+- Increase batch size or frequency
+- Check for errors in logs
 
-### Sentiment analysis not working
+### Max Retries Reached
 
-1. Verify AI binding is configured in wrangler-news-updater.toml
-2. Check worker logs for AI-related errors
-3. Ensure Cloudflare Workers AI is enabled for your account
+Articles with `contentTimeout: 5`:
+```bash
+wrangler kv:key get BTC_ANALYZED_NEWS \
+  --binding CRYPTO_NEWS_CACHE \
+  --config wrangler-news-updater.toml | \
+  jq '.articles[] | select(.contentTimeout >= 5) | {title, link, summaryError}'
+```
 
-## Cost Estimation
+These articles failed 5 times and stopped retrying.
 
-### NewsData.io Free Tier
-- 200 requests/day
-- With hourly cron: ~264 credits/day (11 per run × 24 hours)
-- **Status**: Exceeds free tier, consider upgrading or reducing frequency
+## Further Documentation
 
-### Alternative: Run every 2 hours
-- ~132 credits/day (11 per run × 12 hours)
-- Fits within free tier limits
-- Update cron: `crons = ["0 */2 * * *"]`
-
-### Cloudflare Workers
-- Scheduled workers: Free tier includes 1 million requests/month
-- KV operations: 100,000 reads/day free, 1,000 writes/day free
-- Workers AI: Refer to Cloudflare Workers AI pricing
-
-## Files
-
-- `news-updater-cron.js` - Scheduled worker implementation
-- `wrangler-news-updater.toml` - Configuration for scheduled worker
-- `index.js` - Main API worker (updated to read from KV)
-- `wrangler.toml` - Configuration for main API worker
+- [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) - Deployment instructions
+- [KV_DEPLOYMENT_GUIDE.md](./KV_DEPLOYMENT_GUIDE.md) - Detailed KV architecture guide
+- [ARCHITECTURE_DIAGRAMS.md](./ARCHITECTURE_DIAGRAMS.md) - Visual diagrams
+- [IMPLEMENTATION_SUMMARY_KV.md](./IMPLEMENTATION_SUMMARY_KV.md) - Technical details
