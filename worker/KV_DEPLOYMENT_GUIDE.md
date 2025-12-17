@@ -42,7 +42,7 @@ Articles are marked with boolean flags indicating needed processing:
 
 - **`needsSentiment: true`** - Needs sentiment analysis
 - **`needsSummary: true`** - Needs AI summary generation
-- **`contentTimeout: true`** - Previous fetch timed out, retry this run
+- **`contentTimeout: integer`** - Number of failed fetch attempts (retry if < 5)
 - **`summaryError: string`** - Reason why summary generation failed (for debugging)
 
 After processing, flags are updated:
@@ -51,21 +51,43 @@ After processing, flags are updated:
 - `contentTimeout: undefined` (cleared after successful fetch)
 - `summaryError: undefined` (cleared after successful summary generation)
 
+### Retry Logic
+
+The `contentTimeout` field tracks failed attempts:
+- Starts at 1 on first failure
+- Increments on each retry (2, 3, 4, 5)
+- Retries stop when count reaches 5
+- `needsSummary` set to `false` after 5 failures (gives up)
+
+Example progression:
+```json
+// First failure
+{"needsSummary": true, "contentTimeout": 1, "summaryError": "fetch_failed (attempt 1/5)"}
+
+// Second failure (10 minutes later)
+{"needsSummary": true, "contentTimeout": 2, "summaryError": "fetch_failed (attempt 2/5)"}
+
+// ... continues ...
+
+// Fifth failure (gives up)
+{"needsSummary": false, "contentTimeout": 5, "summaryError": "fetch_failed (attempt 5/5)"}
+```
+
 ### Summary Error Reasons
 
 The `summaryError` field helps diagnose why summary generation failed:
 
 - `content_mismatch` - Webpage content doesn't match article title (paywall, wrong article, etc.)
-- `fetch_failed` - Failed to fetch article content from URL
+- `fetch_failed (attempt X/5)` - Failed to fetch article content from URL, with retry count
 - `no_link` - Article has no URL to fetch
-- `error: <message>` - AI generation error (token limits, API errors, etc.)
+- `error: <message> (attempt X/5)` - AI generation error (token limits, API errors, etc.) with retry count
 
 Example:
 ```json
 {
   "needsSummary": true,
-  "contentTimeout": true,
-  "summaryError": "error: context length exceeded"
+  "contentTimeout": 3,
+  "summaryError": "error: context length exceeded (attempt 3/5)"
 }
 ```
 
@@ -298,38 +320,61 @@ const MAX_ARTICLES_PER_RUN = 3;  // Reduce from 5
 2. Verify API key: `wrangler secret list --config wrangler-news-updater.toml`
 3. Check NewsData.io credits remaining
 
-### Issue: contentTimeout Flag Never Clears
+### Issue: contentTimeout Counter Keeps Increasing
 
-**Symptoms**: Articles permanently stuck with `contentTimeout: true`
+**Symptoms**: Articles with `contentTimeout: 3, 4, or 5`
 
 **Solution**: Check the `summaryError` field for diagnosis
 ```bash
-# Get articles and filter by error type
+# Get articles and filter by timeout count
 wrangler kv:key get BTC_ANALYZED_NEWS \
   --binding CRYPTO_NEWS_CACHE \
   --config wrangler-news-updater.toml | \
-  jq '.articles[] | select(.summaryError != null) | {title, summaryError}'
+  jq '.articles[] | select(.contentTimeout >= 3) | {title, contentTimeout, summaryError}'
 ```
 
 **Common Issues**:
 
-1. **`summaryError: "error: context length exceeded"`**
+1. **`summaryError: "error: context length exceeded (attempt X/5)"`**
    - Content is too long for AI model
+   - After 5 attempts, `needsSummary` will be set to `false` (stops retrying)
    - Solution: Increase MAX_CONTENT_CHARS or add better HTML filtering
 
 2. **`summaryError: "content_mismatch"`**
    - Webpage content doesn't match article title
    - Common with paywalls, login pages, error pages
-   - These won't retry (needsSummary set to false)
+   - No retry (needsSummary set to false immediately)
 
-3. **`summaryError: "fetch_failed"`**
+3. **`summaryError: "fetch_failed (attempt X/5)"`**
    - Failed to fetch content from URL
-   - Will retry on next run (contentTimeout: true)
+   - Will retry up to 5 times
+   - After 5 failures, gives up (needsSummary: false)
    - Check if URL is accessible
 
 4. **`summaryError: "no_link"`**
    - Article has no URL
    - Can't generate summary (needsSummary set to false)
+
+### Issue: Max Retries Reached
+
+**Symptoms**: Articles with `contentTimeout: 5` and `needsSummary: false`
+
+**What Happened**: Article failed 5 times and worker gave up
+
+**Solution**: 
+```bash
+# Find all articles that hit max retries
+wrangler kv:key get BTC_ANALYZED_NEWS \
+  --binding CRYPTO_NEWS_CACHE \
+  --config wrangler-news-updater.toml | \
+  jq '.articles[] | select(.contentTimeout >= 5) | {title, summaryError, link}'
+```
+
+**Actions**:
+1. Check if URLs are permanently broken
+2. Review error messages to identify patterns
+3. Adjust MAX_CONTENT_CHARS if many "context length exceeded" errors
+4. Consider manual cleanup to remove contentTimeout field for permanently failed articles
 
 ## Cost Analysis
 

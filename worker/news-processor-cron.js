@@ -9,14 +9,14 @@
  * Postprocessing flags:
  * - needsSentiment: true → needs sentiment analysis
  * - needsSummary: true → needs AI summary generation
- * - contentTimeout: true → previous fetch timed out, retry this run
+ * - contentTimeout: integer → number of failed fetch attempts (retry if < 5)
  * - summaryError: string → reason why summary failed (for debugging)
  * 
  * Summary error reasons:
  * - "content_mismatch" → webpage doesn't match article title
- * - "fetch_failed" → failed to fetch content
+ * - "fetch_failed (attempt X/5)" → failed to fetch content, retry count
  * - "no_link" → article has no URL
- * - "error: <msg>" → AI generation error (token limits, API errors, etc.)
+ * - "error: <msg> (attempt X/5)" → AI generation error with retry count
  * 
  * This approach solves the "Too many subrequests" error by:
  * - Processing articles in small batches (5 at a time)
@@ -279,9 +279,11 @@ async function processArticle(env, article) {
   }
   
   // Process AI summary if flag is true OR if we're retrying after contentTimeout
-  // contentTimeout flag is set when fetch(article.link) times out or fails
+  // contentTimeout is an integer counter of failed attempts (retry if < 5)
   // This allows us to retry the fetch in the next run instead of giving up
-  if (article.needsSummary === true || article.contentTimeout === true) {
+  const shouldRetry = article.contentTimeout && article.contentTimeout < 5;
+  
+  if (article.needsSummary === true || shouldRetry) {
     if (article.link) {
       try {
         const content = await fetchArticleContent(article.link);
@@ -292,7 +294,7 @@ async function processArticle(env, article) {
           if (summary) {
             updates.aiSummary = summary;         // Set actual summary text
             updates.needsSummary = false;        // Clear the flag
-            updates.contentTimeout = undefined;  // Clear timeout flag if it was set
+            updates.contentTimeout = undefined;  // Clear timeout counter
             updates.summaryError = undefined;    // Clear any previous error
             needsUpdate = true;
             console.log(`  AI Summary: Generated (${summary.length} chars)`);
@@ -306,17 +308,33 @@ async function processArticle(env, article) {
           }
         } else {
           console.log(`  AI Summary: Failed to fetch content`);
-          // Keep needsSummary flag, but mark as timeout for retry
-          updates.contentTimeout = true;
-          updates.summaryError = 'fetch_failed';  // Store reason for failure
+          // Increment timeout counter (start at 1 if undefined)
+          const timeoutCount = (article.contentTimeout || 0) + 1;
+          updates.contentTimeout = timeoutCount;
+          updates.summaryError = `fetch_failed (attempt ${timeoutCount}/5)`;
+          
+          // If we've hit max retries, stop trying
+          if (timeoutCount >= 5) {
+            console.log(`  AI Summary: Max retries (${timeoutCount}) reached, giving up`);
+            updates.needsSummary = false;  // Stop retrying
+          }
+          
           needsUpdate = true;
         }
       } catch (error) {
         console.error(`  Failed summary generation:`, error.message);
-        // Set contentTimeout flag so we can retry next run
-        updates.contentTimeout = true;
+        // Increment timeout counter
+        const timeoutCount = (article.contentTimeout || 0) + 1;
+        updates.contentTimeout = timeoutCount;
         // Store detailed error reason for diagnosis
-        updates.summaryError = `error: ${error.message.substring(0, 100)}`;
+        updates.summaryError = `error: ${error.message.substring(0, 100)} (attempt ${timeoutCount}/5)`;
+        
+        // If we've hit max retries, stop trying
+        if (timeoutCount >= 5) {
+          console.log(`  AI Summary: Max retries (${timeoutCount}) reached, giving up`);
+          updates.needsSummary = false;  // Stop retrying
+        }
+        
         needsUpdate = true;
       }
     } else {
@@ -360,7 +378,9 @@ async function handleScheduled(event, env, ctx) {
     // Step 2: Find articles that need processing (in reverse chronological order - newest first)
     console.log('Step 2: Finding articles that need processing...');
     const pendingArticles = newsData.articles.filter(article => 
-      article.needsSentiment === true || article.needsSummary === true || article.contentTimeout === true
+      article.needsSentiment === true || 
+      article.needsSummary === true || 
+      (article.contentTimeout && article.contentTimeout < 5)  // Retry if timeout count < 5
     );
     
     if (pendingArticles.length === 0) {
