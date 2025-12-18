@@ -179,14 +179,11 @@ async function fetchArticleContent(url) {
     const rewriter = new HTMLRewriter();
     
     // Register remove handlers for all static skip tags
-    const tagsToRemove = ['script', 'style', 'nav', 'header', 'footer', 'aside', 'menu', 'form', 'svg', 'canvas', 'iframe', 'noscript'];
-    for (const tag of tagsToRemove) {
-      rewriter.on(tag, {
-        element(element) {
-          element.remove();
-        }
+    const tagsToRemove = 'script, style, nav, header, footer, aside, menu, form, svg, canvas, iframe, noscript';
+    const rewriter = new HTMLRewriter()
+      .on(tagsToRemove, {
+        element(e) { e.remove(); }
       });
-    }
     
     // Register the text extractor for all elements
     rewriter.on('*', extractor);
@@ -579,6 +576,7 @@ async function handleFetch(request, env) {
     // Parse URL and get articleId parameter
     const url = new URL(request.url);
     const articleId = url.searchParams.get('articleId');
+    const forceProcess = url.searchParams.has('force');
     
     if (!articleId) {
       return new Response(JSON.stringify({
@@ -630,7 +628,8 @@ async function handleFetch(request, env) {
     const article = newsData.articles[articleIndex];
     
     // Check if article needs processing
-    const needsProcessing = (article.needsSentiment ?? true) || 
+    const needsProcessing = forceProcess ||
+                           (article.needsSentiment ?? true) || 
                            (article.needsSummary ?? true) || 
                            (article.contentTimeout && article.contentTimeout < 5);
     
