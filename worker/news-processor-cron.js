@@ -96,16 +96,14 @@ class TextExtractor {
     
     // Quick tag check first (O(1) with Set)
     if (TextExtractor.SKIP_TAGS.has(tagName)) {
-      this.skipDepth++;
-      // Only attach onEndTag listener if element can have one
+      // Only track skip depth for elements with content
       if (canHaveEndTag) {
+        this.skipDepth++;
         element.onEndTag(() => {
           this.skipDepth--;
         });
-      } else {
-        // Self-closing element, immediately decrement
-        this.skipDepth--;
       }
+      // Self-closing elements (like input) don't need depth tracking - no content to skip
       return; // Skip pattern check if already matched by tag
     }
     
@@ -116,21 +114,19 @@ class TextExtractor {
       const id = element.getAttribute('id') || '';
       const combined = className + ' ' + id;
       
-      // Early exit if no class or id (nothing to check)
-      if (combined.length <= 1) return;
+      // Early exit if no meaningful class or id (nothing to check)
+      if (!combined.trim()) return;
       
       // Use regex test (faster than some/includes pattern)
       if (TextExtractor.SKIP_REGEXP.test(combined)) {
-        this.skipDepth++;
-        // Only attach onEndTag listener if element can have one
+        // Only track skip depth for elements with content
         if (canHaveEndTag) {
+          this.skipDepth++;
           element.onEndTag(() => {
             this.skipDepth--;
           });
-        } else {
-          // Self-closing element, immediately decrement
-          this.skipDepth--;
         }
+        // Self-closing elements don't need depth tracking - no content to skip
       }
     }
   }
