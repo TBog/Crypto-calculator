@@ -1855,46 +1855,6 @@ async function handleDownload() {
 }
 
 /**
- * Handle export button click (legacy - kept for compatibility)
- */
-async function handleExport() {
-    try {
-        const exportedData = exportData();
-        
-        // Export always returns a valid base64 string
-        // No need to check length as it will always have at least the structure
-        
-        // Try to share using Web Share API first (works on mobile and some desktop browsers)
-        if (navigator.share) {
-            try {
-                const shared = await shareText(exportedData);
-                if (shared) {
-                    alert('Data exported and ready to share!');
-                    return;
-                }
-                // If shareText returns false, fall through to clipboard
-                console.log('Share not supported, trying clipboard');
-            } catch (e) {
-                // User cancelled or error occurred, fall through to clipboard
-                console.log('Share cancelled or failed, trying clipboard:', e.message);
-            }
-        }
-        
-        // Fallback to copy to clipboard
-        const copied = await copyToClipboard(exportedData);
-        if (copied) {
-            alert('Data exported and copied to clipboard!\n\nYou can now paste it to save or share.');
-        } else {
-            // Last resort: show in a dialog for manual copy
-            const message = 'Copy this data to save or share:\n\n' + exportedData;
-            prompt(message, exportedData);
-        }
-    } catch (e) {
-        alert(e.message || 'Failed to export data');
-    }
-}
-
-/**
  * Handle import button click
  */
 function handleImport() {
@@ -1983,14 +1943,6 @@ async function loadFormValues() {
     // Use fetched price, or fallback to approximate value for initial load only
     document.getElementById('sellPrice').value = formatPrice(sellPriceValue ?? defaults.sellPriceFallback);
     document.getElementById('fee').value = savedFee ?? defaults.fee;
-}
-
-// Set default values
-function setDefaults() {
-    document.getElementById('investment').value = defaults.investment;
-    document.getElementById('buyPrice').value = defaults.buyPrice;
-    document.getElementById('sellPrice').value = formatPrice(defaults.sellPriceFallback);
-    document.getElementById('fee').value = defaults.fee;
 }
 
 // Cache for currency formatters to improve performance
@@ -2102,14 +2054,6 @@ function formatPrice(price) {
         return price;
     }
     return parseFloat(num.toFixed(2));
-}
-
-// Animate element when value changes
-function animateElement(element) {
-    element.classList.remove('animate-digit');
-    // Force reflow to restart animation
-    void element.offsetWidth;
-    element.classList.add('animate-digit');
 }
 
 // Animate individual characters/digits with staggered effect
