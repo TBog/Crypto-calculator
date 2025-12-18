@@ -43,17 +43,21 @@ Elements with class names or IDs containing these patterns are skipped:
 The implementation uses a `skipDepth` counter to handle nested elements:
 - When entering a skipped element, `skipDepth` is incremented
 - When leaving a skipped element (via `onEndTag`), `skipDepth` is decremented
+- For self-closing elements, `skipDepth` is immediately decremented
 - Text is only extracted when `skipDepth === 0`
 
 This ensures that text within nested skipped elements is properly ignored.
 
 ### Performance Optimizations
 To minimize CPU overhead and stay within Worker execution time limits:
+- **Pre-compiled regex**: Uses a single compiled regex for pattern matching instead of `.some()` with `.includes()`. Regex is implemented in the underlying C++/Rust engine layer and is significantly faster than JS loops on large pages.
 - **Set-based lookups**: SKIP_TAGS uses a Set for O(1) tag lookups instead of array iteration
-- **Early returns**: Tag check happens first with early return to skip pattern matching
+- **Early exit on content limit**: Stops checking elements once `MAX_CONTENT_CHARS` is reached, preventing unnecessary parsing of the rest of the HTML
+- **canHaveContent check**: Only attaches `onEndTag` listeners to elements that can actually have end tags (checks `element.canHaveContent && !element.selfClosing`)
 - **Conditional pattern checks**: Pattern matching only runs when `skipDepth === 0`, avoiding redundant checks on already-skipped content
-- **Combined string checks**: className and id are combined into one string for a single toLowerCase() call
-- **Minimal onEndTag usage**: While onEndTag has memory overhead, it's necessary for correct nested element handling. We minimize registrations by early returns and conditional checks.
+- **Minimal string operations**: Avoids repeated `toLowerCase()` calls by using case-insensitive regex flag
+
+These optimizations are critical for processing large pages (2000+ elements) within the 10ms CPU budget.
 
 ### Example
 ```html

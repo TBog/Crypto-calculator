@@ -59,12 +59,14 @@ function getArticleId(article) {
  * Optimized to skip headers, footers, menus, and other non-content elements
  * to reduce Cloudflare neuron usage.
  * 
- * Note: While onEndTag() has memory overhead, it's necessary for correctly
- * handling nested elements. We optimize by using Sets for O(1) lookups and
- * limiting checks to essential patterns.
+ * Performance optimizations:
+ * - Pre-compiled regex for pattern matching (faster than JS loops)
+ * - Check canHaveContent before attaching onEndTag listeners
+ * - Early exit when max content reached to stop unnecessary parsing
+ * - Set-based tag lookups for O(1) performance
  */
 class TextExtractor {
-  // Use Sets for O(1) lookup performance instead of arrays
+  // Use Sets for O(1) lookup performance
   static SKIP_TAGS = new Set([
     'nav', 'header', 'footer', 'aside', 'menu',
     'form', 'button', 'input', 'select', 'textarea',
@@ -72,11 +74,9 @@ class TextExtractor {
     // Note: 'script' and 'style' are handled separately via element.remove() in HTMLRewriter
   ]);
   
-  static SKIP_PATTERNS = [
-    'nav', 'menu', 'header', 'footer', 'sidebar', 'aside',
-    'advertisement', 'ad-', 'promo', 'banner', 'widget',
-    'share', 'social', 'comment', 'related', 'recommend'
-  ];
+  // Pre-compiled regex for pattern matching (much faster than array.some with includes)
+  // Matches skip patterns in class names and IDs
+  static SKIP_REGEXP = /(?:^|\s)(nav|menu|header|footer|sidebar|aside|advertisement|ad-|promo|banner|widget|share|social|comment|related|recommend)(?:\s|$)/i;
   
   constructor() {
     this.textChunks = [];
@@ -86,43 +86,57 @@ class TextExtractor {
   }
   
   element(element) {
-    // Skip non-content elements to reduce neuron usage
+    // Early exit if we already have enough content (saves CPU on large pages)
+    if (this.charCount >= this.maxChars) return;
+    
     const tagName = element.tagName.toLowerCase();
+    
+    // Check if this element can have content and closing tag
+    const canHaveEndTag = element.canHaveContent && !element.selfClosing;
     
     // Quick tag check first (O(1) with Set)
     if (TextExtractor.SKIP_TAGS.has(tagName)) {
       this.skipDepth++;
-      element.onEndTag(() => {
+      // Only attach onEndTag listener if element can have one
+      if (canHaveEndTag) {
+        element.onEndTag(() => {
+          this.skipDepth--;
+        });
+      } else {
+        // Self-closing element, immediately decrement
         this.skipDepth--;
-      });
+      }
       return; // Skip pattern check if already matched by tag
     }
     
     // Only check patterns if not already skipping (optimization)
     if (this.skipDepth === 0) {
-      // Check for common ad/menu class names and IDs
+      // Check for common ad/menu class names and IDs using pre-compiled regex
       const className = element.getAttribute('class') || '';
       const id = element.getAttribute('id') || '';
+      const combined = className + ' ' + id;
       
       // Early exit if no class or id (nothing to check)
-      if (!className && !id) return;
+      if (combined.length <= 1) return;
       
-      const combined = (className + ' ' + id).toLowerCase();
-      const hasSkipPattern = TextExtractor.SKIP_PATTERNS.some(pattern => 
-        combined.includes(pattern)
-      );
-      
-      if (hasSkipPattern) {
+      // Use regex test (faster than some/includes pattern)
+      if (TextExtractor.SKIP_REGEXP.test(combined)) {
         this.skipDepth++;
-        element.onEndTag(() => {
+        // Only attach onEndTag listener if element can have one
+        if (canHaveEndTag) {
+          element.onEndTag(() => {
+            this.skipDepth--;
+          });
+        } else {
+          // Self-closing element, immediately decrement
           this.skipDepth--;
-        });
+        }
       }
     }
   }
   
   text(text) {
-    // Only extract text if we're not inside a skipped element
+    // Only extract text if we're not inside a skipped element and haven't reached limit
     if (this.skipDepth === 0 && this.charCount < this.maxChars) {
       const content = text.text;
       if (content && content.trim()) {
