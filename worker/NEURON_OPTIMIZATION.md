@@ -17,17 +17,22 @@ This resulted in sending unnecessary content to the AI for summarization, wastin
 ## Solution
 The `TextExtractor` class in `news-processor-cron.js` has been optimized to skip non-content elements:
 
-### Elements Skipped by Tag Name
+### Elements Removed at Rust Level (element.remove())
+These elements are completely removed at the native Rust level, preventing the JavaScript text() handler from even waking up for their content:
+- `<script>`, `<style>` - Scripts and styles
 - `<nav>` - Navigation menus
 - `<header>` - Page headers
 - `<footer>` - Page footers
 - `<aside>` - Sidebars
 - `<menu>` - Menu elements
-- `<form>`, `<button>`, `<input>`, `<select>`, `<textarea>` - Form elements
-- `<iframe>`, `<noscript>`, `<svg>`, `<canvas>` - Non-text elements
+- `<form>`, `<svg>`, `<canvas>`, `<iframe>`, `<noscript>` - Non-content elements
 
-### Elements Skipped by Class/ID Patterns
-Elements with class names or IDs containing these patterns are skipped:
+### Elements Skipped by Tag Name (skipDepth tracking)
+Smaller inline elements use skipDepth tracking:
+- `<button>`, `<input>`, `<select>`, `<textarea>` - Form controls (often inline)
+
+### Elements Skipped by Class/ID Patterns (dynamic matching)
+Elements with class names or IDs containing these patterns are skipped using regex:
 - `nav`, `menu` - Navigation elements
 - `header`, `footer` - Header/footer sections
 - `sidebar`, `aside` - Sidebar content
@@ -50,14 +55,16 @@ This ensures that text within nested skipped elements is properly ignored.
 
 ### Performance Optimizations
 To minimize CPU overhead and stay within Worker execution time limits:
-- **Pre-compiled regex**: Uses a single compiled regex for pattern matching instead of `.some()` with `.includes()`. Regex is implemented in the underlying C++/Rust engine layer and is significantly faster than JS loops on large pages.
-- **Set-based lookups**: SKIP_TAGS uses a Set for O(1) tag lookups instead of array iteration
+- **element.remove() for static tags**: Major skip tags (nav, header, footer, aside, menu, form, svg, canvas, iframe, noscript) are removed at the native Rust level. This prevents the JavaScript text() handler from even waking up for content inside those tags, significantly reducing JS overhead.
+- **ReadableStream cancellation**: Fetch stream is cancelled immediately when MAX_CONTENT_CHARS is reached, physically severing the connection and stopping CPU from processing more bytes.
+- **Pre-compiled regex**: Uses a single compiled regex for dynamic pattern matching instead of `.some()` with `.includes()`. Regex is implemented in the underlying C++/Rust engine layer and is significantly faster than JS loops on large pages.
+- **Set-based lookups**: Remaining SKIP_TAGS uses a Set for O(1) tag lookups instead of array iteration
 - **Early exit on content limit**: Stops checking elements once `MAX_CONTENT_CHARS` is reached, preventing unnecessary parsing of the rest of the HTML
 - **canHaveContent check**: Only attaches `onEndTag` listeners to elements that can actually have end tags (checks `element.canHaveContent && !element.selfClosing`)
 - **Conditional pattern checks**: Pattern matching only runs when `skipDepth === 0`, avoiding redundant checks on already-skipped content
 - **Minimal string operations**: Avoids repeated `toLowerCase()` calls by using case-insensitive regex flag
 
-These optimizations are critical for processing large pages (2000+ elements) within the 10ms CPU budget.
+These optimizations are critical for processing large pages (2000+ elements) within the 10ms CPU budget while also reducing network bandwidth usage.
 
 ### Example
 ```html

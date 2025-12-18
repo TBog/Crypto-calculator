@@ -60,18 +60,17 @@ function getArticleId(article) {
  * to reduce Cloudflare neuron usage.
  * 
  * Performance optimizations:
- * - Pre-compiled regex for pattern matching (faster than JS loops)
+ * - Static skip tags (nav, header, footer, etc.) removed via element.remove() at Rust level
+ * - Pre-compiled regex for dynamic pattern matching (class/ID based)
  * - Check canHaveContent before attaching onEndTag listeners
- * - Early exit when max content reached to stop unnecessary parsing
+ * - Early exit when max content reached
  * - Set-based tag lookups for O(1) performance
  */
 class TextExtractor {
-  // Use Sets for O(1) lookup performance
+  // Remaining tags that need skipDepth tracking (not removed via element.remove())
+  // Moved button, input, select, textarea here as they're often inline and safer with depth tracking
   static SKIP_TAGS = new Set([
-    'nav', 'header', 'footer', 'aside', 'menu',
-    'form', 'button', 'input', 'select', 'textarea',
-    'iframe', 'noscript', 'svg', 'canvas'
-    // Note: 'script' and 'style' are handled separately via element.remove() in HTMLRewriter
+    'button', 'input', 'select', 'textarea'
   ]);
   
   // Pre-compiled regex for pattern matching (much faster than array.some with includes)
@@ -82,7 +81,7 @@ class TextExtractor {
     this.textChunks = [];
     this.charCount = 0;
     this.maxChars = MAX_CONTENT_CHARS;
-    this.skipDepth = 0; // Track depth of skipped elements
+    this.skipDepth = 0; // Track depth of skipped elements (for dynamic patterns only)
   }
   
   element(element) {
@@ -94,7 +93,7 @@ class TextExtractor {
     // Check if this element can have content and closing tag
     const canHaveEndTag = element.canHaveContent && !element.selfClosing;
     
-    // Quick tag check first (O(1) with Set)
+    // Quick tag check first (O(1) with Set) - only for remaining tags
     if (TextExtractor.SKIP_TAGS.has(tagName)) {
       // Only track skip depth for elements with content
       if (canHaveEndTag) {
@@ -175,6 +174,8 @@ async function fetchArticleContent(url) {
     
     const extractor = new TextExtractor();
     
+    // Use element.remove() for static skip tags (more efficient - removes at Rust level)
+    // This prevents text() handler from even waking up for content inside these tags
     const rewriter = new HTMLRewriter()
       .on('script', {
         element(element) {
@@ -186,10 +187,76 @@ async function fetchArticleContent(url) {
           element.remove();
         }
       })
+      .on('nav', {
+        element(element) {
+          element.remove();
+        }
+      })
+      .on('header', {
+        element(element) {
+          element.remove();
+        }
+      })
+      .on('footer', {
+        element(element) {
+          element.remove();
+        }
+      })
+      .on('aside', {
+        element(element) {
+          element.remove();
+        }
+      })
+      .on('menu', {
+        element(element) {
+          element.remove();
+        }
+      })
+      .on('form', {
+        element(element) {
+          element.remove();
+        }
+      })
+      .on('svg', {
+        element(element) {
+          element.remove();
+        }
+      })
+      .on('canvas', {
+        element(element) {
+          element.remove();
+        }
+      })
+      .on('iframe', {
+        element(element) {
+          element.remove();
+        }
+      })
+      .on('noscript', {
+        element(element) {
+          element.remove();
+        }
+      })
       .on('*', extractor);
     
     const transformed = rewriter.transform(response);
-    await transformed.arrayBuffer();
+    
+    // Use ReadableStream to cancel fetch as soon as we have enough content
+    // This physically severs the connection and stops CPU from processing more bytes
+    const reader = transformed.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done || extractor.charCount >= MAX_CONTENT_CHARS) {
+          if (extractor.charCount >= MAX_CONTENT_CHARS) {
+            await reader.cancel(); // Stop the parser and network IMMEDIATELY
+          }
+          break;
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
     
     return extractor.getText();
   } catch (error) {
