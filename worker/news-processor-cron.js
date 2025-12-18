@@ -180,8 +180,7 @@ async function fetchArticleContent(url) {
     
     // Register remove handlers for all static skip tags
     const tagsToRemove = 'script, style, nav, header, footer, aside, menu, form, svg, canvas, iframe, noscript';
-    const rewriter = new HTMLRewriter()
-      .on(tagsToRemove, {
+    rewriter.on(tagsToRemove, {
         element(e) { e.remove(); }
       });
     
