@@ -77,7 +77,7 @@ class TextExtractor {
   // Void elements that don't have closing tags
   static VOID_ELEMENTS = [
     'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-    'link', 'meta', 'param', 'source', 'track', 'wbr'
+    'link', 'meta', 'param', 'source', 'track', 'wbr', 'keygen'
   ];
   
   constructor() {
