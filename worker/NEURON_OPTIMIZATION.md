@@ -41,9 +41,9 @@ Elements with class names or IDs containing these patterns are skipped:
 
 ### Skip Depth Tracking
 The implementation uses a `skipDepth` counter to handle nested elements:
-- When entering a skipped element, `skipDepth` is incremented
+- When entering a skipped element that can have content, `skipDepth` is incremented
 - When leaving a skipped element (via `onEndTag`), `skipDepth` is decremented
-- For self-closing elements, `skipDepth` is immediately decremented
+- Self-closing elements don't participate in depth tracking (they have no content to skip)
 - Text is only extracted when `skipDepth === 0`
 
 This ensures that text within nested skipped elements is properly ignored.
