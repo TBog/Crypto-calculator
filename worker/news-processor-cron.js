@@ -630,9 +630,13 @@ async function handleFetch(request, env) {
     const needsProcessing = forceProcess ||
                            (article.needsSentiment ?? true) || 
                            (article.needsSummary ?? true) || 
-                           (article.contentTimeout && article.contentTimeout < 5);
+                           ((article.contentTimeout ?? 0) < 5);
     
-    if (!needsProcessing) {
+    if (needsProcessing) {
+      // make sure we're generating a new summary
+      article.needsSummary = true;
+      article.contentTimeout = 1;
+    } else {
       return new Response(JSON.stringify({
         success: true,
         message: 'Article already processed',
