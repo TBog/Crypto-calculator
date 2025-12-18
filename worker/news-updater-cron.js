@@ -68,50 +68,6 @@ async function fetchNewsPage(apiKey, nextPage = null) {
 }
 
 /**
- * Analyze sentiment of an article using Cloudflare Workers AI
- * @param {Object} env - Environment variables (includes AI binding)
- * @param {Object} article - Article object to analyze
- * @returns {Promise<string>} Sentiment classification (positive, negative, neutral)
- */
-async function analyzeSentiment(env, article) {
-  try {
-    // Construct prompt from article title and description
-    const text = `${article.title || ''}. ${article.description || ''}`;
-    
-    // Use Cloudflare Workers AI to classify sentiment
-    const response = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a sentiment analysis assistant. Classify the sentiment of the provided Bitcoin-related news article as exactly one word: "positive", "negative", or "neutral". Only respond with that single word.'
-        },
-        {
-          role: 'user',
-          content: text
-        }
-      ],
-      max_tokens: 10
-    });
-    
-    // Extract sentiment from response
-    const sentiment = (response.response || response || '').trim().toLowerCase();
-    
-    // Validate and normalize sentiment
-    if (sentiment.includes('positive')) {
-      return 'positive';
-    } else if (sentiment.includes('negative')) {
-      return 'negative';
-    } else {
-      return 'neutral';
-    }
-  } catch (error) {
-    console.error('Failed to analyze sentiment:', error);
-    // Default to neutral on error
-    return 'neutral';
-  }
-}
-
-/**
  * Fetch and aggregate articles with early-exit optimization
  * Stops pagination immediately when a known article is encountered
  * @param {Object} env - Environment variables
