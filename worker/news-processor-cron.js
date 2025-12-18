@@ -74,6 +74,12 @@ class TextExtractor {
     'share', 'social', 'comment', 'related', 'recommend'
   ];
   
+  // Void elements that don't have closing tags
+  static VOID_ELEMENTS = [
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+    'link', 'meta', 'param', 'source', 'track', 'wbr'
+  ];
+  
   constructor() {
     this.textChunks = [];
     this.charCount = 0;
@@ -96,9 +102,15 @@ class TextExtractor {
     
     if (TextExtractor.SKIP_TAGS.includes(tagName) || hasSkipPattern) {
       this.skipDepth++;
-      element.onEndTag(() => {
+      // Only register onEndTag for non-void elements (elements with closing tags)
+      if (!TextExtractor.VOID_ELEMENTS.includes(tagName)) {
+        element.onEndTag(() => {
+          this.skipDepth--;
+        });
+      } else {
+        // For void elements, immediately decrement since they don't have content
         this.skipDepth--;
-      });
+      }
     }
   }
   

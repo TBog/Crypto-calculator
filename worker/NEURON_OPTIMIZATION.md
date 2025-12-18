@@ -43,9 +43,10 @@ Elements with class names or IDs containing these patterns are skipped:
 The implementation uses a `skipDepth` counter to handle nested elements:
 - When entering a skipped element, `skipDepth` is incremented
 - When leaving a skipped element (via `onEndTag`), `skipDepth` is decremented
+- For void elements (self-closing tags like `<input>`), `skipDepth` is immediately decremented since they have no content
 - Text is only extracted when `skipDepth === 0`
 
-This ensures that text within nested skipped elements is properly ignored.
+This ensures that text within nested skipped elements is properly ignored, and void elements don't cause parser errors.
 
 ### Example
 ```html
