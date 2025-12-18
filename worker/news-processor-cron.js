@@ -57,27 +57,25 @@ function getArticleId(article) {
 /**
  * HTMLRewriter handler to extract text content from HTML
  * Optimized to skip headers, footers, menus, and other non-content elements
- * to reduce Cloudflare neuron usage
+ * to reduce Cloudflare neuron usage.
+ * 
+ * Note: While onEndTag() has memory overhead, it's necessary for correctly
+ * handling nested elements. We optimize by using Sets for O(1) lookups and
+ * limiting checks to essential patterns.
  */
 class TextExtractor {
-  // Static arrays to avoid recreation on each element call
-  static SKIP_TAGS = [
+  // Use Sets for O(1) lookup performance instead of arrays
+  static SKIP_TAGS = new Set([
     'nav', 'header', 'footer', 'aside', 'menu',
-    'form', 'button', 'input', 'select', 'textarea',
+    'form', 'button', 'select', 'textarea',
     'iframe', 'noscript', 'svg', 'canvas'
     // Note: 'script' and 'style' are handled separately via element.remove() in HTMLRewriter
-  ];
+  ]);
   
   static SKIP_PATTERNS = [
     'nav', 'menu', 'header', 'footer', 'sidebar', 'aside',
     'advertisement', 'ad-', 'promo', 'banner', 'widget',
     'share', 'social', 'comment', 'related', 'recommend'
-  ];
-  
-  // Void elements that don't have closing tags
-  static VOID_ELEMENTS = [
-    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-    'link', 'meta', 'param', 'source', 'track', 'wbr', 'keygen'
   ];
   
   constructor() {
@@ -91,25 +89,34 @@ class TextExtractor {
     // Skip non-content elements to reduce neuron usage
     const tagName = element.tagName.toLowerCase();
     
-    // Check for common ad/menu class names and IDs
-    const className = element.getAttribute('class') || '';
-    const id = element.getAttribute('id') || '';
-    
-    const hasSkipPattern = TextExtractor.SKIP_PATTERNS.some(pattern => 
-      className.toLowerCase().includes(pattern) || 
-      id.toLowerCase().includes(pattern)
-    );
-    
-    if (TextExtractor.SKIP_TAGS.includes(tagName) || hasSkipPattern) {
+    // Quick tag check first (O(1) with Set)
+    if (TextExtractor.SKIP_TAGS.has(tagName)) {
       this.skipDepth++;
-      // Only register onEndTag for non-void elements (elements with closing tags)
-      if (!TextExtractor.VOID_ELEMENTS.includes(tagName)) {
+      element.onEndTag(() => {
+        this.skipDepth--;
+      });
+      return; // Skip pattern check if already matched by tag
+    }
+    
+    // Only check patterns if not already skipping (optimization)
+    if (this.skipDepth === 0) {
+      // Check for common ad/menu class names and IDs
+      const className = element.getAttribute('class') || '';
+      const id = element.getAttribute('id') || '';
+      
+      // Early exit if no class or id
+      if (!className && !id) return;
+      
+      const combined = (className + ' ' + id).toLowerCase();
+      const hasSkipPattern = TextExtractor.SKIP_PATTERNS.some(pattern => 
+        combined.includes(pattern)
+      );
+      
+      if (hasSkipPattern) {
+        this.skipDepth++;
         element.onEndTag(() => {
           this.skipDepth--;
         });
-      } else {
-        // For void elements, immediately decrement since they don't have content
-        this.skipDepth--;
       }
     }
   }
