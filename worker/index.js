@@ -313,6 +313,16 @@ async function fetchPriceHistory(env, ctx, days = 1) {
   }
 }
 
+function formatTimestamp(timestamp) {
+  const d = new Date(timestamp);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0"); // Months are 0-indexed
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+}
+
 /**
  * Convert price history data to human-readable text for LLM
  * @param {Object} priceData - Price history data from CoinGecko
@@ -359,12 +369,51 @@ function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
   let hourlySummary = "Price points:\n";
   const sampleInterval = Math.max(1, Math.floor(prices.length / targetSamples));
   for (let i = 0; i < prices.length; i += sampleInterval) {
-    const [timestamp, price] = prices[i];
-    const time = new Date(timestamp).toISOString();
-    hourlySummary += `- ${time}: $${price.toFixed(2)}\n`;
+    const chunk = prices.slice(i, i + sampleInterval);
+    if (chunk.length === 0) continue;
+  
+    let chosenEntry;
+  
+    if (chunk.length === 1) {
+      // Fast path for single-point chunks
+      const [timestamp, price] = chunk[0];
+      chosenEntry = [timestamp, price];
+    } else {
+      // Normal multi-point logic
+      let sum = 0;
+      let maxEntry = chunk[0];
+      let minEntry = chunk[0];
+  
+      for (const entry of chunk) {
+        const [, price] = entry;
+        sum += price;
+        if (price > maxEntry[1]) maxEntry = entry;
+        if (price < minEntry[1]) minEntry = entry;
+      }
+  
+      const avg = sum / chunk.length;
+  
+      if (prevValue === null) {
+        chosenEntry = [chunk[Math.floor(chunk.length / 2)][0], avg];
+      } else if (avg > prevValue) {
+        // Uptrend → pick max
+        chosenEntry = maxEntry;
+      } else {
+        // Downtrend or flat → pick min
+        chosenEntry = minEntry;
+      }
+    }
+  
+    const [timestamp, price] = chosenEntry;
+    const time = formatTimestamp(timestamp);
+  
+    dataSummary += `|${time}|${price.toFixed(0)}|\n`;
+  
+    prevValue = price;
   }
   
-  const text = `Bitcoin (BTC) Price Analysis for the ${periodLabel} (in USD):
+  const text = `### DATA_BTC
+Bitcoin (BTC) data for ${periodLabel} (in USD):
 
 Period: ${startTime} to ${endTime}
 
@@ -376,7 +425,7 @@ Summary Statistics:
 - Period Low: $${lowPrice.toFixed(2)} at ${lowTimeFormatted}
 - Volatility Range: $${(highPrice - lowPrice).toFixed(2)}
 
-${hourlySummary}
+${dataSummary}
 
 Total data points: ${prices.length}`;
 
@@ -425,7 +474,7 @@ async function generatePriceSummary(env, ctx, period = '24h') {
       messages: [
         {
           role: 'system',
-          content: 'You are a cryptocurrency market analyst. You write on a website with bullet points instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under 300 words.'
+          content: 'You are a highly experienced **Cryptocurrency Financial Analyst**. You write using markdown instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns followed by a final, three-sentence executive narrative. Your analysis must be purely based on the data provided in the DATA_BTC section. Response must be professional and quantitative.'
         },
         {
           role: 'user',
@@ -439,6 +488,7 @@ async function generatePriceSummary(env, ctx, period = '24h') {
       summary: response.response || response,
       timestamp: Date.now(),
       period: period,
+      dataInputAI: priceText,
       priceData: {
         startPrice: priceData.prices[0][1],
         endPrice: priceData.prices[priceData.prices.length - 1][1],
@@ -482,7 +532,7 @@ async function handleRequest(request, env, ctx) {
   
   // Validate origin against allowed list
   let isAllowedOrigin = false;
-  if (origin) {
+  if (origin && !isAllowedOrigin) {
     try {
       const originUrl = new URL(origin);
       
