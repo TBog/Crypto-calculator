@@ -176,68 +176,20 @@ async function fetchArticleContent(url) {
     
     // Use element.remove() for static skip tags (more efficient - removes at Rust level)
     // This prevents text() handler from even waking up for content inside these tags
-    const rewriter = new HTMLRewriter()
-      .on('script', {
+    const rewriter = new HTMLRewriter();
+    
+    // Register remove handlers for all static skip tags
+    const tagsToRemove = ['script', 'style', 'nav', 'header', 'footer', 'aside', 'menu', 'form', 'svg', 'canvas', 'iframe', 'noscript'];
+    for (const tag of tagsToRemove) {
+      rewriter.on(tag, {
         element(element) {
           element.remove();
         }
-      })
-      .on('style', {
-        element(element) {
-          element.remove();
-        }
-      })
-      .on('nav', {
-        element(element) {
-          element.remove();
-        }
-      })
-      .on('header', {
-        element(element) {
-          element.remove();
-        }
-      })
-      .on('footer', {
-        element(element) {
-          element.remove();
-        }
-      })
-      .on('aside', {
-        element(element) {
-          element.remove();
-        }
-      })
-      .on('menu', {
-        element(element) {
-          element.remove();
-        }
-      })
-      .on('form', {
-        element(element) {
-          element.remove();
-        }
-      })
-      .on('svg', {
-        element(element) {
-          element.remove();
-        }
-      })
-      .on('canvas', {
-        element(element) {
-          element.remove();
-        }
-      })
-      .on('iframe', {
-        element(element) {
-          element.remove();
-        }
-      })
-      .on('noscript', {
-        element(element) {
-          element.remove();
-        }
-      })
-      .on('*', extractor);
+      });
+    }
+    
+    // Register the text extractor for all elements
+    rewriter.on('*', extractor);
     
     const transformed = rewriter.transform(response);
     
@@ -247,10 +199,11 @@ async function fetchArticleContent(url) {
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done || extractor.charCount >= MAX_CONTENT_CHARS) {
-          if (extractor.charCount >= MAX_CONTENT_CHARS) {
-            await reader.cancel(); // Stop the parser and network IMMEDIATELY
-          }
+        if (done) break;
+        
+        // Check if we have enough content and stop immediately
+        if (extractor.charCount >= MAX_CONTENT_CHARS) {
+          await reader.cancel(); // Stop the parser and network IMMEDIATELY
           break;
         }
       }
