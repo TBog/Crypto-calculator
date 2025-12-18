@@ -67,7 +67,7 @@ class TextExtractor {
   // Use Sets for O(1) lookup performance instead of arrays
   static SKIP_TAGS = new Set([
     'nav', 'header', 'footer', 'aside', 'menu',
-    'form', 'button', 'select', 'textarea',
+    'form', 'button', 'input', 'select', 'textarea',
     'iframe', 'noscript', 'svg', 'canvas'
     // Note: 'script' and 'style' are handled separately via element.remove() in HTMLRewriter
   ]);
@@ -104,7 +104,7 @@ class TextExtractor {
       const className = element.getAttribute('class') || '';
       const id = element.getAttribute('id') || '';
       
-      // Early exit if no class or id
+      // Early exit if no class or id (nothing to check)
       if (!className && !id) return;
       
       const combined = (className + ' ' + id).toLowerCase();
