@@ -40,6 +40,18 @@ const MARKET_CHART_CACHE_TTL = 300;
 // Cache duration for Bitcoin news (1 minute in seconds)
 const BITCOIN_NEWS_CACHE_TTL = 60;
 
+// CORS configuration
+const CORS_MAX_AGE = 86400; // 24 hours in seconds
+
+// LLM configuration
+const LLM_MAX_TOKENS = 1024; // Maximum tokens for LLM response
+const LLM_MAX_WORDS = 300; // Maximum words for LLM summary
+
+// Price history sampling configuration
+const PRICE_SAMPLE_THRESHOLD = 200; // Data points threshold for adaptive sampling
+const PRICE_LARGE_DATASET_SAMPLES = 8; // Number of samples for large datasets (>200 points)
+const PRICE_SMALL_DATASET_SAMPLES = 12; // Number of samples for small datasets (<=200 points)
+
 // KV key for stored Bitcoin news (matches news-updater-cron.js)
 const KV_NEWS_KEY = 'BTC_ANALYZED_NEWS';
 
@@ -355,7 +367,7 @@ function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
   
   // Create hourly summary (sample every few hours for brevity)
   // Adjust sample size based on period length to keep input context manageable
-  const targetSamples = prices.length > 200 ? 8 : 12; // Fewer samples for longer periods
+  const targetSamples = prices.length > PRICE_SAMPLE_THRESHOLD ? PRICE_LARGE_DATASET_SAMPLES : PRICE_SMALL_DATASET_SAMPLES; // Fewer samples for longer periods
   let hourlySummary = "Price points:\n";
   const sampleInterval = Math.max(1, Math.floor(prices.length / targetSamples));
   for (let i = 0; i < prices.length; i += sampleInterval) {
@@ -425,14 +437,14 @@ async function generatePriceSummary(env, ctx, period = '24h') {
       messages: [
         {
           role: 'system',
-          content: 'You are a cryptocurrency market analyst. You write on a website with bullet points instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under 300 words.'
+          content: `You are a cryptocurrency market analyst. You write on a website with bullet points instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under ${LLM_MAX_WORDS} words.`
         },
         {
           role: 'user',
           content: priceText
         }
       ],
-      max_tokens: 1024  // Increased from default 256 to prevent truncation for longer periods
+      max_tokens: LLM_MAX_TOKENS  // Increased from default 256 to prevent truncation for longer periods
     });
     
     const summary = {
@@ -515,7 +527,7 @@ async function handleRequest(request, env, ctx) {
     'Access-Control-Allow-Origin': isAllowedOrigin ? origin : ALLOWED_ORIGINS[0],
     'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400', // 24 hours
+    'Access-Control-Max-Age': CORS_MAX_AGE.toString(), // 24 hours
     'Access-Control-Expose-Headers': 'X-Cache-Status, X-Currency-Converted, X-Conversion-Warning, X-Exchange-Rate, X-Data-Source-Price, X-Data-Source-Exchange, X-Data-Source, X-Last-Updated, X-Cache-TTL, Cache-Control',
   };
 
