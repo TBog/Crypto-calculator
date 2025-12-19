@@ -207,10 +207,12 @@ async function fetchArticleContent(url, dbg = false) {
     ];
     
     // Register remove handlers for each tag
-    // Note: text() handlers receive removed text with t.removed=true (handled by TextExtractor)
+    // Note: Both element and text handlers are needed. While text handlers receive t.removed=true,
+    // explicitly calling t.remove() ensures the text is properly removed before other handlers process it.
     for (const tag of tagsToRemove) {
       rewriter.on(tag, { 
-        element(e) { e.remove(); }
+        element(e) { e.remove(); },
+        text(t) { t.remove(); }
       });
     }
 
