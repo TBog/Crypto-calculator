@@ -207,10 +207,10 @@ async function fetchArticleContent(url, dbg = false) {
     ];
     
     // Register remove handlers for each tag
+    // Note: text() handlers receive removed text with t.removed=true (handled by TextExtractor)
     for (const tag of tagsToRemove) {
       rewriter.on(tag, { 
-        element(e) { e.remove(); },
-        text(t) { t.remove(); } 
+        element(e) { e.remove(); }
       });
     }
 
