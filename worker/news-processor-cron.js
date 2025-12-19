@@ -70,10 +70,25 @@ function decodeHTMLEntities(str) {
   if (!str || typeof str !== 'string') return str || '';
 
   return str.replace(HTML_ENTITY_REGEX, (match, dec, hex, named) => {
-    if (dec) return String.fromCodePoint(parseInt(dec, 10));
-    if (hex) return String.fromCodePoint(parseInt(hex, 16));
-    if (named) return HTML_ENTITY_MAP[named] || match;
-    return match;
+    try {
+      if (dec) {
+        const codePoint = parseInt(dec, 10);
+        // Validate code point is within valid Unicode range
+        if (codePoint < 0 || codePoint > 0x10FFFF) return match;
+        return String.fromCodePoint(codePoint);
+      }
+      if (hex) {
+        const codePoint = parseInt(hex, 16);
+        // Validate code point is within valid Unicode range
+        if (codePoint < 0 || codePoint > 0x10FFFF) return match;
+        return String.fromCodePoint(codePoint);
+      }
+      if (named) return HTML_ENTITY_MAP[named] || match;
+      return match;
+    } catch (e) {
+      // If String.fromCodePoint throws, return the original match
+      return match;
+    }
   });
 }
 
@@ -799,7 +814,7 @@ async function handleFetch(request, env) {
 }
 
 // Export for testing
-export { TextExtractor, fetchArticleContent };
+export { TextExtractor, fetchArticleContent, decodeHTMLEntities };
 
 export default {
   async scheduled(event, env, ctx) {

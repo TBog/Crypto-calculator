@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TextExtractor, fetchArticleContent } from './news-processor-cron.js';
+import { TextExtractor, fetchArticleContent, decodeHTMLEntities } from './news-processor-cron.js';
 
 describe('TextExtractor - Debug Mode Functionality', () => {
   describe('Debug Output Mode', () => {
@@ -444,3 +444,223 @@ describe('TextExtractor - Skip Pattern Detection', () => {
     expect(extractor.skipDepth).toBe(0);
   });
 });
+
+describe('decodeHTMLEntities', () => {
+  describe('Decimal Numeric Entities', () => {
+    it('should decode valid decimal numeric entities', () => {
+      expect(decodeHTMLEntities('&#65;')).toBe('A');
+      expect(decodeHTMLEntities('&#66;')).toBe('B');
+      expect(decodeHTMLEntities('&#90;')).toBe('Z');
+      expect(decodeHTMLEntities('&#97;')).toBe('a');
+      expect(decodeHTMLEntities('&#122;')).toBe('z');
+      expect(decodeHTMLEntities('&#48;')).toBe('0');
+      expect(decodeHTMLEntities('&#57;')).toBe('9');
+    });
+
+    it('should decode multiple decimal entities in a string', () => {
+      expect(decodeHTMLEntities('&#72;&#101;&#108;&#108;&#111;')).toBe('Hello');
+      expect(decodeHTMLEntities('Test &#65; and &#66;')).toBe('Test A and B');
+    });
+
+    it('should decode special characters as decimal entities', () => {
+      expect(decodeHTMLEntities('&#169;')).toBe('©'); // copyright
+      expect(decodeHTMLEntities('&#8364;')).toBe('€'); // euro
+      expect(decodeHTMLEntities('&#8220;')).toBe(String.fromCodePoint(8220)); // left double quote (curly)
+      expect(decodeHTMLEntities('&#8221;')).toBe(String.fromCodePoint(8221)); // right double quote (curly)
+    });
+
+    it('should decode zero as decimal entity', () => {
+      // Zero is technically a valid codepoint but may not render usefully
+      expect(decodeHTMLEntities('&#0;')).toBe(String.fromCodePoint(0));
+    });
+  });
+
+  describe('Hexadecimal Numeric Entities', () => {
+    it('should decode valid hexadecimal numeric entities', () => {
+      expect(decodeHTMLEntities('&#x41;')).toBe('A');
+      expect(decodeHTMLEntities('&#x42;')).toBe('B');
+      expect(decodeHTMLEntities('&#x5A;')).toBe('Z');
+      expect(decodeHTMLEntities('&#x61;')).toBe('a');
+      expect(decodeHTMLEntities('&#x7A;')).toBe('z');
+      expect(decodeHTMLEntities('&#x30;')).toBe('0');
+      expect(decodeHTMLEntities('&#x39;')).toBe('9');
+    });
+
+    it('should decode hexadecimal entities with lowercase letters', () => {
+      expect(decodeHTMLEntities('&#x1f600;')).toBe('😀'); // grinning face emoji
+      expect(decodeHTMLEntities('&#xa9;')).toBe('©'); // copyright
+    });
+
+    it('should decode hexadecimal entities with uppercase letters', () => {
+      expect(decodeHTMLEntities('&#x1F600;')).toBe('😀'); // grinning face emoji
+      expect(decodeHTMLEntities('&#xA9;')).toBe('©'); // copyright
+      expect(decodeHTMLEntities('&#XA9;')).toBe('&#XA9;'); // uppercase X should not match
+    });
+
+    it('should decode mixed case hexadecimal values', () => {
+      expect(decodeHTMLEntities('&#x1F4aF;')).toBe('💯'); // 100 points emoji
+    });
+
+    it('should decode special characters as hexadecimal entities', () => {
+      expect(decodeHTMLEntities('&#x20AC;')).toBe('€'); // euro
+      expect(decodeHTMLEntities('&#x201C;')).toBe(String.fromCodePoint(0x201C)); // left double quote (curly)
+      expect(decodeHTMLEntities('&#x201D;')).toBe(String.fromCodePoint(0x201D)); // right double quote (curly)
+    });
+  });
+
+  describe('Named Entities', () => {
+    it('should decode common named entities', () => {
+      expect(decodeHTMLEntities('&amp;')).toBe('&');
+      expect(decodeHTMLEntities('&lt;')).toBe('<');
+      expect(decodeHTMLEntities('&gt;')).toBe('>');
+      expect(decodeHTMLEntities('&quot;')).toBe('"');
+      expect(decodeHTMLEntities('&apos;')).toBe("'");
+      expect(decodeHTMLEntities('&nbsp;')).toBe(' ');
+    });
+
+    it('should decode multiple named entities in a string', () => {
+      expect(decodeHTMLEntities('&lt;div&gt;')).toBe('<div>');
+      expect(decodeHTMLEntities('Tom &amp; Jerry')).toBe('Tom & Jerry');
+      expect(decodeHTMLEntities('&quot;Hello&quot;')).toBe('"Hello"');
+    });
+
+    it('should preserve unknown named entities', () => {
+      expect(decodeHTMLEntities('&unknown;')).toBe('&unknown;');
+      expect(decodeHTMLEntities('&copy;')).toBe('&copy;'); // not in the map
+      expect(decodeHTMLEntities('&reg;')).toBe('&reg;'); // not in the map
+    });
+  });
+
+  describe('Invalid Code Points', () => {
+    it('should handle invalid numeric entities gracefully', () => {
+      // Code points outside valid Unicode range (> 0x10FFFF) should be preserved as-is
+      const result = decodeHTMLEntities('&#9999999;');
+      expect(result).toBe('&#9999999;'); // Should preserve the original entity
+    });
+
+    it('should handle negative numeric values', () => {
+      // Negative values in entities don't make sense but shouldn't crash
+      expect(decodeHTMLEntities('&#-1;')).toBe('&#-1;'); // Won't match the regex
+    });
+
+    it('should handle code points at the boundary of valid range', () => {
+      // 0x10FFFF is the maximum valid Unicode code point
+      expect(decodeHTMLEntities('&#1114111;')).toBe('\u{10FFFF}'); // 0x10FFFF in decimal
+      expect(decodeHTMLEntities('&#x10FFFF;')).toBe('\u{10FFFF}');
+      
+      // 0x110000 is beyond the valid range
+      expect(decodeHTMLEntities('&#1114112;')).toBe('&#1114112;'); // 0x110000 in decimal - should be preserved
+      expect(decodeHTMLEntities('&#x110000;')).toBe('&#x110000;'); // should be preserved
+    });
+  });
+
+  describe('Malformed Entities', () => {
+    it('should preserve malformed entities without semicolon', () => {
+      expect(decodeHTMLEntities('&amp')).toBe('&amp');
+      expect(decodeHTMLEntities('&#65')).toBe('&#65');
+      expect(decodeHTMLEntities('&#x41')).toBe('&#x41');
+    });
+
+    it('should preserve entities with invalid format', () => {
+      expect(decodeHTMLEntities('&#;')).toBe('&#;');
+      expect(decodeHTMLEntities('&#x;')).toBe('&#x;');
+      expect(decodeHTMLEntities('&;')).toBe('&;');
+    });
+
+    it('should preserve ampersand without entity format', () => {
+      expect(decodeHTMLEntities('This & that')).toBe('This & that');
+      expect(decodeHTMLEntities('R&D')).toBe('R&D');
+    });
+
+    it('should preserve entities with spaces', () => {
+      expect(decodeHTMLEntities('& amp;')).toBe('& amp;');
+      expect(decodeHTMLEntities('&# 65;')).toBe('&# 65;');
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should handle empty string', () => {
+      expect(decodeHTMLEntities('')).toBe('');
+    });
+
+    it('should handle null input', () => {
+      expect(decodeHTMLEntities(null)).toBe('');
+    });
+
+    it('should handle undefined input', () => {
+      expect(decodeHTMLEntities(undefined)).toBe('');
+    });
+
+    it('should handle non-string input', () => {
+      expect(decodeHTMLEntities(123)).toBe(123);
+      expect(decodeHTMLEntities(true)).toBe(true);
+      expect(decodeHTMLEntities(false)).toBe(''); // false is falsy, returns empty string
+      // Objects are not strings, so they are returned as-is (same reference)
+      const obj = {};
+      expect(decodeHTMLEntities(obj)).toBe(obj);
+    });
+
+    it('should handle string with no entities', () => {
+      expect(decodeHTMLEntities('Hello World')).toBe('Hello World');
+      expect(decodeHTMLEntities('No entities here!')).toBe('No entities here!');
+    });
+
+    it('should handle consecutive entities', () => {
+      expect(decodeHTMLEntities('&#65;&#66;&#67;')).toBe('ABC');
+      expect(decodeHTMLEntities('&lt;&gt;')).toBe('<>');
+      expect(decodeHTMLEntities('&amp;&amp;')).toBe('&&');
+    });
+
+    it('should handle mixed entity types in one string', () => {
+      expect(decodeHTMLEntities('&#65;&amp;&#x42;&lt;C&gt;')).toBe('A&B<C>');
+      expect(decodeHTMLEntities('Test &#169; &amp; &#x20AC;')).toBe('Test © & €');
+    });
+
+    it('should handle entities at string boundaries', () => {
+      expect(decodeHTMLEntities('&lt;')).toBe('<');
+      expect(decodeHTMLEntities('&#65;')).toBe('A');
+      expect(decodeHTMLEntities('&gt;end')).toBe('>end');
+      expect(decodeHTMLEntities('start&lt;')).toBe('start<');
+    });
+
+    it('should handle very long strings with entities', () => {
+      const longString = '&amp;'.repeat(1000);
+      const expected = '&'.repeat(1000);
+      expect(decodeHTMLEntities(longString)).toBe(expected);
+    });
+
+    it('should handle case sensitivity correctly', () => {
+      // Named entities are case-sensitive
+      expect(decodeHTMLEntities('&AMP;')).toBe('&AMP;'); // uppercase should not match
+      expect(decodeHTMLEntities('&Amp;')).toBe('&Amp;'); // mixed case should not match
+      
+      // Hex prefix is case-sensitive (lowercase 'x' only)
+      expect(decodeHTMLEntities('&#X41;')).toBe('&#X41;'); // uppercase X should not match
+    });
+  });
+
+  describe('Real-World Use Cases', () => {
+    it('should decode HTML snippet with entities', () => {
+      const html = '&lt;div class=&quot;content&quot;&gt;Hello &amp; Goodbye&lt;/div&gt;';
+      const expected = '<div class="content">Hello & Goodbye</div>';
+      expect(decodeHTMLEntities(html)).toBe(expected);
+    });
+
+    it('should decode news article text with quotes', () => {
+      const text = 'The CEO said, &quot;We&apos;re excited about this.&quot;';
+      const expected = 'The CEO said, "We\'re excited about this."';
+      expect(decodeHTMLEntities(text)).toBe(expected);
+    });
+
+    it('should decode mathematical expressions', () => {
+      expect(decodeHTMLEntities('5 &lt; 10 &amp; 10 &gt; 5')).toBe('5 < 10 & 10 > 5');
+      expect(decodeHTMLEntities('x &gt; 0')).toBe('x > 0');
+    });
+
+    it('should decode text with non-breaking spaces', () => {
+      expect(decodeHTMLEntities('Hello&nbsp;World')).toBe('Hello World');
+      expect(decodeHTMLEntities('Price:&nbsp;$100')).toBe('Price: $100');
+    });
+  });
+});
+
