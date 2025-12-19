@@ -60,7 +60,7 @@ const HTML_ENTITY_MAP = {
 };
 
 // Pre-compile the regex once
-// Using (?: ) for the outer group so it isn't captured in the arguments
+// Use a non-capturing outer group (?: ) and three inner capturing groups for dec, hex, and named entities
 const HTML_ENTITY_REGEX = /&(?:#(\d+)|#x([a-fA-F\d]+)|([a-zA-Z\d]+));/g;
 
 /**
