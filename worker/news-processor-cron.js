@@ -248,9 +248,10 @@ async function fetchArticleContent(url, enableDebug = false) {
     ];
     
     // Register remove handlers for each tag
-    // Note: HTMLRewriter already marks text nodes inside removed elements as t.removed === true.
-    // We still register both element and text handlers here to make the intent explicit and robust to
-    // any future changes in how text nodes are emitted for these tags.
+    // Note: Both element and text handlers are required. While HTMLRewriter marks text nodes inside
+    // removed elements as t.removed === true, testing has shown that without explicit text.remove(),
+    // text content from these tags can still be processed by subsequent handlers (like the wildcard
+    // TextExtractor below). Calling t.remove() ensures proper removal order.
     for (const tag of tagsToRemove) {
       rewriter.on(tag, { 
         element(e) { e.remove(); },
