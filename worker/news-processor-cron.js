@@ -74,13 +74,13 @@ function decodeHTMLEntities(str) {
       if (dec) {
         const codePoint = parseInt(dec, 10);
         // Validate code point is within valid Unicode range
-        if (codePoint < 0 || codePoint > 0x10FFFF) return match;
+        if (codePoint > 0x10FFFF) return match;
         return String.fromCodePoint(codePoint);
       }
       if (hex) {
         const codePoint = parseInt(hex, 16);
         // Validate code point is within valid Unicode range
-        if (codePoint < 0 || codePoint > 0x10FFFF) return match;
+        if (codePoint > 0x10FFFF) return match;
         return String.fromCodePoint(codePoint);
       }
       if (named) return HTML_ENTITY_MAP[named] || match;
