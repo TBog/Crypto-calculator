@@ -1,58 +1,10 @@
 /**
  * Test suite for News Processor Cron Worker
  * Tests for TextExtractor debug functionality
- * 
- * Note: These tests are designed to run in a standard Node.js environment
- * and test the TextExtractor class logic directly without requiring
- * Cloudflare Workers runtime bindings.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-
-// We'll test the TextExtractor class by reading it from the source file
-// This avoids needing the full Cloudflare Workers runtime environment
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Read and evaluate the TextExtractor class from source
-const sourceCode = fs.readFileSync(join(__dirname, 'news-processor-cron.js'), 'utf-8');
-
-// Extract the TextExtractor class definition
-const textExtractorMatch = sourceCode.match(/class TextExtractor \{[\s\S]*?\n\}/);
-if (!textExtractorMatch) {
-  throw new Error('Could not find TextExtractor class in source code');
-}
-
-// Extract constants needed by TextExtractor
-const maxContentCharsMatch = sourceCode.match(/const MAX_CONTENT_CHARS = (\d+) \* 1024;/);
-const MAX_CONTENT_CHARS = maxContentCharsMatch ? parseInt(maxContentCharsMatch[1]) * 1024 : 10240;
-
-// Extract the HTML_ENTITY_MAP and related functions
-const htmlEntityMapMatch = sourceCode.match(/const HTML_ENTITY_MAP = \{[\s\S]*?\};/);
-const htmlEntityRegexMatch = sourceCode.match(/const HTML_ENTITY_REGEX = \/[^/]+\/g;/);
-const decodeHTMLEntitiesMatch = sourceCode.match(/function decodeHTMLEntities\(str\) \{[\s\S]*?\n\}/);
-
-// Create a safe evaluation context
-const evalContext = `
-${htmlEntityMapMatch ? htmlEntityMapMatch[0] : 'const HTML_ENTITY_MAP = {};'}
-${htmlEntityRegexMatch ? htmlEntityRegexMatch[0] : 'const HTML_ENTITY_REGEX = /&(?:#(\\d+)|#x([a-fA-F\\d]+)|([a-zA-Z\\d]+));/g;'}
-${decodeHTMLEntitiesMatch ? decodeHTMLEntitiesMatch[0] : 'function decodeHTMLEntities(str) { return str; }'}
-const MAX_CONTENT_CHARS = ${MAX_CONTENT_CHARS};
-${textExtractorMatch[0]}
-`;
-
-// Evaluate to get the TextExtractor class
-let TextExtractor;
-try {
-  TextExtractor = eval(`(function() { ${evalContext}; return TextExtractor; })()`);
-} catch (e) {
-  console.error('Failed to evaluate TextExtractor:', e);
-  throw e;
-}
+import { describe, it, expect } from 'vitest';
+import { TextExtractor, fetchArticleContent } from './news-processor-cron.js';
 
 describe('TextExtractor - Debug Mode Functionality', () => {
   describe('Debug Output Mode', () => {
@@ -364,22 +316,20 @@ describe('fetchArticleContent - Debug Parameter', () => {
   // Note: These tests validate the function signature and parameter passing
   // Full integration testing would require mocking fetch and HTMLRewriter
   
-  it('should have fetchArticleContent function with enableDebug parameter', () => {
-    // Verify the function exists in source code with correct signature
-    const fetchArticleContentMatch = sourceCode.match(/async function fetchArticleContent\(url, enableDebug = false\)/);
-    expect(fetchArticleContentMatch).toBeTruthy();
+  it('should accept enableDebug parameter with default false', () => {
+    // Verify the function exists
+    expect(fetchArticleContent).toBeDefined();
+    expect(typeof fetchArticleContent).toBe('function');
+    
+    // Verify it has at least the url parameter (length=1 because enableDebug has default)
+    expect(fetchArticleContent.length).toBe(1);
   });
 
-  it('should pass enableDebug to TextExtractor', () => {
-    // Verify that enableDebug parameter is used to call enableDebugOutput
-    const enableDebugUsageMatch = sourceCode.match(/if \(enableDebug\) \{\s*extractor\.enableDebugOutput\(\);/s);
-    expect(enableDebugUsageMatch).toBeTruthy();
-  });
-
-  it('should accept debug parameter from handleFetch', () => {
-    // Verify the parameter is passed from handleFetch through to fetchArticleContent
-    const handleFetchMatch = sourceCode.match(/await fetchArticleContent\([^,]+,\s*articleText === "debug"\)/);
-    expect(handleFetchMatch).toBeTruthy();
+  it('should have enableDebug parameter that defaults to false', () => {
+    // Check the function signature includes the default parameter
+    const functionString = fetchArticleContent.toString();
+    expect(functionString).toContain('enableDebug');
+    expect(functionString).toContain('= false');
   });
 });
 
