@@ -73,13 +73,13 @@ function decodeHTMLEntities(str) {
     try {
       if (dec) {
         const codePoint = parseInt(dec, 10);
-        // Validate code point is within valid Unicode range
+        // Validate code point is within valid Unicode range (0x10FFFF is the maximum valid Unicode code point)
         if (codePoint > 0x10FFFF) return match;
         return String.fromCodePoint(codePoint);
       }
       if (hex) {
         const codePoint = parseInt(hex, 16);
-        // Validate code point is within valid Unicode range
+        // Validate code point is within valid Unicode range (0x10FFFF is the maximum valid Unicode code point)
         if (codePoint > 0x10FFFF) return match;
         return String.fromCodePoint(codePoint);
       }
