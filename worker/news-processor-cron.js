@@ -241,10 +241,10 @@ async function fetchArticleContent(url, enableDebug = false) {
     // This prevents text() handler from even waking up for content inside these tags
     const rewriter = new HTMLRewriter();
     
-    // Define static skip tags as an array for clarity and easy edits
+    // Define static skip tags as an array for clarity and easy editing
     const tagsToRemove = [
       'script', 'style', 'nav', 'header', 'footer', 'aside', 'menu',
-      'form', 'svg', 'canvas', 'iframe', 'noscript'
+      'form', 'svg', 'canvas', 'iframe', 'noscript', 'title'
     ];
     
     // Register remove handlers for each tag
