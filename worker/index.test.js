@@ -307,7 +307,6 @@ describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
     it('should use 1-minute cache for Bitcoin news', () => {
       const BITCOIN_NEWS_CACHE_TTL = 60; // 1 minute
       expect(BITCOIN_NEWS_CACHE_TTL).toBe(60);
-      expect(BITCOIN_NEWS_CACHE_TTL).toBeGreaterThanOrEqual(60); // At least 1 minute
       expect(BITCOIN_NEWS_CACHE_TTL).toBeLessThanOrEqual(600); // At most 10 minutes
     });
   });

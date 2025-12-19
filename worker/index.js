@@ -527,7 +527,7 @@ async function handleRequest(request, env, ctx) {
     'Access-Control-Allow-Origin': isAllowedOrigin ? origin : ALLOWED_ORIGINS[0],
     'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': CORS_MAX_AGE.toString(), // 24 hours
+    'Access-Control-Max-Age': CORS_MAX_AGE, // 24 hours
     'Access-Control-Expose-Headers': 'X-Cache-Status, X-Currency-Converted, X-Conversion-Warning, X-Exchange-Rate, X-Data-Source-Price, X-Data-Source-Exchange, X-Data-Source, X-Last-Updated, X-Cache-TTL, Cache-Control',
   };
 
