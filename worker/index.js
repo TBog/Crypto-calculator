@@ -34,6 +34,9 @@ const SUMMARY_CACHE_TTL = 600;
 // Cache duration for price history used in summaries (10 minutes in seconds)
 const PRICE_HISTORY_CACHE_TTL = 600;
 
+// Cache duration for market chart data (5 minutes in seconds)
+const MARKET_CHART_CACHE_TTL = 300;
+
 // Cache duration for Bitcoin news (1 minute in seconds)
 const BITCOIN_NEWS_CACHE_TTL = 60;
 
@@ -712,6 +715,16 @@ async function handleRequest(request, env, ctx) {
         newResponse.headers.set(key, value);
       });
       newResponse.headers.set('X-Cache-Status', 'HIT');
+
+      // Add cache metadata headers
+      // X-Last-Updated should already be in the cached response from when it was stored
+      // X-Cache-TTL is the TTL value for chart data
+      if (!newResponse.headers.has('X-Last-Updated')) {
+        // Fallback if header is missing - use current time (shouldn't happen with new code)
+        newResponse.headers.set('X-Last-Updated', Date.now().toString());
+      }
+      newResponse.headers.set('X-Cache-TTL', MARKET_CHART_CACHE_TTL.toString());
+      
       return newResponse;
     }
 
@@ -781,8 +794,8 @@ async function handleRequest(request, env, ctx) {
       }
     );
 
-    // Add cache control header (10 minutes = 600 seconds)
-    response.headers.set('Cache-Control', 'public, max-age=600');
+    // Add cache control header (5 minutes)
+    response.headers.set('Cache-Control', `public, max-age=${MARKET_CHART_CACHE_TTL}`);
     
     // Add CORS headers
     Object.entries(corsHeaders).forEach(([key, value]) => {
@@ -791,6 +804,10 @@ async function handleRequest(request, env, ctx) {
     
     // Add cache status header
     response.headers.set('X-Cache-Status', 'MISS');
+
+    // Add cache metadata headers for fresh data
+    response.headers.set('X-Last-Updated', Date.now().toString());
+    response.headers.set('X-Cache-TTL', MARKET_CHART_CACHE_TTL.toString());
     
     // Set proper content type only for JSON responses
     if (responseData) {
