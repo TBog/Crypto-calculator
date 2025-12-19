@@ -342,14 +342,8 @@ async function handleFetch(request, env) {
     // Prepare response data
     const articleIds = idIndexData && Array.isArray(idIndexData) ? idIndexData : [];
     const latestArticles = newsData.articles.slice(0, 10).map(article => ({
+      ...article,
       id: getArticleId(article),
-      title: article.title,
-      source: article.source_name || article.source_id,
-      sentiment: article.sentiment,
-      pubDate: article.pubDate,
-      link: article.link,
-      description: article.description,
-      ...(article.aiSummary && { aiSummary: article.aiSummary })
     }));
     
     const response = {
@@ -362,7 +356,7 @@ async function handleFetch(request, env) {
       latestArticles: latestArticles
     };
     
-    return new Response(JSON.stringify(response, null, 2), {
+    return new Response(JSON.stringify(response), {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
