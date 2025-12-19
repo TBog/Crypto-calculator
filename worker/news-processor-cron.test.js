@@ -388,7 +388,7 @@ describe('TextExtractor - Skip Pattern Detection', () => {
       removed: false,
       canHaveContent: true,
       selfClosing: false,
-      getAttribute: (attr) => attr === 'class' ? 'nav' : '', // Use 'nav' not 'navigation' - the regex looks for exact word match
+      getAttribute: (attr) => attr === 'class' ? 'nav' : '', // The regex requires word boundaries: 'nav' matches but 'navigation' doesn't
       onEndTag: (callback) => {
         endTagCallback = callback;
       }
