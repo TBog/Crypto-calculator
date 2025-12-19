@@ -576,6 +576,7 @@ async function handleFetch(request, env) {
     const url = new URL(request.url);
     const articleId = url.searchParams.get('articleId');
     const forceProcess = url.searchParams.has('force');
+    const articleText = url.searchParams.has('text');
     
     if (!articleId) {
       return new Response(JSON.stringify({
@@ -625,6 +626,24 @@ async function handleFetch(request, env) {
     }
     
     const article = newsData.articles[articleIndex];
+
+    // Check if we should return the article text
+    if (articleText) {
+      const content = await fetchArticleContent(article.link);
+      
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'Article text sent to AI for summary',
+        link: article.link,
+        content: content
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
     
     // Check if article needs processing
     const needsProcessing = forceProcess ||
