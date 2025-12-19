@@ -75,7 +75,7 @@ class TextExtractor {
   
   // Pre-compiled regex for pattern matching (much faster than array.some with includes)
   // Matches skip patterns in class names and IDs
-  static SKIP_REGEXP = /(?:^|\s)(nav|menu|header|footer|sidebar|aside|advertisement|ad-|promo|banner|widget|share|social|comment|related|recommend)(?:\s|$)/i;
+  static SKIP_REGEXP = /(?:^|\s)(nav|menu|menu-item|header|footer|sidebar|aside|advertisement|ad-|promo|banner|widget|share|social|comment|related|recommend)(?:\s|$)/i;
   
   constructor() {
     this.textChunks = [];
@@ -104,6 +104,7 @@ class TextExtractor {
   }
   
   element(element) {
+    // HTMLRewriter may invoke element handlers for nodes that have been removed
     if (element.removed) return;
 
     // Early exit if we already have enough content (saves CPU on large pages)
@@ -157,6 +158,7 @@ class TextExtractor {
   }
   
   text(text) {
+    // HTMLRewriter may invoke text handlers for nodes that have been removed
     if (text.removed) return;
 
     // Only extract text if we're not inside a skipped element and haven't reached limit
