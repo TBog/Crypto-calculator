@@ -799,6 +799,9 @@ async function handleFetch(request, env) {
   }
 }
 
+// Export for testing
+export { TextExtractor, fetchArticleContent };
+
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(handleScheduled(event, env));
