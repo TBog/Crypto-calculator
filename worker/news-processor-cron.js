@@ -70,25 +70,20 @@ function decodeHTMLEntities(str) {
   if (!str || typeof str !== 'string') return str || '';
 
   return str.replace(HTML_ENTITY_REGEX, (match, dec, hex, named) => {
-    try {
-      if (dec) {
-        const codePoint = parseInt(dec, 10);
-        // Validate code point is within valid Unicode range (0x10FFFF is the maximum valid Unicode code point)
-        if (codePoint > 0x10FFFF) return match;
-        return String.fromCodePoint(codePoint);
-      }
-      if (hex) {
-        const codePoint = parseInt(hex, 16);
-        // Validate code point is within valid Unicode range (0x10FFFF is the maximum valid Unicode code point)
-        if (codePoint > 0x10FFFF) return match;
-        return String.fromCodePoint(codePoint);
-      }
-      if (named) return HTML_ENTITY_MAP[named] || match;
-      return match;
-    } catch (e) {
-      // If String.fromCodePoint throws, return the original match
-      return match;
+    if (dec) {
+      const codePoint = parseInt(dec, 10);
+      // Validate code point is within valid Unicode range (0x10FFFF is the maximum valid Unicode code point)
+      if (codePoint > 0x10FFFF) return match;
+      return String.fromCodePoint(codePoint);
     }
+    if (hex) {
+      const codePoint = parseInt(hex, 16);
+      // Validate code point is within valid Unicode range (0x10FFFF is the maximum valid Unicode code point)
+      if (codePoint > 0x10FFFF) return match;
+      return String.fromCodePoint(codePoint);
+    }
+    if (named) return HTML_ENTITY_MAP[named] || match;
+    return match;
   });
 }
 
