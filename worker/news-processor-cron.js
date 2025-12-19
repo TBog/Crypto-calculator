@@ -54,21 +54,25 @@ function getArticleId(article) {
   return article.article_id || article.link || null;
 }
 
-const namedEntities = {
+const HTML_ENTITY_MAP = {
   'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'", 'nbsp': ' '
   // Add more common ones here as needed (e.g., 'copy': '©')
 };
+
+// Pre-compile the regex once
+// Using (?: ) for the outer group so it isn't captured in the arguments
+const HTML_ENTITY_REGEX = /&(?:#(\d+)|#x([a-fA-F\d]+)|([a-zA-Z\d]+));/g;
 
 /**
  * Minimal HTML entity decoder
  */
 function decodeHTMLEntities(str) {
-  if (!str) return '';
+  if (!str || typeof str !== 'string') return str || '';
 
-  return str.replace(/&(#(?<dec>\d+)|#x(?<hex>[a-fA-F\d]+)|(?<named>[a-zA-Z\d]+));/g, (match, p1, dec, hex, named) => {
+  return str.replace(HTML_ENTITY_REGEX, (match, dec, hex, named) => {
     if (dec) return String.fromCodePoint(parseInt(dec, 10));
     if (hex) return String.fromCodePoint(parseInt(hex, 16));
-    if (named) return namedEntities[named] || match; // Keep match if name unknown
+    if (named) return HTML_ENTITY_MAP[named] || match;
     return match;
   });
 }
