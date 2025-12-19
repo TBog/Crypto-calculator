@@ -659,7 +659,7 @@ async function handleFetch(request, env) {
 
     // Check if we should return the article text
     if (articleText) {
-      const content = await fetchArticleContent(article.link, articleText == "debug");
+      const content = await fetchArticleContent(article.link, articleText === "debug");
       
       return new Response(JSON.stringify({
         success: true,
