@@ -187,12 +187,12 @@ class TextExtractor {
 /**
  * Fetch article content from URL using HTMLRewriter for parsing
  * @param {string} url - Article URL
- * @param {boolean} dbg - Enable debug output in TextExtractor to show extracted element tags.
- *                        WARNING: Debug mode contaminates text with element markers and should
- *                        only be used for inspection/troubleshooting, NOT for production processing.
+ * @param {boolean} enableDebug - Enable debug output in TextExtractor to show extracted element tags.
+ *                                WARNING: Debug mode contaminates text with element markers and should
+ *                                only be used for inspection/troubleshooting, NOT for production processing.
  * @returns {Promise<string|null>} Article text content or null on error
  */
-async function fetchArticleContent(url, dbg = false) {
+async function fetchArticleContent(url, enableDebug = false) {
   try {
     const response = await fetch(url, {
       headers: {
@@ -207,7 +207,7 @@ async function fetchArticleContent(url, dbg = false) {
     }
     
     const extractor = new TextExtractor();
-    if (dbg) {
+    if (enableDebug) {
       extractor.setDebugOutput();
     }
     
