@@ -54,6 +54,25 @@ function getArticleId(article) {
   return article.article_id || article.link || null;
 }
 
+const namedEntities = {
+  'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'", 'nbsp': ' '
+  // Add more common ones here as needed (e.g., 'copy': '©')
+};
+
+/**
+ * Minimal HTML entity decoder
+ */
+function decodeHTMLEntities(str) {
+  if (!str) return '';
+
+  return str.replace(/&(#(?<dec>\d+)|#x(?<hex>[a-fA-F\d]+)|(?<named>[a-zA-Z\d]+));/g, (match, p1, dec, hex, named) => {
+    if (dec) return String.fromCodePoint(parseInt(dec, 10));
+    if (hex) return String.fromCodePoint(parseInt(hex, 16));
+    if (named) return namedEntities[named] || match; // Keep match if name unknown
+    return match;
+  });
+}
+
 /**
  * HTMLRewriter handler to extract text content from HTML
  * Optimized to skip headers, footers, menus, and other non-content elements
@@ -153,7 +172,7 @@ class TextExtractor {
     }
 
     if (this.debugOutput && this.skipDepth === 0) {
-      this.textChunks.push("[" + tagName + "]\n");
+      this.textChunks.push("[" + tagName + "]");
     }
   }
   
@@ -163,9 +182,10 @@ class TextExtractor {
 
     // Only extract text if we're not inside a skipped element and haven't reached limit
     if (this.skipDepth === 0 && this.charCount < this.maxChars) {
-      const content = text.text;
+      const content = decodeHTMLEntities(text.text);
       if (content && content.trim()) {
         if (this.debugOutput) {
+          // don't count the debug text in this.charCount to preserve the initial parsing amount
           this.textChunks.push("(" + this.lastElementTagName + ")");
         }
         this.textChunks.push(content);
