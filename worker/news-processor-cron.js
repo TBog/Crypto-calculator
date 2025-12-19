@@ -86,6 +86,19 @@ class TextExtractor {
     this.lastElementTagName = null;
   }
 
+  /**
+   * Enable debug output mode for text extraction.
+   * 
+   * WARNING: Debug mode is for inspection and troubleshooting only.
+   * When enabled, element tags like "[div]" and "(p)" are inserted into the extracted text,
+   * contaminating the actual article content. The resulting text should NOT be used for
+   * production processing, AI summarization, or any automated workflows.
+   * 
+   * Debug mode is useful for:
+   * - Understanding which HTML elements contributed to the extracted text
+   * - Debugging extraction issues and verifying skip patterns work correctly
+   * - Manual inspection and testing of the text extraction logic
+   */
   setDebugOutput() {
     this.debugOutput = true;
   }
@@ -174,7 +187,9 @@ class TextExtractor {
 /**
  * Fetch article content from URL using HTMLRewriter for parsing
  * @param {string} url - Article URL
- * @param {boolean} dbg - Enable debug output in TextExtractor to show extracted element tags
+ * @param {boolean} dbg - Enable debug output in TextExtractor to show extracted element tags.
+ *                        WARNING: Debug mode contaminates text with element markers and should
+ *                        only be used for inspection/troubleshooting, NOT for production processing.
  * @returns {Promise<string|null>} Article text content or null on error
  */
 async function fetchArticleContent(url, dbg = false) {
