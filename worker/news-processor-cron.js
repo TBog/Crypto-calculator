@@ -174,7 +174,7 @@ class TextExtractor {
 /**
  * Fetch article content from URL using HTMLRewriter for parsing
  * @param {string} url - Article URL
- * @param {boolean} dbg - Debug the HTMLRewriter and TextExtractor
+ * @param {boolean} dbg - Enable debug output in TextExtractor to show extracted element tags
  * @returns {Promise<string|null>} Article text content or null on error
  */
 async function fetchArticleContent(url, dbg = false) {
