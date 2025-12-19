@@ -82,14 +82,23 @@ class TextExtractor {
     this.charCount = 0;
     this.maxChars = MAX_CONTENT_CHARS;
     this.skipDepth = 0; // Track depth of skipped elements (for dynamic patterns only)
+    this.debugOutput = false;
+    this.lastElementTagName = null;
+  }
+
+  setDebugOutput() {
+    this.debugOutput = true;
   }
   
   element(element) {
+    if (element.removed) return;
+
     // Early exit if we already have enough content (saves CPU on large pages)
     if (this.charCount >= this.maxChars) return;
-    
+
     const tagName = element.tagName.toLowerCase();
-    
+    this.lastElementTagName = tagName;
+
     // Check if this element can have content and closing tag
     const canHaveEndTag = element.canHaveContent && !element.selfClosing;
     
@@ -128,13 +137,22 @@ class TextExtractor {
         // Self-closing elements don't need depth tracking - no content to skip
       }
     }
+
+    if (this.debugOutput && this.skipDepth === 0) {
+      this.textChunks.push("[" + tagName + "]\n");
+    }
   }
   
   text(text) {
+    if (text.removed) return;
+
     // Only extract text if we're not inside a skipped element and haven't reached limit
     if (this.skipDepth === 0 && this.charCount < this.maxChars) {
       const content = text.text;
       if (content && content.trim()) {
+        if (this.debugOutput) {
+          this.textChunks.push("(" + this.lastElementTagName + ")");
+        }
         this.textChunks.push(content);
         this.charCount += content.length;
       }
@@ -156,9 +174,10 @@ class TextExtractor {
 /**
  * Fetch article content from URL using HTMLRewriter for parsing
  * @param {string} url - Article URL
+ * @param {boolean} dbg - Debug the HTMLRewriter and TextExtractor
  * @returns {Promise<string|null>} Article text content or null on error
  */
-async function fetchArticleContent(url) {
+async function fetchArticleContent(url, dbg = false) {
   try {
     const response = await fetch(url, {
       headers: {
@@ -173,18 +192,29 @@ async function fetchArticleContent(url) {
     }
     
     const extractor = new TextExtractor();
+    if (dbg) {
+      extractor.setDebugOutput();
+    }
     
     // Use element.remove() for static skip tags (more efficient - removes at Rust level)
     // This prevents text() handler from even waking up for content inside these tags
     const rewriter = new HTMLRewriter();
     
-    // Register remove handlers for all static skip tags
-    const tagsToRemove = 'script, style, nav, header, footer, aside, menu, form, svg, canvas, iframe, noscript';
-    rewriter.on(tagsToRemove, {
-        element(e) { e.remove(); }
-      });
+    // Define static skip tags as an array for clarity and easy edits
+    const tagsToRemove = [
+      'script', 'style', 'nav', 'header', 'footer', 'aside', 'menu',
+      'form', 'svg', 'canvas', 'iframe', 'noscript'
+    ];
     
-    // Register the text extractor for all elements
+    // Register remove handlers for each tag
+    for (const tag of tagsToRemove) {
+      rewriter.on(tag, { 
+        element(e) { e.remove(); },
+        text(t) { t.remove(); } 
+      });
+    }
+
+    // Register the text extractor for all other elements
     rewriter.on('*', extractor);
     
     const transformed = rewriter.transform(response);
@@ -576,7 +606,7 @@ async function handleFetch(request, env) {
     const url = new URL(request.url);
     const articleId = url.searchParams.get('articleId');
     const forceProcess = url.searchParams.has('force');
-    const articleText = url.searchParams.has('text');
+    const articleText = url.searchParams.get('text');
     
     if (!articleId) {
       return new Response(JSON.stringify({
@@ -629,7 +659,7 @@ async function handleFetch(request, env) {
 
     // Check if we should return the article text
     if (articleText) {
-      const content = await fetchArticleContent(article.link);
+      const content = await fetchArticleContent(article.link, articleText == "debug");
       
       return new Response(JSON.stringify({
         success: true,
