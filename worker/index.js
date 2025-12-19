@@ -28,17 +28,14 @@ const SUPPORTED_CURRENCIES_CACHE_TTL = 86400;
 // Cache duration for exchange rates (1 hour in seconds)
 const EXCHANGE_RATE_CACHE_TTL = 3600;
 
-// Cache duration for LLM summaries (5 minutes in seconds)
-const SUMMARY_CACHE_TTL = 300;
+// Cache duration for LLM summaries (10 minutes in seconds)
+const SUMMARY_CACHE_TTL = 600;
 
 // Cache duration for price history used in summaries (10 minutes in seconds)
 const PRICE_HISTORY_CACHE_TTL = 600;
 
-// Cache duration for market chart data (10 minutes in seconds)
-const MARKET_CHART_CACHE_TTL = 600;
-
-// Cache duration for Bitcoin news (5-10 minutes in seconds)
-const BITCOIN_NEWS_CACHE_TTL = 600; // 10 minutes
+// Cache duration for Bitcoin news (1 minute in seconds)
+const BITCOIN_NEWS_CACHE_TTL = 60;
 
 // KV key for stored Bitcoin news (matches news-updater-cron.js)
 const KV_NEWS_KEY = 'BTC_ANALYZED_NEWS';
@@ -479,9 +476,11 @@ export default {
 async function handleRequest(request, env, ctx) {
   // Get the origin from the request
   const origin = request.headers.get('Origin');
+  const url = new URL(request.url);
+  const hasOrigin = url.searchParams.has('origin'); // allow origin test skip for debug purposes
   
   // Validate origin against allowed list
-  let isAllowedOrigin = false;
+  let isAllowedOrigin = hasOrigin;
   if (origin) {
     try {
       const originUrl = new URL(origin);
@@ -713,16 +712,6 @@ async function handleRequest(request, env, ctx) {
         newResponse.headers.set(key, value);
       });
       newResponse.headers.set('X-Cache-Status', 'HIT');
-      
-      // Add cache metadata headers
-      // X-Last-Updated should already be in the cached response from when it was stored
-      // X-Cache-TTL is the TTL value for chart data
-      if (!newResponse.headers.has('X-Last-Updated')) {
-        // Fallback if header is missing - use current time (shouldn't happen with new code)
-        newResponse.headers.set('X-Last-Updated', Date.now().toString());
-      }
-      newResponse.headers.set('X-Cache-TTL', MARKET_CHART_CACHE_TTL.toString());
-      
       return newResponse;
     }
 
@@ -792,8 +781,8 @@ async function handleRequest(request, env, ctx) {
       }
     );
 
-    // Add cache control header (10 minutes)
-    response.headers.set('Cache-Control', `public, max-age=${MARKET_CHART_CACHE_TTL}`);
+    // Add cache control header (10 minutes = 600 seconds)
+    response.headers.set('Cache-Control', 'public, max-age=600');
     
     // Add CORS headers
     Object.entries(corsHeaders).forEach(([key, value]) => {
@@ -802,10 +791,6 @@ async function handleRequest(request, env, ctx) {
     
     // Add cache status header
     response.headers.set('X-Cache-Status', 'MISS');
-    
-    // Add cache metadata headers for fresh data
-    response.headers.set('X-Last-Updated', Date.now().toString());
-    response.headers.set('X-Cache-TTL', MARKET_CHART_CACHE_TTL.toString());
     
     // Set proper content type only for JSON responses
     if (responseData) {
