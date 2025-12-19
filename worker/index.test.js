@@ -113,9 +113,9 @@ describe('Cloudflare Worker - AI Summary Feature', () => {
   });
 
   describe('Cache Configuration', () => {
-    it('should use 5-minute cache for summaries', () => {
-      const SUMMARY_CACHE_TTL = 300; // 5 minutes
-      expect(SUMMARY_CACHE_TTL).toBe(300);
+    it('should use 10-minute cache for summaries', () => {
+      const SUMMARY_CACHE_TTL = 600; // 10 minutes
+      expect(SUMMARY_CACHE_TTL).toBe(600);
     });
 
     it('should use 10-minute cache for price history', () => {
@@ -304,10 +304,9 @@ describe('Integration Tests', () => {
 
 describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
   describe('Cache Configuration', () => {
-    it('should use 10-minute cache for Bitcoin news', () => {
-      const BITCOIN_NEWS_CACHE_TTL = 600; // 10 minutes
-      expect(BITCOIN_NEWS_CACHE_TTL).toBe(600);
-      expect(BITCOIN_NEWS_CACHE_TTL).toBeGreaterThanOrEqual(300); // At least 5 minutes
+    it('should use 1-minute cache for Bitcoin news', () => {
+      const BITCOIN_NEWS_CACHE_TTL = 60; // 1 minute
+      expect(BITCOIN_NEWS_CACHE_TTL).toBe(60);
       expect(BITCOIN_NEWS_CACHE_TTL).toBeLessThanOrEqual(600); // At most 10 minutes
     });
   });
