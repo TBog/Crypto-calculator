@@ -122,7 +122,7 @@ class TextExtractor {
    * - Debugging extraction issues and verifying skip patterns work correctly
    * - Manual inspection and testing of the text extraction logic
    */
-  setDebugOutput() {
+  enableDebugOutput() {
     this.debugOutput = true;
   }
   
@@ -234,7 +234,7 @@ async function fetchArticleContent(url, enableDebug = false) {
     
     const extractor = new TextExtractor();
     if (enableDebug) {
-      extractor.setDebugOutput();
+      extractor.enableDebugOutput();
     }
     
     // Use element.remove() for static skip tags (more efficient - removes at Rust level)
