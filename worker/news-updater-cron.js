@@ -2,15 +2,21 @@
  * Scheduled Cloudflare Worker for Bitcoin News Aggregation & Analysis
  * 
  * This worker runs on a cron schedule (hourly) to:
- * 1. Fetch Bitcoin articles from NewsData.io using pagination with early-exit optimization
- * 2. Analyze sentiment of each article using Gemini API
+ * 1. Fetch Bitcoin articles from configured news provider (NewsData.io or APITube)
+ * 2. Normalize articles to standard format
  * 3. Store enriched data in Cloudflare KV for fast retrieval
+ * 
+ * Provider selection via NEWS_PROVIDER environment variable:
+ * - 'newsdata' = NewsData.io (default, requires sentiment analysis)
+ * - 'apitube' = APITube (includes sentiment)
  * 
  * This approach optimizes API credit usage by:
  * - Running on a schedule (not per-request)
  * - Early-exit when hitting known articles (stops fetching old data)
  * - Using separate ID index for fast deduplication
  */
+
+import { createNewsProvider, getArticleId } from './news-providers.js';
 
 // KV keys for optimized storage
 const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';  // Full articles payload
@@ -26,48 +32,6 @@ const MAX_PAGES = 15;
 const ID_INDEX_TTL = 60 * 60 * 24 * 30;
 
 /**
- * Get article ID from article object
- * Uses article_id as primary identifier, falls back to link
- * @param {Object} article - Article object
- * @returns {string|null} Article ID or null if not available
- */
-function getArticleId(article) {
-  return article.article_id || article.link || null;
-}
-
-/**
- * Fetch articles from NewsData.io with pagination support
- * @param {string} apiKey - NewsData.io API key
- * @param {string|null} nextPage - Pagination token from previous response
- * @returns {Promise<{articles: Array, nextPage: string|null, totalResults: number}>}
- */
-async function fetchNewsPage(apiKey, nextPage = null) {
-  const newsUrl = new URL('https://newsdata.io/api/1/crypto');
-  newsUrl.searchParams.set('apikey', apiKey);
-  newsUrl.searchParams.set('coin', 'btc');
-  newsUrl.searchParams.set('language', 'en');
-  newsUrl.searchParams.set('removeduplicate', '1');
-  
-  if (nextPage) {
-    newsUrl.searchParams.set('page', nextPage);
-  }
-  
-  const response = await fetch(newsUrl.toString());
-  
-  if (!response.ok) {
-    throw new Error(`NewsData.io API request failed: ${response.status}`);
-  }
-  
-  const data = await response.json();
-  
-  return {
-    articles: data.results || [],
-    nextPage: data.nextPage || null,
-    totalResults: data.totalResults || 0
-  };
-}
-
-/**
  * Fetch and aggregate articles with early-exit optimization
  * Stops pagination immediately when a known article is encountered
  * @param {Object} env - Environment variables
@@ -75,10 +39,8 @@ async function fetchNewsPage(apiKey, nextPage = null) {
  * @returns {Promise<Array>} Array of new articles
  */
 async function aggregateArticles(env, knownIds) {
-  const apiKey = env.NEWSDATA_API_KEY;
-  if (!apiKey) {
-    throw new Error('NEWSDATA_API_KEY not configured');
-  }
+  // Create provider based on environment configuration
+  const provider = createNewsProvider(env);
   
   let newArticles = [];
   let nextPage = null;
@@ -86,14 +48,14 @@ async function aggregateArticles(env, knownIds) {
   let creditsUsed = 0;
   let earlyExitTriggered = false;
   
-  console.log('Starting article aggregation with early-exit optimization...');
+  console.log(`Starting article aggregation with ${provider.name}...`);
   console.log(`Known article IDs: ${knownIds.size}`);
   
   // Pagination loop with early exit
   do {
     try {
       console.log(`Fetching page ${pageCount + 1}...`);
-      const pageData = await fetchNewsPage(apiKey, nextPage);
+      const pageData = await provider.fetchPage(nextPage);
       creditsUsed++;
       
       // Check each article in this page
@@ -115,8 +77,9 @@ async function aggregateArticles(env, knownIds) {
           continue;
         }
         
-        // Add new article to collection
-        newArticles.push(article);
+        // Normalize and add new article to collection
+        const normalizedArticle = provider.normalizeArticle(article);
+        newArticles.push(normalizedArticle);
         knownIds.add(articleId);
       }
       
@@ -160,23 +123,27 @@ async function aggregateArticles(env, knownIds) {
  * we mark them with flags indicating what processing is needed.
  * A separate cron worker will process them incrementally.
  * 
+ * Articles from providers with built-in sentiment (like APITube) will have
+ * needsSentiment set to false, while others will need AI sentiment analysis.
+ * 
  * @param {Array} articles - Array of articles to mark for processing
  * @returns {Promise<Array>} Articles marked with processing flags
  */
 async function markArticlesForProcessing(articles) {
   console.log(`Marking ${articles.length} articles for processing...`);
   
-  const markedArticles = articles.map(article => ({
-    ...article,
-    // Postprocessing flags (set to true for tasks that need to be done)
-    needsSentiment: true,      // Needs sentiment analysis
-    needsSummary: true,        // Needs AI summary generation
-    // contentTimeout not set initially (only set if fetch times out)
-    queuedAt: Date.now()       // Timestamp for tracking
-  }));
+  // Articles are already normalized by the provider with appropriate flags
+  // (needsSentiment, needsSummary, sentiment if available)
+  // No additional marking needed - just log for tracking
   
-  console.log(`Marked ${markedArticles.length} articles for AI processing`);
-  return markedArticles;
+  const needsSentimentCount = articles.filter(a => a.needsSentiment).length;
+  const hasSentimentCount = articles.filter(a => !a.needsSentiment && a.sentiment).length;
+  
+  console.log(`- ${needsSentimentCount} articles need sentiment analysis`);
+  console.log(`- ${hasSentimentCount} articles already have sentiment`);
+  console.log(`- ${articles.length} articles need AI summary`);
+  
+  return articles;
 }
 
 /**

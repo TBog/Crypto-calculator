@@ -22,11 +22,15 @@ id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID_FROM_STEP_2"
 
 # Environment bindings
 # The NEWSDATA_API_KEY should be set using: wrangler secret put NEWSDATA_API_KEY
-# This keeps the API key secure and out of version control
+# The APITUBE_API_KEY should be set using: wrangler secret put APITUBE_API_KEY
+# The NEWS_PROVIDER should be set using: wrangler secret put NEWS_PROVIDER
+#   - Set to 'newsdata' for NewsData.io (default if not set)
+#   - Set to 'apitube' for APITube
+# This keeps the API keys secure and out of version control
 
 [env.production]
 # Production environment configuration
-# Secrets are automatically available in env.NEWSDATA_API_KEY
+# Secrets are automatically available in env.NEWSDATA_API_KEY, env.APITUBE_API_KEY, and env.NEWS_PROVIDER
 [[env.production.kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with production KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production

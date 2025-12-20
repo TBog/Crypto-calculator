@@ -34,6 +34,8 @@
  * - Reduces neuron usage by 50-70%, maximizing daily 10,000 neuron budget on Free Tier
  */
 
+import { getArticleId } from './news-providers.js';
+
 // KV keys (must match news-updater-cron.js)
 const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';
 const KV_KEY_IDS = 'BTC_ID_INDEX';
@@ -44,15 +46,6 @@ const MAX_ARTICLES_PER_RUN = 5;
 
 // Maximum characters to extract from webpage (128KB limit for AI context)
 const MAX_CONTENT_CHARS = 10 * 1024;
-
-/**
- * Get article ID from article object
- * @param {Object} article - Article object
- * @returns {string|null} Article ID or null if not available
- */
-function getArticleId(article) {
-  return article.article_id || article.link || null;
-}
 
 const HTML_ENTITY_MAP = {
   'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'", 'nbsp': ' '
