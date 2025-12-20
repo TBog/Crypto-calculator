@@ -85,48 +85,74 @@ This document provides examples of how articles are processed by different news 
 ### Raw API Response
 ```json
 {
-  "articles": [
+  "data": [
     {
-      "id": "apitube_67890",
+      "id": 67890,
+      "href": "https://example.com/bitcoin-adoption",
       "title": "Bitcoin Adoption Grows in Latin America",
       "description": "Latin American countries are seeing increased Bitcoin adoption...",
-      "url": "https://example.com/bitcoin-adoption",
       "published_at": "2025-01-15T12:00:00Z",
-      "sentiment": "positive",        // ← Already included!
-      "sentiment_score": 0.78,
-      "source": {
-        "id": "btc_journal",
-        "name": "Bitcoin Journal",
-        "url": "https://btcjournal.com",
-        "icon": "https://btcjournal.com/icon.png"
+      "language": "en",
+      "image": "https://example.com/adoption-image.jpg",
+      "sentiment": {
+        "overall": {
+          "score": 0.78,
+          "polarity": "positive"
+        },
+        "title": {
+          "score": 0.82,
+          "polarity": "positive"
+        },
+        "body": {
+          "score": 0.75,
+          "polarity": "positive"
+        }
       },
-      "image": "https://example.com/adoption-image.jpg"
+      "source": {
+        "id": 1,
+        "name": "Bitcoin Journal",
+        "uri": "https://btcjournal.com",
+        "favicon": "https://btcjournal.com/favicon.ico"
+      },
+      "categories": [
+        {
+          "id": 1,
+          "name": "cryptocurrency",
+          "score": 0.95
+        }
+      ]
     }
   ],
-  "next": "cursor_abc123",
-  "total": 200
+  "meta": {
+    "total": 200,
+    "page": 1,
+    "per_page": 10
+  },
+  "links": {
+    "next_page": "https://api.apitube.io/v1/news/everything?page=2"
+  }
 }
 ```
 
 ### After Normalization
 ```json
 {
-  "article_id": "apitube_67890",
+  "article_id": 67890,
   "title": "Bitcoin Adoption Grows in Latin America",
   "description": "Latin American countries are seeing increased Bitcoin adoption...",
   "link": "https://example.com/bitcoin-adoption",
   "pubDate": "2025-01-15T12:00:00Z",
-  "source_id": "btc_journal",
+  "source_id": 1,
   "source_name": "Bitcoin Journal",
   "source_url": "https://btcjournal.com",
-  "source_icon": "https://btcjournal.com/icon.png",
+  "source_icon": "https://btcjournal.com/favicon.ico",
   "image_url": "https://example.com/adoption-image.jpg",
   "language": "en",
   "country": undefined,
-  "category": "crypto",
+  "category": "cryptocurrency",
   
   // Added by provider
-  "sentiment": "positive",      // ← Already from APITube!
+  "sentiment": "positive",      // ← Extracted from sentiment.overall.polarity!
   "needsSentiment": false,      // ← No AI sentiment needed
   "needsSummary": true,         // ← Still needs AI summary
   "queuedAt": 1705318800000
@@ -183,32 +209,96 @@ Total: ~5 minutes + 5 seconds (1 second faster!)
 
 ## Sentiment Score Examples (APITube)
 
-APITube may provide sentiment as either a string or a numeric score. The provider normalizes both formats:
+APITube provides sentiment as an object with three components: overall, title, and body. Each contains a score (-1 to 1) and polarity (positive/negative/neutral). The provider uses the overall polarity:
 
-### String Format
+### APITube Sentiment Object Format
 ```javascript
 // Input
+{
+  "sentiment": {
+    "overall": {
+      "score": 0.78,
+      "polarity": "positive"
+    },
+    "title": {
+      "score": 0.82,
+      "polarity": "positive"
+    },
+    "body": {
+      "score": 0.75,
+      "polarity": "positive"
+    }
+  }
+}
+// Normalized → "positive" (from overall.polarity)
+
+// Negative example
+{
+  "sentiment": {
+    "overall": {
+      "score": -0.65,
+      "polarity": "negative"
+    },
+    "title": {
+      "score": -0.70,
+      "polarity": "negative"
+    },
+    "body": {
+      "score": -0.60,
+      "polarity": "negative"
+    }
+  }
+}
+// Normalized → "negative" (from overall.polarity)
+
+// Neutral example
+{
+  "sentiment": {
+    "overall": {
+      "score": 0.05,
+      "polarity": "neutral"
+    }
+  }
+}
+// Normalized → "neutral" (from overall.polarity)
+```
+
+### Fallback to Score (if polarity missing)
+```javascript
+// Input with score only
+{
+  "sentiment": {
+    "overall": { "score": 0.85 }
+  }
+}
+// Normalized → "positive" (score > 0.1)
+
+{
+  "sentiment": {
+    "overall": { "score": -0.60 }
+  }
+}
+// Normalized → "negative" (score < -0.1)
+
+{
+  "sentiment": {
+    "overall": { "score": 0.05 }
+  }
+}
+// Normalized → "neutral" (between -0.1 and 0.1)
+```
+
+### Legacy Format Support
+The provider also supports legacy string and numeric formats for backward compatibility:
+
+```javascript
+// Legacy string format
 { "sentiment": "positive" }
 // Normalized → "positive"
 
-{ "sentiment": "NEGATIVE" }
-// Normalized → "negative"
-
-{ "sentiment": "neutral" }
-// Normalized → "neutral"
-```
-
-### Numeric Score Format (0-1 scale)
-```javascript
-// Input
+// Legacy numeric format
 { "sentiment_score": 0.85 }
 // Normalized → "positive" (score > 0.1)
-
-{ "sentiment_score": -0.60 }
-// Normalized → "negative" (score < -0.1)
-
-{ "sentiment_score": 0.05 }
-// Normalized → "neutral" (between -0.1 and 0.1)
 ```
 
 ## Handling Missing Data

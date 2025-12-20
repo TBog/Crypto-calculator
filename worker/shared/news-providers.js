@@ -10,40 +10,28 @@
  * - Set to 'apitube' for APITube
  * 
  * ============================================================================
- * IMPORTANT: APITube Configuration
+ * APITube Configuration (verified against official documentation)
  * ============================================================================
  * 
- * The APITube provider implementation is based on common REST API patterns.
- * Before deploying to production, you MUST verify and update the following
- * in the APITubeProvider class:
+ * The APITube provider has been configured based on the official API docs at:
+ * https://docs.apitube.io/platform/news-api/response-structure
  * 
- * 1. API Endpoint (line ~120):
- *    const newsUrl = new URL('https://api.apitube.io/v1/news/crypto');
- *    → Update with actual APITube endpoint URL
+ * Key fields used:
+ * - id (integer): Unique article identifier
+ * - href (string): Article URL
+ * - title (string): Article headline
+ * - description (string): Brief description (may be absent)
+ * - published_at (string): Publication date in ISO 8601 format
+ * - language (string): Language in ISO 639-1 format (e.g., "en")
+ * - image (string): Main image URL (may be absent)
+ * - source (object): { id, name, uri, favicon }
+ * - sentiment (object): { overall: { score, polarity }, title: {...}, body: {...} }
+ * - categories (array): Array of category objects with name field
  * 
- * 2. Authentication Method (line ~138):
- *    Currently uses: Authorization: Bearer <token>
- *    → Verify this matches APITube's authentication
- *    → Alternative: Use 'x-api-key' or URL parameter if required
- * 
- * 3. Query Parameters (lines ~124-125):
- *    coin: 'bitcoin', language: 'en'
- *    → Verify parameter names match APITube's API
- * 
- * 4. Pagination Style (line ~130):
- *    Currently assumes: ?page=<number>
- *    → Update if APITube uses cursor-based pagination
- * 
- * 5. Response Structure (lines ~148-151):
- *    Expected: { articles: [], next: '', total: 0 }
- *    → Update field names based on actual response
- * 
- * 6. Sentiment Field (line ~171):
- *    Expected: article.sentiment or article.sentiment_score
- *    → Update based on actual APITube response format
- * 
- * Refer to APITube's official API documentation to configure these values.
- * Test thoroughly before using in production.
+ * BEFORE PRODUCTION:
+ * 1. Verify API endpoint URL (currently: https://api.apitube.io/v1/news/everything)
+ * 2. Confirm authentication method (currently: Bearer token)
+ * 3. Test with actual APITube API key and Bitcoin/crypto news queries
  * 
  * ============================================================================
  */
@@ -141,40 +129,52 @@ class APITubeProvider {
   /**
    * Fetch a page of articles from APITube
    * 
-   * IMPORTANT: This implementation is based on common API patterns.
-   * Before using in production, verify against actual APITube documentation:
+   * Based on APITube official documentation:
+   * https://docs.apitube.io/platform/news-api/endpoints
    * 
-   * 1. API Endpoint URL - Update base URL if different
-   * 2. Authentication Method - Currently using Bearer token in Authorization header
-   *    (apikey URL parameter is commented out as alternative)
-   * 3. Pagination Style - Currently assumes numeric page-based pagination
-   *    (cursor-based pagination code is commented as alternative)
-   * 4. Query Parameters - Verify parameter names match APITube's API
+   * Configuration notes:
+   * 1. Endpoint: /v1/news/everything (general news endpoint)
+   * 2. Authentication: Bearer token in Authorization header
+   * 3. Pagination: Uses 'page' parameter with 'next_page' URL in response
+   * 4. Query Parameters: Customize based on needs (language, categories, etc.)
    * 
-   * @param {string|null} nextPage - Pagination token or page number
+   * @param {string|null} nextPage - Page number or URL for next page
    * @returns {Promise<{articles: Array, nextPage: string|null, totalResults: number}>}
    */
   async fetchPage(nextPage = null) {
-    // TODO: Verify this endpoint with actual APITube documentation
-    const newsUrl = new URL('https://api.apitube.io/v1/news/crypto');
+    // APITube endpoint for general news
+    // For crypto-specific news, you may want to filter by category or keywords
+    const newsUrl = new URL('https://api.apitube.io/v1/news/everything');
     
-    // Query parameters - verify with APITube docs
-    // NOTE: apikey parameter removed - using Authorization header instead
-    newsUrl.searchParams.set('coin', 'bitcoin');
+    // Query parameters - customize based on your needs
+    // Example: Filter by language, categories, keywords, etc.
     newsUrl.searchParams.set('language', 'en');
+    // Add crypto-specific filters if needed:
+    // newsUrl.searchParams.set('q', 'bitcoin OR cryptocurrency');
+    // or use categories/topics if APITube provides crypto category
     
-    // Handle pagination - verify pagination style with APITube docs
+    // Handle pagination
     if (nextPage) {
-      // Current assumption: numeric page-based pagination
-      newsUrl.searchParams.set('page', nextPage);
-      
-      // Alternative: If APITube uses cursor-based pagination, use this instead:
-      // newsUrl.searchParams.set('cursor', nextPage);
+      // If nextPage is a full URL (from next_page in response), use it directly
+      // Otherwise, treat it as a page number
+      if (nextPage.startsWith('http')) {
+        return this.fetchFromUrl(nextPage);
+      } else {
+        newsUrl.searchParams.set('page', nextPage);
+      }
     }
     
-    // Authentication via Bearer token (recommended for security)
-    // TODO: Verify this authentication method with APITube docs
-    const response = await fetch(newsUrl.toString(), {
+    return this.fetchFromUrl(newsUrl.toString());
+  }
+  
+  /**
+   * Helper method to fetch from a URL
+   * @param {string} url - Full URL to fetch from
+   * @returns {Promise<{articles: Array, nextPage: string|null, totalResults: number}>}
+   */
+  async fetchFromUrl(url) {
+    // Authentication via Bearer token
+    const response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json'
@@ -187,39 +187,59 @@ class APITubeProvider {
     
     const data = await response.json();
     
-    // Adjust based on actual APITube response structure
+    // Parse APITube response structure
+    // Response includes: { data: [...], meta: { ... }, links: { next_page, ... } }
     return {
-      articles: data.articles || data.results || data.data || [],
-      nextPage: data.nextPage || data.next || data.cursor || null,
-      totalResults: data.total || data.totalResults || 0
+      articles: data.data || data.articles || [],
+      nextPage: data.links?.next_page || data.next_page || null,
+      totalResults: data.meta?.total || data.total || 0
     };
   }
 
   /**
    * Normalize article to standard format
    * APITube includes sentiment, so we don't need to mark for AI sentiment analysis
-   * @param {Object} article - Raw article from provider
-   * @returns {Object} Normalized article
+   * 
+   * APITube Response Structure:
+   * - id: integer (unique identifier)
+   * - href: string (article URL)
+   * - title: string
+   * - description: string (may be absent)
+   * - body: string (full text without HTML)
+   * - published_at: string (ISO 8601)
+   * - language: string (ISO 639-1, e.g., "en")
+   * - image: string (URL, may be absent)
+   * - source: { id, name, uri, favicon }
+   * - sentiment: { overall: { score, polarity }, title: {...}, body: {...} }
+   * - categories: array of category objects
+   * 
+   * @param {Object} article - Raw article from APITube
+   * @returns {Object} Normalized article in standard format
    */
   normalizeArticle(article) {
     // Map APITube sentiment to our standard format (positive/negative/neutral)
-    // Adjust field names based on actual APITube response
-    const sentiment = this.normalizeSentiment(article.sentiment || article.sentiment_score);
+    // APITube provides: { sentiment: { overall: { score, polarity }, title: {...}, body: {...} } }
+    const sentiment = this.normalizeSentiment(article.sentiment);
+    
+    // Extract first category name if categories array exists
+    const category = article.categories && article.categories.length > 0 
+      ? article.categories[0].name 
+      : 'crypto';
     
     return {
       article_id: article.id || article.article_id,
       title: article.title,
-      description: article.description || article.summary,
-      link: article.url || article.link,
+      description: article.description || '',
+      link: article.href || article.url || article.link,
       pubDate: article.published_at || article.pubDate || article.date,
       source_id: article.source?.id || article.source_id,
       source_name: article.source?.name || article.source_name,
-      source_url: article.source?.url || article.source_url,
-      source_icon: article.source?.icon || article.source_icon,
+      source_url: article.source?.uri || article.source?.url || article.source_url,
+      source_icon: article.source?.favicon || article.source?.icon || article.source_icon,
       image_url: article.image || article.image_url,
       language: article.language || 'en',
-      country: article.country,
-      category: article.category || 'crypto',
+      country: article.country,  // May not exist in APITube
+      category: category,
       // APITube provides sentiment - use it directly
       sentiment: sentiment,
       needsSentiment: false,  // Already has sentiment
@@ -230,13 +250,38 @@ class APITubeProvider {
 
   /**
    * Normalize sentiment values from APITube to our standard format
-   * @param {string|number} sentiment - Sentiment from APITube
+   * APITube provides sentiment as an object with overall, title, and body sub-objects.
+   * Each sub-object has 'score' (numeric) and 'polarity' (string: positive/negative/neutral).
+   * We use the 'overall' polarity as it represents the complete article sentiment.
+   * 
+   * @param {Object|string|number} sentiment - Sentiment from APITube
    * @returns {string} Normalized sentiment (positive/negative/neutral)
    */
   normalizeSentiment(sentiment) {
     if (!sentiment) return 'neutral';
     
-    // If sentiment is a string like "positive", "negative", "neutral"
+    // APITube structure: sentiment = { overall: { score, polarity }, title: {...}, body: {...} }
+    if (typeof sentiment === 'object' && sentiment.overall) {
+      // Use overall polarity (textual representation)
+      const polarity = sentiment.overall.polarity;
+      if (polarity) {
+        const lower = polarity.toLowerCase();
+        if (lower === 'positive') return 'positive';
+        if (lower === 'negative') return 'negative';
+        return 'neutral';
+      }
+      
+      // Fallback to overall score if polarity not available
+      const score = sentiment.overall.score;
+      if (typeof score === 'number') {
+        // Assuming -1 to 1 scale
+        if (score > 0.1) return 'positive';
+        if (score < -0.1) return 'negative';
+        return 'neutral';
+      }
+    }
+    
+    // Fallback: If sentiment is already a string like "positive", "negative", "neutral"
     if (typeof sentiment === 'string') {
       const lower = sentiment.toLowerCase();
       if (lower.includes('pos')) return 'positive';
@@ -244,9 +289,9 @@ class APITubeProvider {
       return 'neutral';
     }
     
-    // If sentiment is a score (e.g., -1 to 1, or 0 to 100)
+    // Fallback: If sentiment is a numeric score (legacy support)
     if (typeof sentiment === 'number') {
-      // Assuming -1 to 1 scale (adjust based on actual APITube format)
+      // Assuming -1 to 1 scale
       if (sentiment > 0.1) return 'positive';
       if (sentiment < -0.1) return 'negative';
       return 'neutral';

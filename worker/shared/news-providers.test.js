@@ -135,6 +135,43 @@ describe('APITubeProvider', () => {
   });
 
   describe('normalizeSentiment', () => {
+    it('should normalize APITube sentiment object with overall polarity', () => {
+      const sentimentObj = {
+        overall: { score: 0.8, polarity: 'positive' },
+        title: { score: 0.7, polarity: 'positive' },
+        body: { score: 0.9, polarity: 'positive' }
+      };
+      expect(provider.normalizeSentiment(sentimentObj)).toBe('positive');
+      
+      const negativeSentiment = {
+        overall: { score: -0.6, polarity: 'negative' },
+        title: { score: -0.5, polarity: 'negative' },
+        body: { score: -0.7, polarity: 'negative' }
+      };
+      expect(provider.normalizeSentiment(negativeSentiment)).toBe('negative');
+      
+      const neutralSentiment = {
+        overall: { score: 0.05, polarity: 'neutral' },
+        title: { score: 0.1, polarity: 'neutral' },
+        body: { score: 0.0, polarity: 'neutral' }
+      };
+      expect(provider.normalizeSentiment(neutralSentiment)).toBe('neutral');
+    });
+
+    it('should fallback to overall score if polarity not available', () => {
+      const sentimentWithScore = {
+        overall: { score: 0.8 },
+        title: { score: 0.7 },
+        body: { score: 0.9 }
+      };
+      expect(provider.normalizeSentiment(sentimentWithScore)).toBe('positive');
+      
+      const negativeSentiment = {
+        overall: { score: -0.5 }
+      };
+      expect(provider.normalizeSentiment(negativeSentiment)).toBe('negative');
+    });
+
     it('should normalize string sentiment values', () => {
       expect(provider.normalizeSentiment('positive')).toBe('positive');
       expect(provider.normalizeSentiment('Positive')).toBe('positive');
@@ -156,41 +193,86 @@ describe('APITubeProvider', () => {
   });
 
   describe('normalizeArticle', () => {
-    it('should normalize APITube article correctly', () => {
+    it('should normalize APITube article correctly with proper field mapping', () => {
       const rawArticle = {
-        id: 'apitube-123',
+        id: 12345,  // integer in APITube
         title: 'Bitcoin surges',
         description: 'Bitcoin hits record high',
-        url: 'https://example.com/article',
-        published_at: '2025-01-01T12:00:00Z',
-        sentiment: 'positive',
+        href: 'https://example.com/article',  // 'href' not 'url'
+        published_at: '2025-01-15T12:00:00Z',
+        language: 'en',
+        image: 'https://example.com/image.jpg',
+        sentiment: {
+          overall: { score: 0.8, polarity: 'positive' },
+          title: { score: 0.7, polarity: 'positive' },
+          body: { score: 0.9, polarity: 'positive' }
+        },
         source: {
-          id: 'src1',
+          id: 1,
           name: 'Crypto News',
-          url: 'https://cryptonews.com'
-        }
+          uri: 'https://cryptonews.com',  // 'uri' not 'url'
+          favicon: 'https://cryptonews.com/favicon.ico'
+        },
+        categories: [
+          { id: 1, name: 'cryptocurrency' },
+          { id: 2, name: 'finance' }
+        ]
       };
 
       const normalized = provider.normalizeArticle(rawArticle);
 
-      expect(normalized.article_id).toBe('apitube-123');
+      expect(normalized.article_id).toBe(12345);
       expect(normalized.title).toBe('Bitcoin surges');
+      expect(normalized.link).toBe('https://example.com/article');
+      expect(normalized.source_url).toBe('https://cryptonews.com');
+      expect(normalized.source_icon).toBe('https://cryptonews.com/favicon.ico');
+      expect(normalized.category).toBe('cryptocurrency');  // First category
       expect(normalized.sentiment).toBe('positive');
       expect(normalized.needsSentiment).toBe(false);
       expect(normalized.needsSummary).toBe(true);
       expect(normalized.queuedAt).toBeDefined();
     });
 
-    it('should handle numeric sentiment scores', () => {
+    it('should handle articles without categories', () => {
+      const rawArticle = {
+        id: 123,
+        title: 'Test Article',
+        href: 'https://example.com/test',
+        sentiment: {
+          overall: { score: 0.05, polarity: 'neutral' }
+        }
+      };
+
+      const normalized = provider.normalizeArticle(rawArticle);
+      expect(normalized.category).toBe('crypto');  // Default when no categories
+      expect(normalized.sentiment).toBe('neutral');
+    });
+
+    it('should handle legacy string sentiment format', () => {
       const rawArticle = {
         id: 'test-id',
         title: 'Test',
-        sentiment_score: 0.7
+        sentiment: 'positive'
       };
 
       const normalized = provider.normalizeArticle(rawArticle);
       expect(normalized.sentiment).toBe('positive');
       expect(normalized.needsSentiment).toBe(false);
+    });
+    
+    it('should handle sentiment object with negative polarity', () => {
+      const rawArticle = {
+        id: 456,
+        title: 'Bitcoin drops',
+        href: 'https://example.com/drop',
+        sentiment: {
+          overall: { score: -0.6, polarity: 'negative' }
+        }
+      };
+
+      const normalized = provider.normalizeArticle(rawArticle);
+      expect(normalized.sentiment).toBe('negative');
+      expect(normalized.link).toBe('https://example.com/drop');
     });
   });
 

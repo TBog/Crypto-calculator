@@ -91,22 +91,39 @@ console.log('------------------------');
 try {
   const apiTubeProvider = new APITubeProvider('test-api-key');
   
-  // Test string sentiment
+  // Test APITube sentiment object structure with correct field names
   const rawArticle1 = {
-    id: 'at_456',
+    id: 456,  // integer in APITube
     title: 'Bitcoin Adoption Growing',
     description: 'More businesses accept Bitcoin',
-    url: 'https://example.com/article2',
+    href: 'https://example.com/article2',  // APITube uses 'href' not 'url'
     published_at: '2025-01-15T12:00:00Z',
-    sentiment: 'positive'
+    language: 'en',
+    sentiment: {
+      overall: { score: 0.8, polarity: 'positive' },
+      title: { score: 0.7, polarity: 'positive' },
+      body: { score: 0.9, polarity: 'positive' }
+    },
+    source: {
+      id: 1,
+      name: 'Crypto News',
+      uri: 'https://cryptonews.com',  // APITube uses 'uri' not 'url'
+      favicon: 'https://cryptonews.com/favicon.ico'
+    },
+    categories: [
+      { id: 1, name: 'cryptocurrency' }
+    ]
   };
   
   const normalized1 = apiTubeProvider.normalizeArticle(rawArticle1);
   
-  console.log('✓ Article with string sentiment normalized');
+  console.log('✓ Article with APITube field structure normalized');
+  console.log('  - ID (integer):', normalized1.article_id);
+  console.log('  - Link (from href):', normalized1.link);
+  console.log('  - Source URL (from uri):', normalized1.source_url);
+  console.log('  - Category (from array):', normalized1.category);
   console.log('  - Sentiment:', normalized1.sentiment);
   console.log('  - needsSentiment:', normalized1.needsSentiment);
-  console.log('  - needsSummary:', normalized1.needsSummary);
   
   if (normalized1.needsSentiment !== false) {
     throw new Error('APITube articles should not need sentiment analysis');
@@ -116,20 +133,51 @@ try {
     throw new Error('Sentiment should be "positive"');
   }
   
-  // Test numeric sentiment
+  if (normalized1.link !== 'https://example.com/article2') {
+    throw new Error('Link should be extracted from href field');
+  }
+  
+  if (normalized1.category !== 'cryptocurrency') {
+    throw new Error('Category should be extracted from categories array');
+  }
+  
+  // Test negative sentiment object
   const rawArticle2 = {
-    id: 'at_789',
+    id: 789,
     title: 'Bitcoin Price Drops',
-    sentiment_score: -0.6
+    href: 'https://example.com/drop',
+    sentiment: {
+      overall: { score: -0.6, polarity: 'negative' },
+      body: { score: -0.7, polarity: 'negative' }
+    }
   };
   
   const normalized2 = apiTubeProvider.normalizeArticle(rawArticle2);
   
-  console.log('✓ Article with numeric sentiment normalized');
-  console.log('  - Score -0.6 → Sentiment:', normalized2.sentiment);
+  console.log('✓ Article with negative sentiment object normalized');
+  console.log('  - Sentiment object → Sentiment:', normalized2.sentiment);
   
   if (normalized2.sentiment !== 'negative') {
-    throw new Error('Sentiment score -0.6 should map to "negative"');
+    throw new Error('Sentiment object with negative polarity should map to "negative"');
+  }
+  
+  // Test fallback to score when polarity missing
+  const rawArticle3 = {
+    id: 890,
+    title: 'Bitcoin Neutral News',
+    href: 'https://example.com/neutral',
+    sentiment: {
+      overall: { score: 0.05 }
+    }
+  };
+  
+  const normalized3 = apiTubeProvider.normalizeArticle(rawArticle3);
+  
+  console.log('✓ Article with score-only sentiment normalized');
+  console.log('  - Score 0.05 → Sentiment:', normalized3.sentiment);
+  
+  if (normalized3.sentiment !== 'neutral') {
+    throw new Error('Low sentiment score should map to "neutral"');
   }
   
   console.log('✅ APITube provider tests passed\n');
@@ -166,17 +214,26 @@ console.log('--------------------------------');
 try {
   const provider = new APITubeProvider('test-key');
   
-  // Test various sentiment inputs
+  // Test various sentiment inputs including APITube object structure
   const testCases = [
+    // APITube object structure
+    [{ overall: { score: 0.8, polarity: 'positive' } }, 'positive'],
+    [{ overall: { score: -0.6, polarity: 'negative' } }, 'negative'],
+    [{ overall: { score: 0.05, polarity: 'neutral' } }, 'neutral'],
+    [{ overall: { score: 0.8 } }, 'positive'],  // Score only
+    [{ overall: { score: -0.5 } }, 'negative'],  // Score only
+    // Legacy string format
     ['positive', 'positive'],
     ['POSITIVE', 'positive'],
     ['negative', 'negative'],
     ['Negative', 'negative'],
     ['neutral', 'neutral'],
+    // Legacy numeric format
     [0.8, 'positive'],
     [-0.5, 'negative'],
     [0.05, 'neutral'],
     [-0.05, 'neutral'],
+    // Missing values
     [null, 'neutral'],
     [undefined, 'neutral']
   ];
@@ -184,14 +241,17 @@ try {
   for (const [input, expected] of testCases) {
     const result = provider.normalizeSentiment(input);
     const passed = result === expected;
+    const inputStr = typeof input === 'object' && input !== null 
+      ? JSON.stringify(input).substring(0, 30) + '...'
+      : String(input);
     console.log(
       passed ? '✓' : '❌',
-      `${String(input).padEnd(10)} → ${result.padEnd(10)}`,
+      `${inputStr.padEnd(35)} → ${result.padEnd(10)}`,
       passed ? '' : `(expected ${expected})`
     );
     
     if (!passed) {
-      throw new Error(`Sentiment normalization failed for input: ${input}`);
+      throw new Error(`Sentiment normalization failed for input: ${JSON.stringify(input)}`);
     }
   }
   
