@@ -18,7 +18,7 @@ binding = "AI"
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with actual KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE"
 # See DEPLOYMENT_GUIDE.md Step 2 for instructions
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID_FROM_STEP_2"
+id = "4933e1596e304b71b4aac4cae364b75f"
 
 # Environment bindings
 # The NEWSDATA_API_KEY should be set using: wrangler secret put NEWSDATA_API_KEY
@@ -41,7 +41,7 @@ id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID_FROM_STEP_2"
 [[env.production.kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with production KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production
-id = "REPLACE_WITH_YOUR_PRODUCTION_KV_NAMESPACE_ID"
+id = "4933e1596e304b71b4aac4cae364b75f"
 
 # Production-specific variables (optional)
 # [env.production.vars]
