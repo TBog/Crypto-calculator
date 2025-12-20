@@ -45,10 +45,6 @@ describe('NewsDataProvider', () => {
     expect(provider.name).toBe('NewsData.io');
   });
 
-  it('should not have built-in sentiment', () => {
-    expect(provider.hasSentiment()).toBe(false);
-  });
-
   describe('normalizeArticle', () => {
     it('should normalize NewsData article correctly', () => {
       const rawArticle = {
@@ -136,10 +132,6 @@ describe('APITubeProvider', () => {
 
   it('should have correct name', () => {
     expect(provider.name).toBe('APITube');
-  });
-
-  it('should have built-in sentiment', () => {
-    expect(provider.hasSentiment()).toBe(true);
   });
 
   describe('normalizeSentiment', () => {

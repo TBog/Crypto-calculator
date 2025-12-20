@@ -125,14 +125,6 @@ class NewsDataProvider {
       queuedAt: Date.now()
     };
   }
-
-  /**
-   * Check if provider supports built-in sentiment
-   * @returns {boolean}
-   */
-  hasSentiment() {
-    return false;
-  }
 }
 
 /**
@@ -261,14 +253,6 @@ class APITubeProvider {
     }
     
     return 'neutral';
-  }
-
-  /**
-   * Check if provider supports built-in sentiment
-   * @returns {boolean}
-   */
-  hasSentiment() {
-    return true;
   }
 }
 

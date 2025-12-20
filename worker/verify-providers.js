@@ -78,10 +78,6 @@ try {
     throw new Error('NewsData articles should need sentiment analysis');
   }
   
-  if (newsDataProvider.hasSentiment()) {
-    throw new Error('NewsData provider should not have built-in sentiment');
-  }
-  
   console.log('✅ NewsData provider tests passed\n');
 } catch (error) {
   console.error('❌ NewsData provider test failed:', error.message);
@@ -134,10 +130,6 @@ try {
   
   if (normalized2.sentiment !== 'negative') {
     throw new Error('Sentiment score -0.6 should map to "negative"');
-  }
-  
-  if (!apiTubeProvider.hasSentiment()) {
-    throw new Error('APITube provider should have built-in sentiment');
   }
   
   console.log('✅ APITube provider tests passed\n');
