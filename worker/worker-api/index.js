@@ -9,6 +9,8 @@
  * - Currency conversion layer for unsupported currencies
  */
 
+import { getAPIWorkerConfig } from '../shared/constants.js';
+
 // Allowed origins for accessing this worker
 // For localhost/127.0.0.1: protocol and hostname must match (any port allowed)
 // For production domains: protocol, hostname, and port must match exactly
@@ -22,50 +24,18 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:5500'
 ];
 
-// Cache duration for supported currencies list (1 day in seconds)
-const SUPPORTED_CURRENCIES_CACHE_TTL = 86400;
-
-// Cache duration for exchange rates (1 hour in seconds)
-const EXCHANGE_RATE_CACHE_TTL = 3600;
-
-// Cache duration for LLM summaries (10 minutes in seconds)
-const SUMMARY_CACHE_TTL = 600;
-
-// Cache duration for price history used in summaries (10 minutes in seconds)
-const PRICE_HISTORY_CACHE_TTL = 600;
-
-// Cache duration for market chart data (5 minutes in seconds)
-const MARKET_CHART_CACHE_TTL = 300;
-
-// Cache duration for Bitcoin news (1 minute in seconds)
-const BITCOIN_NEWS_CACHE_TTL = 60;
-
-// CORS configuration
-const CORS_MAX_AGE = 86400; // 24 hours in seconds
-
-// LLM configuration
-const LLM_MAX_TOKENS = 1024; // Maximum tokens for LLM response
-const LLM_MAX_WORDS = 300; // Maximum words for LLM summary
-
-// Price history sampling configuration
-const PRICE_SAMPLE_THRESHOLD = 200; // Data points threshold for adaptive sampling
-const PRICE_LARGE_DATASET_SAMPLES = 8; // Number of samples for large datasets (>200 points)
-const PRICE_SMALL_DATASET_SAMPLES = 12; // Number of samples for small datasets (<=200 points)
-
-// KV key for stored Bitcoin news (matches news-updater-cron.js)
-const KV_NEWS_KEY = 'BTC_ANALYZED_NEWS';
-
 /**
  * Fetch Bitcoin news from Cloudflare KV (populated by scheduled worker)
  * This endpoint simply reads pre-fetched and pre-analyzed data from KV
  * No external API calls are made, ensuring ultra-fast response times
  * @param {Object} env - Environment variables (includes CRYPTO_NEWS_CACHE KV binding)
+ * @param {Object} config - Configuration object with KV keys and cache TTLs
  * @returns {Promise<{data: Object, cacheStatus: string, lastUpdated: number}>} News data with cache status and timestamp
  */
-async function fetchBitcoinNews(env) {
+async function fetchBitcoinNews(env, config) {
   try {
     // Read from KV namespace
-    const cachedData = await env.CRYPTO_NEWS_CACHE.get(KV_NEWS_KEY, { type: 'json' });
+    const cachedData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' });
     
     if (!cachedData) {
       // KV key is missing - scheduled worker hasn't run yet or failed
@@ -489,6 +459,9 @@ export default {
  * @returns {Promise<Response>} Response with CORS headers and caching
  */
 async function handleRequest(request, env, ctx) {
+  // Load configuration with environment variable overrides
+  const config = getAPIWorkerConfig(env);
+  
   // Get the origin from the request
   const origin = request.headers.get('Origin');
   const url = new URL(request.url);

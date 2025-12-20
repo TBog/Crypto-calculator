@@ -1,0 +1,126 @@
+# GitHub Actions Workflows
+
+This directory contains GitHub Actions workflows for automated deployment.
+
+## Workflows
+
+### 1. Deploy Main to GitHub Pages (`deploy-main.yml`)
+Deploys the main static site to GitHub Pages root.
+- **Trigger**: Push to `main` branch or manual dispatch
+- **Target**: https://tbog.github.io/Crypto-calculator/
+- **What it does**: Builds Tailwind CSS and deploys static files to gh-pages branch
+
+### 2. Deploy PR Preview (`pr-preview.yml`)
+Creates preview environments for pull requests.
+- **Trigger**: PR opened/updated/closed
+- **Target**: https://tbog.github.io/Crypto-calculator/pr-preview/pr-{number}/
+- **What it does**: Builds and deploys PR-specific previews
+
+### 3. Deploy Cloudflare Workers (`deploy-workers.yml`)
+Deploys Cloudflare Workers for the backend API and cron jobs.
+- **Trigger**: Push to `main` branch (when `worker/**` changes) or manual dispatch
+- **Workers deployed**:
+  - `worker-api`: Main API worker (crypto-cache)
+  - `worker-news-updater`: News updater cron job (runs hourly)
+  - `worker-news-processor`: News processor cron job (runs every 10 minutes)
+
+## Cloudflare Workers Deployment
+
+### Prerequisites
+
+Before the `deploy-workers.yml` workflow can run, you need to configure the following secrets in your GitHub repository:
+
+1. **CLOUDFLARE_API_TOKEN**
+   - Go to Cloudflare Dashboard → My Profile → API Tokens
+   - Create a token with "Edit Cloudflare Workers" permissions
+   - Add this as a repository secret
+
+2. **CLOUDFLARE_ACCOUNT_ID**
+   - Found in your Cloudflare Dashboard URL or in the Workers overview
+   - Add this as a repository secret
+
+### How It Works
+
+The workflow uses a matrix strategy to deploy all three workers in parallel:
+
+```yaml
+strategy:
+  matrix:
+    worker: [worker-api, worker-news-updater, worker-news-processor]
+```
+
+For each worker:
+1. Checks out the code
+2. Runs `wrangler deploy --config {worker}/wrangler.toml` from the `worker/` directory
+3. This allows all workers to access the `shared/` folder with common code
+
+### Shared Code
+
+All workers import from `../shared/news-providers.js` which contains:
+- News provider interface (NewsData.io and APITube)
+- Provider factory and configuration
+- Article normalization logic
+
+The deployment process ensures the shared folder is available to all workers.
+
+### Manual Deployment
+
+You can also manually trigger the deployment:
+1. Go to Actions tab in GitHub
+2. Select "Deploy Cloudflare Workers"
+3. Click "Run workflow"
+4. Select the branch (usually `main`)
+
+### Local Deployment
+
+For local deployment, use the npm scripts from the `worker/` directory:
+
+```bash
+cd worker
+
+# Deploy all workers
+npm run deploy
+
+# Deploy individual workers
+npm run deploy:api
+npm run deploy:updater
+npm run deploy:processor
+```
+
+### Troubleshooting
+
+**Error: "Missing API Token"**
+- Ensure `CLOUDFLARE_API_TOKEN` secret is set in repository settings
+- Verify the token has correct permissions
+
+**Error: "Missing Account ID"**
+- Ensure `CLOUDFLARE_ACCOUNT_ID` secret is set in repository settings
+
+**Error: "Module not found: ../shared/news-providers.js"**
+- Check that `workingDirectory` in the workflow is set to `worker`
+- Verify the import paths in worker files use `../shared/`
+
+**Deployment succeeds but workers don't update**
+- Check Cloudflare Dashboard to verify the deployment timestamp
+- Ensure you're testing the correct environment (production vs preview)
+- Clear Cloudflare cache if needed
+
+### Monitoring Deployments
+
+After deployment:
+1. Check the Actions tab for deployment status
+2. View deployment logs in Cloudflare Dashboard → Workers & Pages
+3. Test the workers using their deployed URLs
+4. Monitor worker logs: `wrangler tail --config worker-{name}/wrangler.toml`
+
+## Repository Secrets
+
+Required secrets for all workflows:
+- `GITHUB_TOKEN` (automatically provided)
+- `CLOUDFLARE_API_TOKEN` (manual setup required)
+- `CLOUDFLARE_ACCOUNT_ID` (manual setup required)
+
+To add secrets:
+1. Go to repository Settings → Secrets and variables → Actions
+2. Click "New repository secret"
+3. Add the secret name and value

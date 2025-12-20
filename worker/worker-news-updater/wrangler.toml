@@ -1,5 +1,5 @@
 name = "crypto-news-updater"
-main = "news-updater-cron.js"
+main = "index.js"
 compatibility_date = "2024-10-01"
 compatibility_flags = ["nodejs_compat"]
 
@@ -22,12 +22,27 @@ id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID_FROM_STEP_2"
 
 # Environment bindings
 # The NEWSDATA_API_KEY should be set using: wrangler secret put NEWSDATA_API_KEY
-# This keeps the API key secure and out of version control
+# The APITUBE_API_KEY should be set using: wrangler secret put APITUBE_API_KEY
+# The NEWS_PROVIDER should be set using: wrangler secret put NEWS_PROVIDER
+#   - Set to 'newsdata' for NewsData.io (default if not set)
+#   - Set to 'apitube' for APITube
+# This keeps the API keys secure and out of version control
+
+# Configuration variables (optional - defaults are set in shared/constants.js)
+# Uncomment and modify these to override defaults:
+# [vars]
+# MAX_STORED_ARTICLES = 500      # Maximum articles to keep in KV (default: 500)
+# MAX_PAGES = 15                 # Maximum pages to fetch from API (default: 15)
+# ID_INDEX_TTL = 2592000         # ID index TTL in seconds (default: 30 days)
 
 [env.production]
 # Production environment configuration
-# Secrets are automatically available in env.NEWSDATA_API_KEY
+# Secrets are automatically available in env.NEWSDATA_API_KEY, env.APITUBE_API_KEY, and env.NEWS_PROVIDER
 [[env.production.kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with production KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production
 id = "REPLACE_WITH_YOUR_PRODUCTION_KV_NAMESPACE_ID"
+
+# Production-specific variables (optional)
+# [env.production.vars]
+# MAX_STORED_ARTICLES = 1000     # Store more articles in production

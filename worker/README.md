@@ -1,6 +1,36 @@
 # Cloudflare Worker Deployment Guide
 
-This directory contains a Cloudflare Worker that acts as a proxy for the CoinGecko API with edge caching.
+This directory contains Cloudflare Workers for the Crypto Calculator application.
+
+## Directory Structure
+
+The workers are organized into separate folders for better maintainability:
+
+```
+worker/
+├── shared/                    # Shared code used by multiple workers
+│   ├── news-providers.js     # News provider interface and implementations
+│   ├── news-providers.test.js
+│   └── verify-providers.js
+├── worker-api/               # Main API worker (crypto-cache)
+│   ├── index.js
+│   ├── index.test.js
+│   └── wrangler.toml
+├── worker-news-updater/      # News updater cron worker
+│   ├── index.js
+│   └── wrangler.toml
+├── worker-news-processor/    # News processor cron worker
+│   ├── index.js
+│   ├── index.test.js
+│   └── wrangler.toml
+└── [test configs and docs]
+```
+
+## Workers Overview
+
+1. **worker-api** (crypto-cache) - Main API proxy with caching and AI summaries
+2. **worker-news-updater** - Fetches news articles hourly from configured provider
+3. **worker-news-processor** - Processes articles every 10 minutes with AI analysis
 
 ## Features
 
@@ -24,16 +54,19 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
   - Provides concise market analysis
   - Cached for 5 minutes for optimal performance
 - **Bitcoin News Feed with Scheduled Updates**: Bitcoin news with AI-powered sentiment analysis
-  - **NEW: Queue-Based Architecture** - Solves "Too many subrequests" error
-  - Three-worker system: Producer (scheduled) → Queue → Consumer (AI processing)
+  - **Multiple Provider Support** - NewsData.io and APITube integration via unified interface
+  - Provider selection via Cloudflare secret (defaults to NewsData.io)
+  - APITube includes built-in sentiment analysis (faster processing)
+  - NewsData.io uses Cloudflare Workers AI for sentiment
+  - Three-worker system: Producer (scheduled) → KV → Consumer (AI processing)
   - Each article processed in separate worker invocation with fresh subrequest budget
-  - Cloudflare Workers AI sentiment analysis and content summarization
   - Early-exit optimization: Stops fetching when hitting known articles
   - Two-key KV structure: ID index for deduplication + full payload for API
   - Maintains up to 500 articles with sentiment tags and AI summaries
   - API endpoint reads from KV (millisecond latency)
   - Scales to process unlimited articles without hitting subrequest limits
-  - See [QUEUE_DEPLOYMENT_GUIDE.md](./QUEUE_DEPLOYMENT_GUIDE.md) for setup instructions
+  - See [NEWS_PROVIDER_GUIDE.md](./NEWS_PROVIDER_GUIDE.md) for provider configuration
+  - See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for setup instructions
 
 ## Testing
 
@@ -91,11 +124,45 @@ The test suite covers:
    # Add your environment variables here after deployment
    ```
 
-4. **Deploy the worker**:
+4. **Deploy the workers**:
+   
+   **Option A: Using npm scripts (recommended)**
    ```bash
    cd worker
-   wrangler deploy
+   
+   # Deploy all workers at once
+   npm run deploy
+   
+   # Or deploy individual workers
+   npm run deploy:api
+   npm run deploy:updater
+   npm run deploy:processor
    ```
+   
+   **Option B: Using wrangler directly**
+   ```bash
+   cd worker
+   
+   # Deploy API worker
+   wrangler deploy --config worker-api/wrangler.toml
+   
+   # Deploy news updater
+   wrangler deploy --config worker-news-updater/wrangler.toml
+   
+   # Deploy news processor
+   wrangler deploy --config worker-news-processor/wrangler.toml
+   ```
+   
+   **Option C: Using GitHub Actions (automated)**
+   
+   The repository includes a GitHub Actions workflow that automatically deploys all workers when you push to the `main` branch. See `.github/workflows/deploy-workers.yml` for details.
+   
+   To use automated deployment:
+   1. Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository secrets
+   2. Push changes to `main` branch or manually trigger the workflow
+   3. All three workers will be deployed in parallel
+   
+   See [.github/workflows/README.md](../.github/workflows/README.md) for detailed setup instructions.
 
 5. **Set the API Keys** (recommended):
    
