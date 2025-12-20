@@ -37,7 +37,6 @@
 import { getArticleId } from '../shared/news-providers.js';
 import { 
   getNewsProcessorConfig,
-  decodeHTMLEntities,
   MAX_CONTENT_FETCH_ATTEMPTS 
 } from '../shared/constants.js';
 
@@ -150,7 +149,7 @@ class TextExtractor {
 
     // Only extract text if we're not inside a skipped element and haven't reached limit
     if (this.skipDepth === 0 && this.charCount < this.maxChars) {
-      const content = decodeHTMLEntities(text.text);
+      const content = text.text;
       if (content && content.trim()) {
         if (this.debugOutput) {
           // don't count the debug text in this.charCount to preserve the initial parsing amount
