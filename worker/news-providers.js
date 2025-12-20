@@ -8,6 +8,44 @@
  * Provider selection is controlled via NEWS_PROVIDER Cloudflare secret:
  * - Set to 'newsdata' for NewsData.io (default)
  * - Set to 'apitube' for APITube
+ * 
+ * ============================================================================
+ * IMPORTANT: APITube Configuration
+ * ============================================================================
+ * 
+ * The APITube provider implementation is based on common REST API patterns.
+ * Before deploying to production, you MUST verify and update the following
+ * in the APITubeProvider class:
+ * 
+ * 1. API Endpoint (line ~120):
+ *    const newsUrl = new URL('https://api.apitube.io/v1/news/crypto');
+ *    → Update with actual APITube endpoint URL
+ * 
+ * 2. Authentication Method (line ~138):
+ *    Currently uses: Authorization: Bearer <token>
+ *    → Verify this matches APITube's authentication
+ *    → Alternative: Use 'x-api-key' or URL parameter if required
+ * 
+ * 3. Query Parameters (lines ~124-125):
+ *    coin: 'bitcoin', language: 'en'
+ *    → Verify parameter names match APITube's API
+ * 
+ * 4. Pagination Style (line ~130):
+ *    Currently assumes: ?page=<number>
+ *    → Update if APITube uses cursor-based pagination
+ * 
+ * 5. Response Structure (lines ~148-151):
+ *    Expected: { articles: [], next: '', total: 0 }
+ *    → Update field names based on actual response
+ * 
+ * 6. Sentiment Field (line ~171):
+ *    Expected: article.sentiment or article.sentiment_score
+ *    → Update based on actual APITube response format
+ * 
+ * Refer to APITube's official API documentation to configure these values.
+ * Test thoroughly before using in production.
+ * 
+ * ============================================================================
  */
 
 /**
@@ -110,26 +148,40 @@ class APITubeProvider {
 
   /**
    * Fetch a page of articles from APITube
-   * Note: APITube API structure is based on common patterns
-   * Adjust endpoint and parameters based on actual APITube documentation
+   * 
+   * IMPORTANT: This implementation is based on common API patterns.
+   * Before using in production, verify against actual APITube documentation:
+   * 
+   * 1. API Endpoint URL - Update base URL if different
+   * 2. Authentication Method - Currently using Bearer token in Authorization header
+   *    (apikey URL parameter is commented out as alternative)
+   * 3. Pagination Style - Currently assumes numeric page-based pagination
+   *    (cursor-based pagination code is commented as alternative)
+   * 4. Query Parameters - Verify parameter names match APITube's API
+   * 
    * @param {string|null} nextPage - Pagination token or page number
    * @returns {Promise<{articles: Array, nextPage: string|null, totalResults: number}>}
    */
   async fetchPage(nextPage = null) {
-    // APITube endpoint - adjust based on actual API documentation
+    // TODO: Verify this endpoint with actual APITube documentation
     const newsUrl = new URL('https://api.apitube.io/v1/news/crypto');
-    newsUrl.searchParams.set('apikey', this.apiKey);
+    
+    // Query parameters - verify with APITube docs
+    // NOTE: apikey parameter removed - using Authorization header instead
     newsUrl.searchParams.set('coin', 'bitcoin');
     newsUrl.searchParams.set('language', 'en');
     
-    // Handle pagination - adjust based on APITube's pagination style
+    // Handle pagination - verify pagination style with APITube docs
     if (nextPage) {
-      // If APITube uses numeric pages
+      // Current assumption: numeric page-based pagination
       newsUrl.searchParams.set('page', nextPage);
-      // Or if APITube uses cursor-based pagination:
+      
+      // Alternative: If APITube uses cursor-based pagination, use this instead:
       // newsUrl.searchParams.set('cursor', nextPage);
     }
     
+    // Authentication via Bearer token (recommended for security)
+    // TODO: Verify this authentication method with APITube docs
     const response = await fetch(newsUrl.toString(), {
       headers: {
         'Authorization': `Bearer ${this.apiKey}`,

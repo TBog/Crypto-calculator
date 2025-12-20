@@ -166,27 +166,132 @@ The test suite includes:
 - Article normalization tests
 - Sentiment normalization tests
 
-## APITube API Endpoint Notes
+## APITube API Configuration Requirements
 
-**Important**: The APITube provider implementation is based on common API patterns. You may need to adjust the following in `news-providers.js`:
+**CRITICAL**: The APITube provider implementation is a template based on common REST API patterns. 
 
-1. **API Endpoint**: Update the base URL if different
+⚠️ **You MUST configure the following based on actual APITube documentation before using in production:**
+
+### Required Configuration Steps
+
+1. **Obtain APITube Documentation**
+   - Get official API documentation from APITube
+   - Verify API endpoint URLs
+   - Check authentication requirements
+   - Review request/response formats
+
+2. **Update API Endpoint** (in `news-providers.js`, line ~120)
    ```javascript
+   // Current placeholder:
    const newsUrl = new URL('https://api.apitube.io/v1/news/crypto');
+   
+   // Update with actual endpoint from APITube docs
    ```
 
-2. **Authentication**: Adjust header format if needed
+3. **Configure Authentication** (in `news-providers.js`, line ~138)
    ```javascript
+   // Current implementation uses Bearer token:
    headers: {
      'Authorization': `Bearer ${this.apiKey}`,
+     'Content-Type': 'application/json'
    }
+   
+   // Update if APITube uses different auth:
+   // - API key in header: 'X-API-Key': this.apiKey
+   // - API key in URL: newsUrl.searchParams.set('apikey', this.apiKey)
    ```
 
-3. **Response Structure**: Update field mapping in `normalizeArticle()` based on actual API response
+4. **Verify Query Parameters** (in `news-providers.js`, lines ~124-125)
+   ```javascript
+   // Current parameters:
+   newsUrl.searchParams.set('coin', 'bitcoin');
+   newsUrl.searchParams.set('language', 'en');
+   
+   // Adjust parameter names to match APITube's API
+   ```
 
-4. **Pagination**: Adjust pagination handling in `fetchPage()` based on APITube's pagination style
+5. **Configure Pagination** (in `news-providers.js`, line ~130)
+   ```javascript
+   // Current: page-based pagination
+   if (nextPage) {
+     newsUrl.searchParams.set('page', nextPage);
+   }
+   
+   // Update if APITube uses cursor-based:
+   // newsUrl.searchParams.set('cursor', nextPage);
+   ```
 
-Refer to APITube's official documentation for the exact API structure and update the code accordingly.
+6. **Update Response Parsing** (in `news-providers.js`, lines ~148-151)
+   ```javascript
+   // Current expected response format:
+   {
+     articles: [...],  // or 'results' or 'data'
+     next: '...',      // or 'nextPage' or 'cursor'
+     total: 100        // or 'totalResults'
+   }
+   
+   // Update field names based on actual response
+   ```
+
+7. **Verify Sentiment Format** (in `news-providers.js`, line ~171)
+   ```javascript
+   // Current: expects 'sentiment' or 'sentiment_score'
+   // Update based on actual field name in APITube response
+   ```
+
+### Testing APITube Integration
+
+After configuring:
+
+1. **Test with sample data**:
+   ```bash
+   cd worker
+   node verify-providers.js
+   ```
+
+2. **Test with actual API** (requires valid API key):
+   ```bash
+   # Set environment variable for testing
+   export APITUBE_API_KEY="your-actual-key"
+   
+   # Deploy to development
+   wrangler deploy --config wrangler-news-updater.toml
+   
+   # Monitor logs for errors
+   wrangler tail --config wrangler-news-updater.toml
+   ```
+
+3. **Verify first batch of articles**:
+   - Check if articles are fetched correctly
+   - Verify sentiment values are normalized properly
+   - Ensure pagination works as expected
+
+### Common APITube Configuration Issues
+
+**Authentication Failed (401/403)**:
+- Verify API key is correct
+- Check if authentication method matches APITube's requirements
+- Ensure headers are formatted correctly
+
+**No Articles Returned**:
+- Verify endpoint URL is correct
+- Check query parameters match API documentation
+- Review response structure and update parsing logic
+
+**Pagination Not Working**:
+- Verify pagination style (page vs cursor)
+- Check parameter names
+- Ensure nextPage value is extracted correctly
+
+**Incorrect Sentiment Values**:
+- Check sentiment field name in response
+- Verify sentiment format (string vs numeric)
+- Update normalizeSentiment() logic if needed
+
+## NewsData.io Configuration (Pre-configured)
+
+The NewsData.io provider is fully configured and ready to use.
+No additional configuration needed - just set the API key as described in Step 1.
 
 ## Best Practices
 
