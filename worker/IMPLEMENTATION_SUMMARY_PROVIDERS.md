@@ -46,15 +46,15 @@ Created a unified news provider interface (`news-providers.js`) that:
 ### 3. Files Modified/Created
 
 **Created**:
-- `worker/news-providers.js` - Provider interface and implementations
+- `worker/shared/news-providers.js` - Provider interface and implementations
 - `worker/news-providers.test.js` - Provider unit tests (25 tests)
 - `worker/NEWS_PROVIDER_GUIDE.md` - Configuration guide
 - `worker/NEWS_PROVIDER_EXAMPLES.md` - Usage examples
 - `worker/verify-providers.js` - Verification script
 
 **Modified**:
-- `worker/news-updater-cron.js` - Uses provider abstraction
-- `worker/news-processor-cron.js` - Imports getArticleId from providers
+- `worker/worker-news-updater/index.js` - Uses provider abstraction
+- `worker/worker-news-processor/index.js` - Imports getArticleId from providers
 - `worker/wrangler-news-updater.toml` - Documents new secrets
 - `worker/vitest.config.unit.js` - Includes provider tests
 - `worker/README.md` - Documents provider support

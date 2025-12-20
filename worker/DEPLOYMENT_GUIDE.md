@@ -74,7 +74,7 @@ Add the following to your configuration file in your kv_namespaces array:
 
 #### For News Updater Worker (Producer)
 
-Edit `wrangler-news-updater.toml` and replace the namespace ID:
+Edit `worker-news-updater/wrangler.toml` and replace the namespace ID:
 
 ```toml
 [[kv_namespaces]]
@@ -84,7 +84,7 @@ id = "YOUR_NAMESPACE_ID_HERE"  # Replace with the ID from Step 2
 
 #### For News Processor Worker (Consumer)
 
-Edit `wrangler-news-processor.toml` and replace the namespace ID:
+Edit `worker-news-processor/wrangler.toml` and replace the namespace ID:
 
 ```toml
 [[kv_namespaces]]
@@ -94,7 +94,7 @@ id = "YOUR_NAMESPACE_ID_HERE"  # Replace with the SAME ID from Step 2
 
 #### For Main API Worker
 
-Edit `wrangler.toml` and replace the namespace ID:
+Edit `worker-api/wrangler.toml` and replace the namespace ID:
 
 ```toml
 [[kv_namespaces]]
@@ -117,7 +117,7 @@ Update the production namespace IDs in all three config files under `[[env.produ
 ### Step 5: Deploy the News Updater Worker (Producer)
 
 ```bash
-wrangler deploy --config wrangler-news-updater.toml
+wrangler deploy --config worker-news-updater/wrangler.toml
 ```
 
 **Expected output:**
@@ -138,7 +138,7 @@ Current Deployment ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 Choose which news provider to use (defaults to NewsData.io if not set):
 
 ```bash
-wrangler secret put NEWS_PROVIDER --config wrangler-news-updater.toml
+wrangler secret put NEWS_PROVIDER --config worker-news-updater/wrangler.toml
 ```
 
 When prompted, enter either:
@@ -149,14 +149,14 @@ When prompted, enter either:
 
 **For NewsData.io:**
 ```bash
-wrangler secret put NEWSDATA_API_KEY --config wrangler-news-updater.toml
+wrangler secret put NEWSDATA_API_KEY --config worker-news-updater/wrangler.toml
 ```
 
 When prompted, paste your NewsData.io API key and press Enter.
 
 **For APITube:**
 ```bash
-wrangler secret put APITUBE_API_KEY --config wrangler-news-updater.toml
+wrangler secret put APITUBE_API_KEY --config worker-news-updater/wrangler.toml
 ```
 
 When prompted, paste your APITube API key and press Enter.
@@ -166,7 +166,7 @@ When prompted, paste your APITube API key and press Enter.
 ### Step 7: Deploy the News Processor Worker (Consumer)
 
 ```bash
-wrangler deploy --config wrangler-news-processor.toml
+wrangler deploy --config worker-news-processor/wrangler.toml
 ```
 
 **Expected output:**
@@ -196,10 +196,10 @@ Verify both cron jobs are configured:
 
 ```bash
 # Producer (runs hourly)
-wrangler deployments list --config wrangler-news-updater.toml
+wrangler deployments list --config worker-news-updater/wrangler.toml
 
 # Consumer (runs every 10 minutes)
-wrangler deployments list --config wrangler-news-processor.toml
+wrangler deployments list --config worker-news-processor/wrangler.toml
 ```
 
 You should see cron schedules:
@@ -211,7 +211,7 @@ You should see cron schedules:
 Monitor the producer worker logs:
 
 ```bash
-wrangler tail --config wrangler-news-updater.toml
+wrangler tail --config worker-news-updater/wrangler.toml
 ```
 
 Wait for the next hour. You should see logs like:
@@ -230,7 +230,7 @@ Queued 50 articles for AI processing by consumer worker
 In a separate terminal, monitor the consumer worker:
 
 ```bash
-wrangler tail --config wrangler-news-processor.toml
+wrangler tail --config worker-news-processor/wrangler.toml
 ```
 
 You should see logs every 10 minutes:
@@ -255,7 +255,7 @@ Remaining: 45 articles (will process in next run)
 Verify data is being stored:
 
 ```bash
-wrangler kv:key list --binding CRYPTO_NEWS_CACHE --config wrangler-news-updater.toml
+wrangler kv:key list --binding CRYPTO_NEWS_CACHE --config worker-news-updater/wrangler.toml
 ```
 
 You should see keys like `BTC_ANALYZED_NEWS` and `BTC_ID_INDEX`.
@@ -263,7 +263,7 @@ You should see keys like `BTC_ANALYZED_NEWS` and `BTC_ID_INDEX`.
 #### View Stored Articles
 
 ```bash
-wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrangler-news-updater.toml | jq '.articles[0]'
+wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config worker-news-updater/wrangler.toml | jq '.articles[0]'
 ```
 
 You should see article data with postprocessing flags:
@@ -323,7 +323,7 @@ Verify it matches your deployed worker URL.
 To manually trigger the producer for testing (without waiting for cron):
 
 ```bash
-wrangler dev --config wrangler-news-updater.toml --test-scheduled
+wrangler dev --config worker-news-updater/wrangler.toml --test-scheduled
 ```
 
 This will run the worker immediately in development mode.
@@ -333,7 +333,7 @@ This will run the worker immediately in development mode.
 To test the consumer worker:
 
 ```bash
-wrangler dev --config wrangler-news-processor.toml --test-scheduled
+wrangler dev --config worker-news-processor/wrangler.toml --test-scheduled
 ```
 
 ## Monitoring
@@ -342,12 +342,12 @@ wrangler dev --config wrangler-news-processor.toml --test-scheduled
 
 For the producer worker:
 ```bash
-wrangler tail --config wrangler-news-updater.toml
+wrangler tail --config worker-news-updater/wrangler.toml
 ```
 
 For the consumer worker:
 ```bash
-wrangler tail --config wrangler-news-processor.toml
+wrangler tail --config worker-news-processor/wrangler.toml
 ```
 
 For the main API worker:
@@ -359,7 +359,7 @@ wrangler tail
 
 ```bash
 # News updater worker
-wrangler deployments list --config wrangler-news-updater.toml
+wrangler deployments list --config worker-news-updater/wrangler.toml
 
 # Main API worker
 wrangler deployments list
@@ -369,13 +369,13 @@ wrangler deployments list
 
 ```bash
 # List all keys
-wrangler kv:key list --binding CRYPTO_NEWS_CACHE --config wrangler-news-updater.toml
+wrangler kv:key list --binding CRYPTO_NEWS_CACHE --config worker-news-updater/wrangler.toml
 
 # Get specific key
-wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrangler-news-updater.toml
+wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config worker-news-updater/wrangler.toml
 
 # Get metadata
-wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrangler-news-updater.toml --preview false --metadata
+wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config worker-news-updater/wrangler.toml --preview false --metadata
 ```
 
 ## Troubleshooting
@@ -385,9 +385,9 @@ wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrang
 **Symptoms:** No logs appear, KV is empty after 1+ hour
 
 **Solutions:**
-1. Verify deployment: `wrangler deployments list --config wrangler-news-updater.toml`
-2. Check cron configuration in `wrangler-news-updater.toml`
-3. Manually trigger: `wrangler dev --config wrangler-news-updater.toml --test-scheduled`
+1. Verify deployment: `wrangler deployments list --config worker-news-updater/wrangler.toml`
+2. Check cron configuration in `worker-news-updater/wrangler.toml`
+3. Manually trigger: `wrangler dev --config worker-news-updater/wrangler.toml --test-scheduled`
 
 ### Issue: API endpoint returns "temporarily unavailable"
 
@@ -395,8 +395,8 @@ wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrang
 
 **Solutions:**
 1. Wait for scheduled worker to run (up to 1 hour after deployment)
-2. Check scheduled worker logs: `wrangler tail --config wrangler-news-updater.toml`
-3. Verify API key is set: `wrangler secret list --config wrangler-news-updater.toml`
+2. Check scheduled worker logs: `wrangler tail --config worker-news-updater/wrangler.toml`
+3. Verify API key is set: `wrangler secret list --config worker-news-updater/wrangler.toml`
 4. Manually trigger worker to populate KV
 
 ### Issue: Sentiment analysis not working
@@ -404,7 +404,7 @@ wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrang
 **Symptoms:** Articles in KV don't have sentiment field or all show neutral
 
 **Solutions:**
-1. Verify AI binding is configured in `wrangler-news-updater.toml`
+1. Verify AI binding is configured in `worker-news-updater/wrangler.toml`
 2. Check Cloudflare Workers AI is enabled for your account
 3. Review worker logs for AI-related errors
 4. Ensure Cloudflare Workers AI has the Llama 3.1 model available
@@ -423,7 +423,7 @@ wrangler kv:key get BTC_ANALYZED_NEWS --binding CRYPTO_NEWS_CACHE --config wrang
 
 ### Adjust Producer Schedule
 
-Edit `wrangler-news-updater.toml`:
+Edit `worker-news-updater/wrangler.toml`:
 
 ```toml
 [triggers]
@@ -435,7 +435,7 @@ crons = ["0 * * * *"]  # Every hour (default)
 
 ### Adjust Consumer Schedule
 
-Edit `wrangler-news-processor.toml`:
+Edit `worker-news-processor/wrangler.toml`:
 
 ```toml
 [triggers]
@@ -481,7 +481,7 @@ With 2-hour producer schedule (recommended for free tier):
 - Articles still updated every 2 hours
 - Consumer continues processing every 10 minutes
 
-To use 2-hour schedule, edit `wrangler-news-updater.toml`:
+To use 2-hour schedule, edit `worker-news-updater/wrangler.toml`:
 ```toml
 [triggers]
 crons = ["0 */2 * * *"]  # Every 2 hours instead of hourly
@@ -515,13 +515,13 @@ If issues occur, you can rollback to the previous version:
 wrangler rollback
 
 # Rollback news updater worker
-wrangler rollback --config wrangler-news-updater.toml
+wrangler rollback --config worker-news-updater/wrangler.toml
 ```
 
 Or temporarily disable the scheduled worker:
 
-1. Comment out the `[triggers]` section in `wrangler-news-updater.toml`
-2. Redeploy: `wrangler deploy --config wrangler-news-updater.toml`
+1. Comment out the `[triggers]` section in `worker-news-updater/wrangler.toml`
+2. Redeploy: `wrangler deploy --config worker-news-updater/wrangler.toml`
 
 ## Next Steps
 

@@ -34,7 +34,7 @@
  * - Reduces neuron usage by 50-70%, maximizing daily 10,000 neuron budget on Free Tier
  */
 
-import { getArticleId } from './news-providers.js';
+import { getArticleId } from '../shared/news-providers.js';
 
 // KV keys (must match news-updater-cron.js)
 const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';

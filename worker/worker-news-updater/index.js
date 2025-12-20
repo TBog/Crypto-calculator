@@ -16,7 +16,7 @@
  * - Using separate ID index for fast deduplication
  */
 
-import { createNewsProvider, getArticleId } from './news-providers.js';
+import { createNewsProvider, getArticleId } from '../shared/news-providers.js';
 
 // KV keys for optimized storage
 const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';  // Full articles payload

@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TextExtractor, fetchArticleContent, decodeHTMLEntities } from './news-processor-cron.js';
+import { TextExtractor, fetchArticleContent, decodeHTMLEntities } from './index.js';
 
 describe('TextExtractor - Debug Mode Functionality', () => {
   describe('Debug Output Mode', () => {

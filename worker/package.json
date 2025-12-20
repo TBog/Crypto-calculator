@@ -8,8 +8,11 @@
     "test:unit": "vitest run --config vitest.config.unit.js",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev"
+    "deploy": "wrangler deploy --config worker-api/wrangler.toml && wrangler deploy --config worker-news-updater/wrangler.toml && wrangler deploy --config worker-news-processor/wrangler.toml",
+    "deploy:api": "wrangler deploy --config worker-api/wrangler.toml",
+    "deploy:updater": "wrangler deploy --config worker-news-updater/wrangler.toml",
+    "deploy:processor": "wrangler deploy --config worker-news-processor/wrangler.toml",
+    "dev": "wrangler dev --config worker-api/wrangler.toml"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.5.0",

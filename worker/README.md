@@ -1,6 +1,36 @@
 # Cloudflare Worker Deployment Guide
 
-This directory contains a Cloudflare Worker that acts as a proxy for the CoinGecko API with edge caching.
+This directory contains Cloudflare Workers for the Crypto Calculator application.
+
+## Directory Structure
+
+The workers are organized into separate folders for better maintainability:
+
+```
+worker/
+├── shared/                    # Shared code used by multiple workers
+│   ├── news-providers.js     # News provider interface and implementations
+│   ├── news-providers.test.js
+│   └── verify-providers.js
+├── worker-api/               # Main API worker (crypto-cache)
+│   ├── index.js
+│   ├── index.test.js
+│   └── wrangler.toml
+├── worker-news-updater/      # News updater cron worker
+│   ├── index.js
+│   └── wrangler.toml
+├── worker-news-processor/    # News processor cron worker
+│   ├── index.js
+│   ├── index.test.js
+│   └── wrangler.toml
+└── [test configs and docs]
+```
+
+## Workers Overview
+
+1. **worker-api** (crypto-cache) - Main API proxy with caching and AI summaries
+2. **worker-news-updater** - Fetches news articles hourly from configured provider
+3. **worker-news-processor** - Processes articles every 10 minutes with AI analysis
 
 ## Features
 
@@ -94,10 +124,18 @@ The test suite covers:
    # Add your environment variables here after deployment
    ```
 
-4. **Deploy the worker**:
+4. **Deploy the workers**:
    ```bash
    cd worker
-   wrangler deploy
+   
+   # Deploy API worker
+   wrangler deploy --config worker-api/wrangler.toml
+   
+   # Deploy news updater
+   wrangler deploy --config worker-news-updater/wrangler.toml
+   
+   # Deploy news processor
+   wrangler deploy --config worker-news-processor/wrangler.toml
    ```
 
 5. **Set the API Keys** (recommended):

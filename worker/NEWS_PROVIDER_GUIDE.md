@@ -58,7 +58,7 @@ Deploy the news updater worker with the new configuration:
 
 ```bash
 cd worker
-wrangler deploy --config wrangler-news-updater.toml
+wrangler deploy --config worker-news-updater/wrangler.toml
 ```
 
 ## Provider Differences
@@ -110,7 +110,7 @@ Both providers store articles in the same standardized format in Cloudflare KV:
 Check which provider is currently active by viewing the worker logs:
 
 ```bash
-wrangler tail --config wrangler-news-updater.toml
+wrangler tail --config worker-news-updater/wrangler.toml
 ```
 
 You'll see log entries like:
@@ -131,7 +131,7 @@ wrangler secret put NEWS_PROVIDER
 # Enter: apitube
 
 # Optional: Redeploy to take effect immediately
-wrangler deploy --config wrangler-news-updater.toml
+wrangler deploy --config worker-news-updater/wrangler.toml
 ```
 
 ## Troubleshooting
@@ -180,7 +180,7 @@ The test suite includes:
    - Check authentication requirements
    - Review request/response formats
 
-2. **Update API Endpoint** (in `news-providers.js`, line ~120)
+2. **Update API Endpoint** (in `shared/news-providers.js`, line ~120)
    ```javascript
    // Current placeholder:
    const newsUrl = new URL('https://api.apitube.io/v1/news/crypto');
@@ -188,7 +188,7 @@ The test suite includes:
    // Update with actual endpoint from APITube docs
    ```
 
-3. **Configure Authentication** (in `news-providers.js`, line ~138)
+3. **Configure Authentication** (in `shared/news-providers.js`, line ~138)
    ```javascript
    // Current implementation uses Bearer token:
    headers: {
@@ -201,7 +201,7 @@ The test suite includes:
    // - API key in URL: newsUrl.searchParams.set('apikey', this.apiKey)
    ```
 
-4. **Verify Query Parameters** (in `news-providers.js`, lines ~124-125)
+4. **Verify Query Parameters** (in `shared/news-providers.js`, lines ~124-125)
    ```javascript
    // Current parameters:
    newsUrl.searchParams.set('coin', 'bitcoin');
@@ -210,7 +210,7 @@ The test suite includes:
    // Adjust parameter names to match APITube's API
    ```
 
-5. **Configure Pagination** (in `news-providers.js`, line ~130)
+5. **Configure Pagination** (in `shared/news-providers.js`, line ~130)
    ```javascript
    // Current: page-based pagination
    if (nextPage) {
@@ -221,7 +221,7 @@ The test suite includes:
    // newsUrl.searchParams.set('cursor', nextPage);
    ```
 
-6. **Update Response Parsing** (in `news-providers.js`, lines ~148-151)
+6. **Update Response Parsing** (in `shared/news-providers.js`, lines ~148-151)
    ```javascript
    // Current expected response format:
    {
@@ -233,7 +233,7 @@ The test suite includes:
    // Update field names based on actual response
    ```
 
-7. **Verify Sentiment Format** (in `news-providers.js`, line ~171)
+7. **Verify Sentiment Format** (in `shared/news-providers.js`, line ~171)
    ```javascript
    // Current: expects 'sentiment' or 'sentiment_score'
    // Update based on actual field name in APITube response
@@ -255,10 +255,10 @@ After configuring:
    export APITUBE_API_KEY="your-actual-key"
    
    # Deploy to development
-   wrangler deploy --config wrangler-news-updater.toml
+   wrangler deploy --config worker-news-updater/wrangler.toml
    
    # Monitor logs for errors
-   wrangler tail --config wrangler-news-updater.toml
+   wrangler tail --config worker-news-updater/wrangler.toml
    ```
 
 3. **Verify first batch of articles**:
