@@ -1,15 +1,14 @@
-import { defineWorkersConfig } from '@cloudflare/vitest-pool-workers/config';
+import { defineConfig } from 'vitest/config';
 
-// Simplified test configuration that uses wrangler.toml for bindings
-// Note: AI binding is configured in wrangler.toml but cannot be fully mocked
-// in the test environment. Tests focus on structural validation and logic.
-export default defineWorkersConfig({
+// Main test configuration using Node environment
+// This avoids issues with AI bindings that can't be mocked in test environment
+// Tests focus on structural validation and logic, not runtime bindings
+export default defineConfig({
   test: {
-    poolOptions: {
-      workers: {
-        wrangler: { configPath: './worker-api/wrangler.toml' }
-      }
-    }
+    include: ['**/*.test.js'],
+    environment: 'node',
+    globals: false,
+    setupFiles: ['./test-setup.js']
   },
   css: {
     postcss: false // Disable PostCSS processing for tests

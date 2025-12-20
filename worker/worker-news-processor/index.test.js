@@ -4,7 +4,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TextExtractor, fetchArticleContent, decodeHTMLEntities } from './index.js';
+import { TextExtractor, fetchArticleContent } from './index.js';
+import { decodeHTMLEntities } from '../shared/constants.js';
 
 describe('TextExtractor - Debug Mode Functionality', () => {
   describe('Debug Output Mode', () => {
