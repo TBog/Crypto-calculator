@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "vitest run",
+    "test:unit": "vitest run --config vitest.config.unit.js",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "deploy": "wrangler deploy",

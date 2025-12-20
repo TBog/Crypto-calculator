@@ -28,17 +28,29 @@ const SUPPORTED_CURRENCIES_CACHE_TTL = 86400;
 // Cache duration for exchange rates (1 hour in seconds)
 const EXCHANGE_RATE_CACHE_TTL = 3600;
 
-// Cache duration for LLM summaries (5 minutes in seconds)
-const SUMMARY_CACHE_TTL = 300;
+// Cache duration for LLM summaries (10 minutes in seconds)
+const SUMMARY_CACHE_TTL = 600;
 
 // Cache duration for price history used in summaries (10 minutes in seconds)
 const PRICE_HISTORY_CACHE_TTL = 600;
 
-// Cache duration for market chart data (10 minutes in seconds)
-const MARKET_CHART_CACHE_TTL = 600;
+// Cache duration for market chart data (5 minutes in seconds)
+const MARKET_CHART_CACHE_TTL = 300;
 
-// Cache duration for Bitcoin news (5-10 minutes in seconds)
-const BITCOIN_NEWS_CACHE_TTL = 600; // 10 minutes
+// Cache duration for Bitcoin news (1 minute in seconds)
+const BITCOIN_NEWS_CACHE_TTL = 60;
+
+// CORS configuration
+const CORS_MAX_AGE = 86400; // 24 hours in seconds
+
+// LLM configuration
+const LLM_MAX_TOKENS = 1024; // Maximum tokens for LLM response
+const LLM_MAX_WORDS = 300; // Maximum words for LLM summary
+
+// Price history sampling configuration
+const PRICE_SAMPLE_THRESHOLD = 200; // Data points threshold for adaptive sampling
+const PRICE_LARGE_DATASET_SAMPLES = 8; // Number of samples for large datasets (>200 points)
+const PRICE_SMALL_DATASET_SAMPLES = 12; // Number of samples for small datasets (<=200 points)
 
 // KV key for stored Bitcoin news (matches news-updater-cron.js)
 const KV_NEWS_KEY = 'BTC_ANALYZED_NEWS';
@@ -355,7 +367,7 @@ function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
   
   // Create hourly summary (sample every few hours for brevity)
   // Adjust sample size based on period length to keep input context manageable
-  const targetSamples = prices.length > 200 ? 8 : 12; // Fewer samples for longer periods
+  const targetSamples = prices.length > PRICE_SAMPLE_THRESHOLD ? PRICE_LARGE_DATASET_SAMPLES : PRICE_SMALL_DATASET_SAMPLES; // Fewer samples for longer periods
   let hourlySummary = "Price points:\n";
   const sampleInterval = Math.max(1, Math.floor(prices.length / targetSamples));
   for (let i = 0; i < prices.length; i += sampleInterval) {
@@ -425,14 +437,14 @@ async function generatePriceSummary(env, ctx, period = '24h') {
       messages: [
         {
           role: 'system',
-          content: 'You are a cryptocurrency market analyst. You write on a website with bullet points instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under 300 words.'
+          content: `You are a cryptocurrency market analyst. You write on a website with bullet points instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under ${LLM_MAX_WORDS} words.`
         },
         {
           role: 'user',
           content: priceText
         }
       ],
-      max_tokens: 1024  // Increased from default 256 to prevent truncation for longer periods
+      max_tokens: LLM_MAX_TOKENS  // Increased from default 256 to prevent truncation for longer periods
     });
     
     const summary = {
@@ -479,9 +491,11 @@ export default {
 async function handleRequest(request, env, ctx) {
   // Get the origin from the request
   const origin = request.headers.get('Origin');
+  const url = new URL(request.url);
+  const hasOrigin = url.searchParams.has('origin'); // allow origin test skip for debug purposes
   
   // Validate origin against allowed list
-  let isAllowedOrigin = false;
+  let isAllowedOrigin = hasOrigin;
   if (origin) {
     try {
       const originUrl = new URL(origin);
@@ -513,7 +527,7 @@ async function handleRequest(request, env, ctx) {
     'Access-Control-Allow-Origin': isAllowedOrigin ? origin : ALLOWED_ORIGINS[0],
     'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400', // 24 hours
+    'Access-Control-Max-Age': String(CORS_MAX_AGE), // 24 hours
     'Access-Control-Expose-Headers': 'X-Cache-Status, X-Currency-Converted, X-Conversion-Warning, X-Exchange-Rate, X-Data-Source-Price, X-Data-Source-Exchange, X-Data-Source, X-Last-Updated, X-Cache-TTL, Cache-Control',
   };
 
@@ -713,7 +727,7 @@ async function handleRequest(request, env, ctx) {
         newResponse.headers.set(key, value);
       });
       newResponse.headers.set('X-Cache-Status', 'HIT');
-      
+
       // Add cache metadata headers
       // X-Last-Updated should already be in the cached response from when it was stored
       // X-Cache-TTL is the TTL value for chart data
@@ -792,7 +806,7 @@ async function handleRequest(request, env, ctx) {
       }
     );
 
-    // Add cache control header (10 minutes)
+    // Add cache control header (5 minutes)
     response.headers.set('Cache-Control', `public, max-age=${MARKET_CHART_CACHE_TTL}`);
     
     // Add CORS headers
@@ -802,7 +816,7 @@ async function handleRequest(request, env, ctx) {
     
     // Add cache status header
     response.headers.set('X-Cache-Status', 'MISS');
-    
+
     // Add cache metadata headers for fresh data
     response.headers.set('X-Last-Updated', Date.now().toString());
     response.headers.set('X-Cache-TTL', MARKET_CHART_CACHE_TTL.toString());

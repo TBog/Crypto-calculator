@@ -54,6 +54,39 @@ function getArticleId(article) {
   return article.article_id || article.link || null;
 }
 
+const HTML_ENTITY_MAP = {
+  'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'", 'nbsp': ' '
+  // Add more common ones here as needed (e.g., 'copy': '©')
+};
+
+// Pre-compile the regex once
+// Use a non-capturing outer group (?: ) and three inner capturing groups for dec, hex, and named entities
+const HTML_ENTITY_REGEX = /&(?:#(\d+)|#x([a-fA-F\d]+)|([a-zA-Z\d]+));/g;
+
+/**
+ * Minimal HTML entity decoder
+ */
+function decodeHTMLEntities(str) {
+  if (!str || typeof str !== 'string') return str || '';
+
+  return str.replace(HTML_ENTITY_REGEX, (match, dec, hex, named) => {
+    if (dec) {
+      const codePoint = parseInt(dec, 10);
+      // Validate code point is within valid Unicode range (0x10FFFF is the maximum valid Unicode code point)
+      if (codePoint > 0x10FFFF) return match;
+      return String.fromCodePoint(codePoint);
+    }
+    if (hex) {
+      const codePoint = parseInt(hex, 16);
+      // Validate code point is within valid Unicode range (0x10FFFF is the maximum valid Unicode code point)
+      if (codePoint > 0x10FFFF) return match;
+      return String.fromCodePoint(codePoint);
+    }
+    if (named) return HTML_ENTITY_MAP[named] || match;
+    return match;
+  });
+}
+
 /**
  * HTMLRewriter handler to extract text content from HTML
  * Optimized to skip headers, footers, menus, and other non-content elements
@@ -75,21 +108,44 @@ class TextExtractor {
   
   // Pre-compiled regex for pattern matching (much faster than array.some with includes)
   // Matches skip patterns in class names and IDs
-  static SKIP_REGEXP = /(?:^|\s)(nav|menu|header|footer|sidebar|aside|advertisement|ad-|promo|banner|widget|share|social|comment|related|recommend)(?:\s|$)/i;
+  static SKIP_REGEXP = /(?:^|\s)(nav|menu|menu-item|header|footer|sidebar|aside|advertisement|ad-|promo|banner|widget|share|social|comment|related|recommend)(?:\s|$)/i;
   
   constructor() {
     this.textChunks = [];
     this.charCount = 0;
     this.maxChars = MAX_CONTENT_CHARS;
     this.skipDepth = 0; // Track depth of skipped elements (for dynamic patterns only)
+    this.debugOutput = false;
+    this.lastElementTagName = null;
+  }
+
+  /**
+   * Enable debug output mode for text extraction.
+   * 
+   * WARNING: Debug mode is for inspection and troubleshooting only.
+   * When enabled, element tags like "[div]" and "(p)" are inserted into the extracted text,
+   * contaminating the actual article content. The resulting text should NOT be used for
+   * production processing, AI summarization, or any automated workflows.
+   * 
+   * Debug mode is useful for:
+   * - Understanding which HTML elements contributed to the extracted text
+   * - Debugging extraction issues and verifying skip patterns work correctly
+   * - Manual inspection and testing of the text extraction logic
+   */
+  enableDebugOutput() {
+    this.debugOutput = true;
   }
   
   element(element) {
+    // HTMLRewriter may invoke element handlers for nodes that have been removed
+    if (element.removed) return;
+
     // Early exit if we already have enough content (saves CPU on large pages)
     if (this.charCount >= this.maxChars) return;
-    
+
     const tagName = element.tagName.toLowerCase();
-    
+    this.lastElementTagName = tagName;
+
     // Check if this element can have content and closing tag
     const canHaveEndTag = element.canHaveContent && !element.selfClosing;
     
@@ -128,13 +184,24 @@ class TextExtractor {
         // Self-closing elements don't need depth tracking - no content to skip
       }
     }
+
+    if (this.debugOutput && this.skipDepth === 0) {
+      this.textChunks.push("[" + tagName + "]");
+    }
   }
   
   text(text) {
+    // HTMLRewriter may invoke text handlers for nodes that have been removed
+    if (text.removed) return;
+
     // Only extract text if we're not inside a skipped element and haven't reached limit
     if (this.skipDepth === 0 && this.charCount < this.maxChars) {
-      const content = text.text;
+      const content = decodeHTMLEntities(text.text);
       if (content && content.trim()) {
+        if (this.debugOutput) {
+          // don't count the debug text in this.charCount to preserve the initial parsing amount
+          this.textChunks.push("(" + this.lastElementTagName + ")");
+        }
         this.textChunks.push(content);
         this.charCount += content.length;
       }
@@ -156,9 +223,12 @@ class TextExtractor {
 /**
  * Fetch article content from URL using HTMLRewriter for parsing
  * @param {string} url - Article URL
+ * @param {boolean} enableDebug - Enable debug output in TextExtractor to show extracted element tags.
+ *                                WARNING: Debug mode contaminates text with element markers and should
+ *                                only be used for inspection/troubleshooting, NOT for production processing.
  * @returns {Promise<string|null>} Article text content or null on error
  */
-async function fetchArticleContent(url) {
+async function fetchArticleContent(url, enableDebug = false) {
   try {
     const response = await fetch(url, {
       headers: {
@@ -173,18 +243,31 @@ async function fetchArticleContent(url) {
     }
     
     const extractor = new TextExtractor();
+    if (enableDebug) {
+      extractor.enableDebugOutput();
+    }
     
     // Use element.remove() for static skip tags (more efficient - removes at Rust level)
     // This prevents text() handler from even waking up for content inside these tags
     const rewriter = new HTMLRewriter();
     
-    // Register remove handlers for all static skip tags
-    const tagsToRemove = 'script, style, nav, header, footer, aside, menu, form, svg, canvas, iframe, noscript';
-    rewriter.on(tagsToRemove, {
-        element(e) { e.remove(); }
-      });
+    // Define static skip tags as an array for clarity and easy editing
+    const tagsToRemove = [
+      'script', 'style', 'nav', 'header', 'footer', 'aside', 'menu',
+      'form', 'svg', 'canvas', 'iframe', 'noscript', 'title'
+    ];
     
-    // Register the text extractor for all elements
+    // Register remove handlers for each tag
+    // Note: Both element and text handlers are needed. While text handlers receive t.removed=true,
+    // explicitly calling t.remove() ensures the text is properly removed before other handlers process it.
+    for (const tag of tagsToRemove) {
+      rewriter.on(tag, { 
+        element(e) { e.remove(); },
+        text(t) { t.remove(); }
+      });
+    }
+
+    // Register the text extractor for all other elements
     rewriter.on('*', extractor);
     
     const transformed = rewriter.transform(response);
@@ -576,7 +659,7 @@ async function handleFetch(request, env) {
     const url = new URL(request.url);
     const articleId = url.searchParams.get('articleId');
     const forceProcess = url.searchParams.has('force');
-    const articleText = url.searchParams.has('text');
+    const articleText = url.searchParams.get('text');
     
     if (!articleId) {
       return new Response(JSON.stringify({
@@ -629,7 +712,7 @@ async function handleFetch(request, env) {
 
     // Check if we should return the article text
     if (articleText) {
-      const content = await fetchArticleContent(article.link);
+      const content = await fetchArticleContent(article.link, articleText === "debug");
       
       return new Response(JSON.stringify({
         success: true,
@@ -724,6 +807,9 @@ async function handleFetch(request, env) {
     });
   }
 }
+
+// Export for testing
+export { TextExtractor, fetchArticleContent, decodeHTMLEntities };
 
 export default {
   async scheduled(event, env, ctx) {
