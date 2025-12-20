@@ -23,9 +23,20 @@ id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID_FROM_STEP_2"
 # Environment bindings
 # No API keys needed - this worker only reads from KV and calls AI
 
+# Configuration variables (optional - defaults are set in shared/constants.js)
+# Uncomment and modify these to override defaults:
+# [vars]
+# MAX_ARTICLES_PER_RUN = 5       # Articles to process per run (default: 5)
+# MAX_CONTENT_CHARS = 10240      # Max chars to extract from webpage (default: 10KB)
+# MAX_CONTENT_FETCH_ATTEMPTS = 5 # Max retry attempts for content fetch (default: 5)
+
 [env.production]
 # Production environment configuration
 [[env.production.kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with production KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production
 id = "REPLACE_WITH_YOUR_PRODUCTION_KV_NAMESPACE_ID"
+
+# Production-specific variables (optional)
+# [env.production.vars]
+# MAX_ARTICLES_PER_RUN = 10      # Process more articles per run in production

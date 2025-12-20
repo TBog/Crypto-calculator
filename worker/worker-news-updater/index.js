@@ -17,28 +17,17 @@
  */
 
 import { createNewsProvider, getArticleId } from '../shared/news-providers.js';
-
-// KV keys for optimized storage
-const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';  // Full articles payload
-const KV_KEY_IDS = 'BTC_ID_INDEX';         // ID index for deduplication
-
-// Maximum articles to keep in KV storage (prevent size issues)
-const MAX_STORED_ARTICLES = 500;
-
-// Maximum number of pages to fetch (safety limit)
-const MAX_PAGES = 15;
-
-// ID index TTL in seconds (30 days)
-const ID_INDEX_TTL = 60 * 60 * 24 * 30;
+import { getNewsUpdaterConfig } from '../shared/constants.js';
 
 /**
  * Fetch and aggregate articles with early-exit optimization
  * Stops pagination immediately when a known article is encountered
  * @param {Object} env - Environment variables
  * @param {Set} knownIds - Set of known article IDs for deduplication
+ * @param {Object} config - Configuration values
  * @returns {Promise<Array>} Array of new articles
  */
-async function aggregateArticles(env, knownIds) {
+async function aggregateArticles(env, knownIds, config) {
   // Create provider based on environment configuration
   const provider = createNewsProvider(env);
   
@@ -95,8 +84,8 @@ async function aggregateArticles(env, knownIds) {
       pageCount++;
       
       // Stop if we've reached max pages
-      if (pageCount >= MAX_PAGES) {
-        console.log(`Stopping: Max pages (${MAX_PAGES}) reached`);
+      if (pageCount >= config.MAX_PAGES) {
+        console.log(`Stopping: Max pages (${config.MAX_PAGES}) reached`);
         break;
       }
       
@@ -110,7 +99,7 @@ async function aggregateArticles(env, knownIds) {
       console.error(`Error fetching page ${pageCount + 1}:`, error);
       break;
     }
-  } while (nextPage && pageCount < MAX_PAGES);
+  } while (nextPage && pageCount < config.MAX_PAGES);
   
   console.log(`Aggregation complete: ${newArticles.length} new articles, ${creditsUsed} credits used`);
   
@@ -152,19 +141,20 @@ async function markArticlesForProcessing(articles) {
  * Write #2: Update ID index (BTC_ID_INDEX)
  * @param {Object} env - Environment variables
  * @param {Array} newArticles - New analyzed articles
+ * @param {Object} config - Configuration values
  * @returns {Promise<void>}
  */
-async function storeInKV(env, newArticles) {
+async function storeInKV(env, newArticles, config) {
   const timestamp = Date.now();
   
   // Merge with existing articles to maintain history
   let allArticles = [...newArticles];
   
   try {
-    const existingData = await env.CRYPTO_NEWS_CACHE.get(KV_KEY_NEWS, { type: 'json' });
+    const existingData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' });
     if (existingData && existingData.articles) {
       // Keep existing articles (up to a reasonable limit to avoid KV size issues)
-      const existingArticles = existingData.articles.slice(0, MAX_STORED_ARTICLES - newArticles.length);
+      const existingArticles = existingData.articles.slice(0, config.MAX_STORED_ARTICLES - newArticles.length);
       allArticles = [...newArticles, ...existingArticles];
       console.log(`Merged ${newArticles.length} new articles with ${existingArticles.length} existing articles`);
     }
@@ -195,8 +185,8 @@ async function storeInKV(env, newArticles) {
   };
   
   // Write #1: Update full news payload
-  await env.CRYPTO_NEWS_CACHE.put(KV_KEY_NEWS, JSON.stringify(finalData));
-  console.log(`Write #1: Stored ${allArticles.length} articles in KV under key: ${KV_KEY_NEWS}`);
+  await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(finalData));
+  console.log(`Write #1: Stored ${allArticles.length} articles in KV under key: ${config.KV_KEY_NEWS}`);
   
   // Write #2: Update ID index - MUST match the articles actually stored
   // Extract IDs from the articles we're storing using consistent helper function
@@ -205,13 +195,13 @@ async function storeInKV(env, newArticles) {
     .filter(id => id); // Remove any null/undefined IDs
   
   await env.CRYPTO_NEWS_CACHE.put(
-    KV_KEY_IDS, 
+    config.KV_KEY_IDS, 
     JSON.stringify(storedArticleIds),
     {
-      expirationTtl: ID_INDEX_TTL
+      expirationTtl: config.ID_INDEX_TTL
     }
   );
-  console.log(`Write #2: Stored ${storedArticleIds.length} article IDs in index under key: ${KV_KEY_IDS}`);
+  console.log(`Write #2: Stored ${storedArticleIds.length} article IDs in index under key: ${config.KV_KEY_IDS}`);
 }
 
 /**
@@ -227,13 +217,16 @@ async function handleScheduled(event, env, ctx) {
   console.log('=== Bitcoin News Updater Cron Job Started ===');
   console.log(`Execution time: ${new Date().toISOString()}`);
   
+  // Load configuration with environment variable overrides
+  const config = getNewsUpdaterConfig(env);
+  
   try {
     // Phase 1: Preparation - Read ID index
     console.log('Phase 1: Reading ID index from KV...');
     let knownIds = new Set();
     
     try {
-      const idIndexData = await env.CRYPTO_NEWS_CACHE.get(KV_KEY_IDS, { type: 'json' });
+      const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
       if (idIndexData && Array.isArray(idIndexData)) {
         knownIds = new Set(idIndexData);
         console.log(`Loaded ${knownIds.size} known article IDs from index`);
@@ -246,7 +239,7 @@ async function handleScheduled(event, env, ctx) {
     
     // Phase 2: Optimized Fetch with Early Exit
     console.log('Phase 2: Fetching articles with early-exit optimization...');
-    const newArticles = await aggregateArticles(env, knownIds);
+    const newArticles = await aggregateArticles(env, knownIds, config);
     
     if (newArticles.length === 0) {
       console.log('No new articles to process, skipping analysis and KV update');
@@ -261,7 +254,7 @@ async function handleScheduled(event, env, ctx) {
     
     // Phase 3: KV Update (exactly 2 writes)
     console.log('Phase 3: Updating KV (2 writes)...');
-    await storeInKV(env, markedArticles);
+    await storeInKV(env, markedArticles, config);
     
     console.log('=== Bitcoin News Updater Cron Job Completed Successfully ===');
     console.log(`Queued ${newArticles.length} articles for AI processing by consumer worker`);
@@ -283,11 +276,13 @@ async function handleScheduled(event, env, ctx) {
  * @returns {Promise<Response>} JSON response with cache statistics
  */
 async function handleFetch(request, env) {
+  const config = getNewsUpdaterConfig(env);
+  
   try {
     // Read both KV keys
     const [newsData, idIndexData] = await Promise.all([
-      env.CRYPTO_NEWS_CACHE.get(KV_KEY_NEWS, { type: 'json' }),
-      env.CRYPTO_NEWS_CACHE.get(KV_KEY_IDS, { type: 'json' })
+      env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' }),
+      env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' })
     ]);
     
     if (!newsData || !newsData.articles) {

@@ -35,50 +35,11 @@
  */
 
 import { getArticleId } from '../shared/news-providers.js';
-
-// KV keys (must match news-updater-cron.js)
-const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';
-const KV_KEY_IDS = 'BTC_ID_INDEX';
-
-// Maximum articles to process per run (stay within subrequest limits)
-// 5 articles × 3 subrequests (fetch + 2 AI calls) = 15 subrequests (well under 50 limit)
-const MAX_ARTICLES_PER_RUN = 5;
-
-// Maximum characters to extract from webpage (128KB limit for AI context)
-const MAX_CONTENT_CHARS = 10 * 1024;
-
-const HTML_ENTITY_MAP = {
-  'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'", 'nbsp': ' '
-  // Add more common ones here as needed (e.g., 'copy': '©')
-};
-
-// Pre-compile the regex once
-// Use a non-capturing outer group (?: ) and three inner capturing groups for dec, hex, and named entities
-const HTML_ENTITY_REGEX = /&(?:#(\d+)|#x([a-fA-F\d]+)|([a-zA-Z\d]+));/g;
-
-/**
- * Minimal HTML entity decoder
- */
-function decodeHTMLEntities(str) {
-  if (!str || typeof str !== 'string') return str || '';
-
-  return str.replace(HTML_ENTITY_REGEX, (match, dec, hex, named) => {
-    if (dec) {
-      const codePoint = parseInt(dec, 10);
-      // Validate code point is within valid Unicode range (0x10FFFF is the maximum valid Unicode code point)
-      if (codePoint > 0x10FFFF) return match;
-      return String.fromCodePoint(codePoint);
-    }
-    if (hex) {
-      const codePoint = parseInt(hex, 16);
-      // Validate code point is within valid Unicode range (0x10FFFF is the maximum valid Unicode code point)
-      if (codePoint > 0x10FFFF) return match;
-      return String.fromCodePoint(codePoint);
-    }
-    if (named) return HTML_ENTITY_MAP[named] || match;
-    return match;
-  });
-}
+import { 
+  getNewsProcessorConfig,
+  decodeHTMLEntities,
+  MAX_CONTENT_FETCH_ATTEMPTS 
+} from '../shared/constants.js';
 
 /**
  * HTMLRewriter handler to extract text content from HTML
@@ -103,10 +64,10 @@ class TextExtractor {
   // Matches skip patterns in class names and IDs
   static SKIP_REGEXP = /(?:^|\s)(nav|menu|menu-item|header|footer|sidebar|aside|advertisement|ad-|promo|banner|widget|share|social|comment|related|recommend)(?:\s|$)/i;
   
-  constructor() {
+  constructor(maxChars = 10 * 1024) {
     this.textChunks = [];
     this.charCount = 0;
-    this.maxChars = MAX_CONTENT_CHARS;
+    this.maxChars = maxChars;
     this.skipDepth = 0; // Track depth of skipped elements (for dynamic patterns only)
     this.debugOutput = false;
     this.lastElementTagName = null;
@@ -219,9 +180,10 @@ class TextExtractor {
  * @param {boolean} enableDebug - Enable debug output in TextExtractor to show extracted element tags.
  *                                WARNING: Debug mode contaminates text with element markers and should
  *                                only be used for inspection/troubleshooting, NOT for production processing.
+ * @param {number} maxContentChars - Maximum characters to extract from webpage
  * @returns {Promise<string|null>} Article text content or null on error
  */
-async function fetchArticleContent(url, enableDebug = false) {
+async function fetchArticleContent(url, enableDebug = false, maxContentChars = 10 * 1024) {
   try {
     const response = await fetch(url, {
       headers: {
@@ -235,7 +197,7 @@ async function fetchArticleContent(url, enableDebug = false) {
       return null;
     }
     
-    const extractor = new TextExtractor();
+    const extractor = new TextExtractor(maxContentChars);
     if (enableDebug) {
       extractor.enableDebugOutput();
     }
@@ -274,7 +236,7 @@ async function fetchArticleContent(url, enableDebug = false) {
         if (done) break;
         
         // Check if we have enough content and stop immediately
-        if (extractor.charCount >= MAX_CONTENT_CHARS) {
+        if (extractor.charCount >= maxContentChars) {
           await reader.cancel(); // Stop the parser and network IMMEDIATELY
           break;
         }
@@ -426,7 +388,7 @@ async function analyzeSentiment(env, article) {
  * @param {Object} article - Article to process
  * @returns {Promise<Object>} Processed article with updates
  */
-async function processArticle(env, article) {
+async function processArticle(env, article, config) {
   const updates = { ...article };
   let needsUpdate = false;
   
@@ -448,14 +410,14 @@ async function processArticle(env, article) {
   }
   
   // Process AI summary if flag is true OR if we're retrying after contentTimeout
-  // contentTimeout is an integer counter of failed attempts (retry if < 5)
+  // contentTimeout is an integer counter of failed attempts (retry if < MAX_CONTENT_FETCH_ATTEMPTS)
   // This allows us to retry the fetch in the next run instead of giving up
-  const shouldRetry = article.contentTimeout && article.contentTimeout < 5;
+  const shouldRetry = article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS;
   
   if (needsSummary === true || shouldRetry) {
     if (article.link) {
       try {
-        const content = await fetchArticleContent(article.link);
+        const content = await fetchArticleContent(article.link, false, config.MAX_CONTENT_CHARS);
         
         if (content) {
           const summary = await generateArticleSummary(env, article.title, content);
@@ -480,10 +442,10 @@ async function processArticle(env, article) {
           // Increment timeout counter (start at 1 if undefined)
           const timeoutCount = (article.contentTimeout || 0) + 1;
           updates.contentTimeout = timeoutCount;
-          updates.summaryError = `fetch_failed (attempt ${timeoutCount}/5)`;
+          updates.summaryError = `fetch_failed (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
           
           // If we've hit max retries, stop trying
-          if (timeoutCount >= 5) {
+          if (timeoutCount >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
             console.log(`  AI Summary: Max retries (${timeoutCount}) reached, giving up`);
             updates.needsSummary = false;  // Stop retrying
           }
@@ -532,10 +494,13 @@ async function handleScheduled(event, env) {
   console.log('=== Bitcoin News Processor Cron Job Started ===');
   console.log(`Execution time: ${new Date().toISOString()}`);
   
+  // Load configuration with environment variable overrides
+  const config = getNewsProcessorConfig(env);
+  
   try {
     // Step 1: Read articles from KV
     console.log('Step 1: Reading articles from KV...');
-    const newsData = await env.CRYPTO_NEWS_CACHE.get(KV_KEY_NEWS, { type: 'json' });
+    const newsData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' });
     
     if (!newsData || !newsData.articles || newsData.articles.length === 0) {
       console.log('No articles found in KV');
@@ -548,7 +513,7 @@ async function handleScheduled(event, env) {
     const pendingArticles = newsData.articles.filter(article => 
       (article.needsSentiment ?? true) || 
       (article.needsSummary ?? true) || 
-      (article.contentTimeout && article.contentTimeout < 5)  // Retry if timeout count < 5
+      (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS)  // Retry if timeout count < max
     );
     
     if (pendingArticles.length === 0) {
@@ -560,7 +525,7 @@ async function handleScheduled(event, env) {
     console.log(`Found ${pendingArticles.length} articles needing processing`);
     
     // Step 3: Process up to MAX_ARTICLES_PER_RUN articles
-    const articlesToProcess = pendingArticles.slice(0, MAX_ARTICLES_PER_RUN);
+    const articlesToProcess = pendingArticles.slice(0, config.MAX_ARTICLES_PER_RUN);
     console.log(`Processing ${articlesToProcess.length} articles this run...`);
     
     let processedCount = 0;
@@ -571,7 +536,7 @@ async function handleScheduled(event, env) {
       
       try {
         // Process the article
-        const updatedArticle = await processArticle(env, article);
+        const updatedArticle = await processArticle(env, article, config);
         
         // Step 4: Update article in KV after processing (incremental write)
         // Find and replace the article in the array
@@ -599,7 +564,7 @@ async function handleScheduled(event, env) {
           newsData.lastUpdatedExternal = Date.now();
           
           // Write updated data back to KV
-          await env.CRYPTO_NEWS_CACHE.put(KV_KEY_NEWS, JSON.stringify(newsData));
+          await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
           console.log(`  ✓ Article updated in KV`);
           
           processedCount++;
@@ -633,6 +598,8 @@ async function handleScheduled(event, env) {
  * @returns {Promise<Response>} JSON response with processing result
  */
 async function handleFetch(request, env) {
+  const config = getNewsProcessorConfig(env);
+  
   try {
     // Only allow GET requests
     if (request.method !== 'GET') {
@@ -670,7 +637,7 @@ async function handleFetch(request, env) {
     console.log(`Processing on-demand request for article: ${articleId}`);
     
     // Read articles from KV
-    const newsData = await env.CRYPTO_NEWS_CACHE.get(KV_KEY_NEWS, { type: 'json' });
+    const newsData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' });
     
     if (!newsData || !newsData.articles) {
       return new Response(JSON.stringify({
@@ -725,7 +692,7 @@ async function handleFetch(request, env) {
     const needsProcessing = forceProcess ||
                            (article.needsSentiment ?? true) || 
                            (article.needsSummary ?? true) || 
-                           ((article.contentTimeout ?? 0) < 5);
+                           ((article.contentTimeout ?? 0) < config.MAX_CONTENT_FETCH_ATTEMPTS);
     
     if (needsProcessing) {
       // make sure we're generating a new summary
@@ -747,7 +714,7 @@ async function handleFetch(request, env) {
     
     // Process the article
     console.log(`Processing article: "${article.title?.substring(0, 50)}..."`);
-    const updatedArticle = await processArticle(env, article);
+    const updatedArticle = await processArticle(env, article, config);
     
     // Update article in KV
     newsData.articles[articleIndex] = updatedArticle;
@@ -770,7 +737,7 @@ async function handleFetch(request, env) {
     newsData.lastUpdatedExternal = Date.now();
     
     // Write back to KV
-    await env.CRYPTO_NEWS_CACHE.put(KV_KEY_NEWS, JSON.stringify(newsData));
+    await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
     
     console.log(`Article processed and updated in KV`);
     
