@@ -12,11 +12,21 @@ The architecture consists of three Cloudflare Workers to solve the "Too many sub
 
 This architecture uses **Cloudflare KV as a "todo list"** to enable incremental processing while staying within the FREE tier's 50 subrequest limit.
 
+## News Provider Support
+
+The system supports multiple news providers:
+- **NewsData.io** (default) - Requires AI sentiment analysis
+- **APITube** - Includes built-in sentiment
+
+See [NEWS_PROVIDER_GUIDE.md](./NEWS_PROVIDER_GUIDE.md) for detailed provider configuration instructions.
+
 ## Prerequisites
 
 - Cloudflare account with Workers enabled (FREE tier is sufficient)
 - Wrangler CLI installed (`npm install -g wrangler`)
-- NewsData.io API key ([get one here](https://newsdata.io/))
+- API key for your chosen news provider:
+  - NewsData.io: [get one here](https://newsdata.io/)
+  - APITube: Contact APITube for API access
 
 ## Architecture Diagram
 
@@ -121,13 +131,37 @@ Published crypto-news-updater (x.xx sec)
 Current Deployment ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-### Step 6: Set NewsData.io API Key for Producer
+### Step 6: Configure News Provider
 
+#### Set Provider Selection (Optional)
+
+Choose which news provider to use (defaults to NewsData.io if not set):
+
+```bash
+wrangler secret put NEWS_PROVIDER --config wrangler-news-updater.toml
+```
+
+When prompted, enter either:
+- `newsdata` for NewsData.io (default)
+- `apitube` for APITube
+
+#### Set Provider API Key
+
+**For NewsData.io:**
 ```bash
 wrangler secret put NEWSDATA_API_KEY --config wrangler-news-updater.toml
 ```
 
 When prompted, paste your NewsData.io API key and press Enter.
+
+**For APITube:**
+```bash
+wrangler secret put APITUBE_API_KEY --config wrangler-news-updater.toml
+```
+
+When prompted, paste your APITube API key and press Enter.
+
+**Note:** You only need to set the API key for the provider you're using. However, it's recommended to set both keys to enable quick switching between providers.
 
 ### Step 7: Deploy the News Processor Worker (Consumer)
 

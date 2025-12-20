@@ -24,16 +24,19 @@ This directory contains a Cloudflare Worker that acts as a proxy for the CoinGec
   - Provides concise market analysis
   - Cached for 5 minutes for optimal performance
 - **Bitcoin News Feed with Scheduled Updates**: Bitcoin news with AI-powered sentiment analysis
-  - **NEW: Queue-Based Architecture** - Solves "Too many subrequests" error
-  - Three-worker system: Producer (scheduled) → Queue → Consumer (AI processing)
+  - **Multiple Provider Support** - NewsData.io and APITube integration via unified interface
+  - Provider selection via Cloudflare secret (defaults to NewsData.io)
+  - APITube includes built-in sentiment analysis (faster processing)
+  - NewsData.io uses Cloudflare Workers AI for sentiment
+  - Three-worker system: Producer (scheduled) → KV → Consumer (AI processing)
   - Each article processed in separate worker invocation with fresh subrequest budget
-  - Cloudflare Workers AI sentiment analysis and content summarization
   - Early-exit optimization: Stops fetching when hitting known articles
   - Two-key KV structure: ID index for deduplication + full payload for API
   - Maintains up to 500 articles with sentiment tags and AI summaries
   - API endpoint reads from KV (millisecond latency)
   - Scales to process unlimited articles without hitting subrequest limits
-  - See [QUEUE_DEPLOYMENT_GUIDE.md](./QUEUE_DEPLOYMENT_GUIDE.md) for setup instructions
+  - See [NEWS_PROVIDER_GUIDE.md](./NEWS_PROVIDER_GUIDE.md) for provider configuration
+  - See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for setup instructions
 
 ## Testing
 
