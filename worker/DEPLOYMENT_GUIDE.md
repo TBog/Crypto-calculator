@@ -533,6 +533,53 @@ After successful deployment:
 4. Consider setting up alerts for failures
 5. Document your specific configuration for future reference
 
+## Automated Deployment with GitHub Actions
+
+For continuous deployment, the repository includes a GitHub Actions workflow that automatically deploys all three workers when changes are pushed to the `main` branch.
+
+### Setup GitHub Actions Deployment
+
+1. **Add Cloudflare Secrets to GitHub Repository**
+   
+   Go to your repository Settings → Secrets and variables → Actions, then add:
+   
+   - `CLOUDFLARE_API_TOKEN`: Create a token at [Cloudflare Dashboard → My Profile → API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+     - Use "Edit Cloudflare Workers" template or create custom token with Workers permissions
+   - `CLOUDFLARE_ACCOUNT_ID`: Found in your Cloudflare Dashboard or Workers overview page
+
+2. **Workflow Configuration**
+   
+   The workflow file is located at `.github/workflows/deploy-workers.yml` and will:
+   - Trigger on push to `main` branch when `worker/**` files change
+   - Can also be manually triggered from GitHub Actions tab
+   - Deploy all three workers in parallel using a matrix strategy
+   - Properly handle the shared folder that contains common code
+
+3. **How It Works**
+   
+   The workflow runs from the `worker/` directory and deploys each worker with:
+   ```bash
+   wrangler deploy --config worker-{name}/wrangler.toml
+   ```
+   
+   This ensures all workers have access to the `shared/` folder containing `news-providers.js`.
+
+4. **Manual Trigger**
+   
+   You can manually trigger deployment:
+   - Go to Actions tab in GitHub
+   - Select "Deploy Cloudflare Workers"
+   - Click "Run workflow"
+   - Select the branch (usually `main`)
+
+5. **Monitoring Deployments**
+   
+   - View deployment status in the Actions tab
+   - Check deployment logs in Cloudflare Dashboard
+   - Verify worker versions in Cloudflare Workers & Pages dashboard
+
+For detailed information about the GitHub Actions setup, see [.github/workflows/README.md](../.github/workflows/README.md).
+
 ## Support
 
 For issues with:
