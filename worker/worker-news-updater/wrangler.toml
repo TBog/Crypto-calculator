@@ -35,6 +35,22 @@ id = "4933e1596e304b71b4aac4cae364b75f"
 # MAX_PAGES = 15                 # Maximum pages to fetch from API (default: 15)
 # ID_INDEX_TTL = 2592000         # ID index TTL in seconds (default: 30 days)
 
+# Observability configuration for logs and traces
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = true
+persist = true
+head_sampling_rate = 1
+
 [env.production]
 # Production environment configuration
 # Secrets are automatically available in env.NEWSDATA_API_KEY, env.APITUBE_API_KEY, and env.NEWS_PROVIDER

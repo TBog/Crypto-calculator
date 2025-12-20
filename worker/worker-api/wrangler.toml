@@ -19,6 +19,22 @@ id = "4933e1596e304b71b4aac4cae364b75f"
 # The NEWSDATA_API_KEY should be set using: wrangler secret put NEWSDATA_API_KEY (no longer needed after migration)
 # This keeps the API keys secure and out of version control
 
+# Observability configuration for logs and traces
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = true
+persist = true
+head_sampling_rate = 1
+
 [env.production]
 # Production environment configuration
 # Secrets are automatically available in env.COINGECKO_KEY and env.NEWSDATA_API_KEY
