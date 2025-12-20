@@ -30,6 +30,22 @@ MAX_ARTICLES_PER_RUN = 1       # Articles to process per run (default: 5)
 # MAX_CONTENT_CHARS = 10240      # Max chars to extract from webpage (default: 10KB)
 MAX_CONTENT_FETCH_ATTEMPTS = 2 # Max retry attempts for content fetch (default: 5)
 
+# Observability configuration for logs and traces
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = true
+persist = true
+head_sampling_rate = 1
+
 [env.production]
 # Production environment configuration
 [[env.production.kv_namespaces]]
