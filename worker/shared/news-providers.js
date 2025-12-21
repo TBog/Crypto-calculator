@@ -46,8 +46,13 @@ function getArticleId(article) {
 }
 
 /**
+ * Common acronyms that should be fully capitalized in source names
+ */
+const COMMON_ACRONYMS = ['BBC', 'CNN', 'ABC', 'NBC', 'CBS', 'BTC', 'ETH'];
+
+/**
  * Format source_id into a readable source name
- * Converts identifiers like "coindesk" to "CoinDesk", "bbc-news" to "BBC News"
+ * Converts identifiers like "coindesk" to "Coindesk", "bbc-news" to "BBC News"
  * @param {string} sourceId - Source identifier (e.g., "coindesk", "cointelegraph")
  * @returns {string} Formatted source name
  */
@@ -65,7 +70,7 @@ function formatSourceName(sourceId) {
     .map(word => {
       // Handle common acronyms
       const upper = word.toUpperCase();
-      if (['BBC', 'CNN', 'ABC', 'NBC', 'CBS', 'BTC', 'ETH'].includes(upper)) {
+      if (COMMON_ACRONYMS.includes(upper)) {
         return upper;
       }
       // Capitalize first letter, lowercase rest
