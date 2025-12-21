@@ -46,6 +46,35 @@ function getArticleId(article) {
 }
 
 /**
+ * Format source_id into a readable source name
+ * Converts identifiers like "coindesk" to "CoinDesk", "bbc-news" to "BBC News"
+ * @param {string} sourceId - Source identifier (e.g., "coindesk", "cointelegraph")
+ * @returns {string} Formatted source name
+ */
+function formatSourceName(sourceId) {
+  if (!sourceId) return '';
+  
+  // Split on hyphens, underscores, or camelCase boundaries
+  const words = sourceId
+    .replace(/([a-z])([A-Z])/g, '$1 $2') // Handle camelCase
+    .split(/[-_\s]+/) // Split on hyphens, underscores, spaces
+    .filter(word => word.length > 0);
+  
+  // Capitalize each word
+  return words
+    .map(word => {
+      // Handle common acronyms
+      const upper = word.toUpperCase();
+      if (['BBC', 'CNN', 'ABC', 'NBC', 'CBS', 'BTC', 'ETH'].includes(upper)) {
+        return upper;
+      }
+      // Capitalize first letter, lowercase rest
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
+/**
  * NewsData.io Provider
  * Fetches Bitcoin news from NewsData.io API
  */
@@ -89,6 +118,10 @@ class NewsDataProvider {
   /**
    * Normalize article to standard format
    * NewsData.io articles don't include sentiment, so we mark them for processing
+   * 
+   * Note: NewsData.io API does not provide a source_name field.
+   * We derive it from source_id using formatSourceName().
+   * 
    * @param {Object} article - Raw article from provider
    * @returns {Object} Normalized article
    */
@@ -100,7 +133,7 @@ class NewsDataProvider {
       link: article.link,
       pubDate: article.pubDate,
       source_id: article.source_id,
-      source_name: article.source_name,
+      source_name: formatSourceName(article.source_id),
       source_url: article.source_url,
       source_icon: article.source_icon,
       image_url: article.image_url,
@@ -337,5 +370,6 @@ export {
   NewsDataProvider,
   APITubeProvider,
   createNewsProvider,
-  getArticleId
+  getArticleId,
+  formatSourceName
 };
