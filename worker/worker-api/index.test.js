@@ -316,6 +316,72 @@ describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
       const url = new URL('http://localhost/api/bitcoin-news');
       expect(url.pathname).toBe('/api/bitcoin-news');
     });
+
+    it('should successfully fetch bitcoin news when KV data is available', async () => {
+      const mockNewsData = {
+        articles: [
+          { title: 'Test Article', sentiment: 'positive' }
+        ],
+        totalArticles: 1,
+        lastUpdatedExternal: Date.now(),
+        sentimentCounts: { positive: 1, negative: 0, neutral: 0 }
+      };
+
+      const request = new Request('http://localhost/api/bitcoin-news', {
+        headers: {
+          'Origin': 'https://tbog.github.io'
+        }
+      });
+
+      const env = {
+        CRYPTO_NEWS_CACHE: {
+          get: async (key, options) => {
+            expect(key).toBe('BTC_ANALYZED_NEWS');
+            expect(options.type).toBe('json');
+            return mockNewsData;
+          }
+        }
+      };
+
+      const ctx = {
+        waitUntil: (promise) => promise,
+        passThroughOnException: () => {}
+      };
+
+      const response = await worker.fetch(request, env, ctx);
+      expect(response.status).toBe(200);
+      
+      const data = await response.json();
+      expect(data.articles).toHaveLength(1);
+      expect(data.totalArticles).toBe(1);
+    });
+
+    it('should handle missing KV data with proper error', async () => {
+      const request = new Request('http://localhost/api/bitcoin-news', {
+        headers: {
+          'Origin': 'https://tbog.github.io'
+        }
+      });
+
+      const env = {
+        CRYPTO_NEWS_CACHE: {
+          get: async (key, options) => {
+            return null; // No data in KV
+          }
+        }
+      };
+
+      const ctx = {
+        waitUntil: (promise) => promise,
+        passThroughOnException: () => {}
+      };
+
+      const response = await worker.fetch(request, env, ctx);
+      expect(response.status).toBe(503);
+      
+      const data = await response.json();
+      expect(data.error).toBe('News data temporarily unavailable');
+    });
   });
 
   describe('KV Storage Architecture', () => {
