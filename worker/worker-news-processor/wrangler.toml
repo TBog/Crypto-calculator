@@ -3,11 +3,12 @@ main = "index.js"
 compatibility_date = "2024-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Cron trigger - runs every 10 minutes
+# Cron trigger - runs every minute to split work across successive calls
 # Format: "minute hour day month day-of-week"
-# "*/10 * * * *" = every 10 minutes
+# "* * * * *" = every minute
+# This allows scraping and AI processing to happen in separate runs
 [triggers]
-crons = ["*/3 * * * *"]
+crons = ["* * * * *"]
 
 # AI binding for sentiment analysis and summarization
 [ai]

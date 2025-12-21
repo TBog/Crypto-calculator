@@ -379,17 +379,25 @@ async function analyzeSentiment(env, article) {
 
 /**
  * Process a single article with AI analysis
+ * 
+ * Architecture: Phase-based processing across successive cron runs
+ * - Phase 1 (no extractedContent): Scrape content, save, exit
+ * - Phase 2 (has extractedContent): Run AI summary, save, exit
+ * 
+ * This splits work naturally without defensive saves during processing.
+ * The 1-minute cron schedule ensures phases execute quickly in sequence.
+ * 
  * Checks postprocessing flags and processes accordingly:
  * - needsSentiment: true → needs sentiment analysis
  * - needsSummary: true → needs AI summary generation
- * - contentTimeout: true → previous fetch timed out, retry
+ * - contentTimeout: integer → number of failed attempts (retry if < MAX_ATTEMPTS)
  * 
  * @param {Object} env - Environment variables
  * @param {Object} article - Article to process
- * @param {Function} saveArticleCallback - Callback to save article to KV after each critical section
+ * @param {Object} config - Configuration object
  * @returns {Promise<Object>} Processed article with updates
  */
-async function processArticle(env, article, config, saveArticleCallback) {
+async function processArticle(env, article, config) {
   const updates = { ...article };
   let needsUpdate = false;
   
@@ -417,42 +425,26 @@ async function processArticle(env, article, config, saveArticleCallback) {
   
   if (needsSummary === true || shouldRetry) {
     if (article.link) {
-      // PRE-EMPTIVE INCREMENT: Increment contentTimeout BEFORE processing
-      // This acts as a "poison pill" - if the worker crashes during processing,
-      // the next run will see the incremented counter and know a previous attempt failed.
-      // After MAX_CONTENT_FETCH_ATTEMPTS failures, circuit breaker stops retrying to prevent
-      // infinite retry loops on toxic articles that repeatedly crash the Worker.
+      // Increment timeout counter for crash tracking
       const timeoutCount = (article.contentTimeout || 0) + 1;
       updates.contentTimeout = timeoutCount;
-      updates.summaryError = `processing (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
-      needsUpdate = true;
       
-      // Save the pre-emptive increment immediately to KV (circuit breaker activation)
-      if (saveArticleCallback) {
-        await saveArticleCallback(updates);
-        console.log(`  ✓ Circuit breaker: Pre-emptive increment saved (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`);
-      }
-      
-      // CRITICAL SECTION 1: Content Scraping
-      // Skip scraping if we already have extracted content from a previous attempt
+      // PHASE 1: Content Scraping
+      // Skip if we already have extracted content from a previous run
       let content = updates.extractedContent || null;
       
       if (!content) {
+        // This is the scraping phase - extract content and exit
         try {
-          console.log(`  Fetching article content...`);
+          console.log(`  Phase 1: Fetching article content...`);
           content = await fetchArticleContent(article.link, false, config.MAX_CONTENT_CHARS);
           
           if (content) {
-            // Save extracted content to avoid re-scraping on retry
+            // Save extracted content for next run
             updates.extractedContent = content;
+            updates.summaryError = `scraping_complete (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
             needsUpdate = true;
-            console.log(`  ✓ Content extracted (${content.length} chars)`);
-            
-            // Save to KV after successful scraping
-            if (saveArticleCallback) {
-              await saveArticleCallback(updates);
-              console.log(`  ✓ Extracted content saved to KV`);
-            }
+            console.log(`  ✓ Content extracted (${content.length} chars) - AI processing in next run`);
           } else {
             console.log(`  AI Summary: Failed to fetch content`);
             updates.summaryError = `fetch_failed (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
@@ -461,10 +453,10 @@ async function processArticle(env, article, config, saveArticleCallback) {
             if (timeoutCount >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
               console.log(`  AI Summary: Max retries (${timeoutCount}) reached, giving up`);
               updates.needsSummary = false;  // Stop retrying
+              updates.contentTimeout = undefined;
             }
             
             needsUpdate = true;
-            return updates;
           }
         } catch (error) {
           console.error(`  Failed to fetch content:`, error.message);
@@ -474,21 +466,27 @@ async function processArticle(env, article, config, saveArticleCallback) {
           if (timeoutCount >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
             console.log(`  AI Summary: Max retries (${timeoutCount}) reached, giving up`);
             updates.needsSummary = false;  // Stop retrying
+            updates.contentTimeout = undefined;
           }
           
           needsUpdate = true;
-          return updates;
         }
-      } else {
-        console.log(`  Using previously extracted content (${content.length} chars)`);
+        
+        // Exit after scraping phase - AI will run in next cron call
+        if (needsUpdate) {
+          updates.processedAt = Date.now();
+        }
+        return updates;
       }
       
-      // CRITICAL SECTION 2: AI Processing
-      // At this point, we have content (either fresh or from previous attempt)
+      // PHASE 2: AI Processing
+      // We have content from previous run - process with AI
+      console.log(`  Phase 2: Using previously extracted content (${content.length} chars)`);
+      
       try {
         console.log(`  Generating AI summary...`);
         
-        // Decode HTML entities in title and content after content is stored
+        // Decode HTML entities in title and content
         // Content is already normalized by TextExtractor.getText()
         const decodedTitle = decodeHTMLEntities(article.title);
         const decodedText = decodeHTMLEntities(content);
@@ -521,6 +519,7 @@ async function processArticle(env, article, config, saveArticleCallback) {
         if (timeoutCount >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
           console.log(`  AI Summary: Max retries (${timeoutCount}) reached, giving up`);
           updates.needsSummary = false;               // Stop retrying
+          updates.contentTimeout = undefined;
           updates.extractedContent = undefined;       // Clear cached content
         }
         
@@ -593,27 +592,23 @@ async function handleScheduled(event, env) {
       console.log(`\nProcessing article ${processedCount + 1}/${articlesToProcess.length}: "${article.title?.substring(0, 50)}..."`);
       
       try {
-        // Create a save callback that updates the article in KV
-        // This will be called after each critical section (pre-emptive increment, scraping, AI)
-        const saveArticleCallback = async (updatedArticle) => {
-          const articleIndex = newsData.articles.findIndex(a => getArticleId(a) === articleId);
+        // Process the article (one phase per run)
+        const updatedArticle = await processArticle(env, article, config);
+        
+        // Update article in KV after processing
+        const articleIndex = newsData.articles.findIndex(a => getArticleId(a) === articleId);
+        
+        if (articleIndex !== -1) {
+          newsData.articles[articleIndex] = updatedArticle;
           
-          if (articleIndex !== -1) {
-            newsData.articles[articleIndex] = updatedArticle;
-            
-            // Write updated data back to KV
-            await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
-          }
-        };
-        
-        // Process the article with save callback
-        const updatedArticle = await processArticle(env, article, config, saveArticleCallback);
-        
-        // Step 4: Final update of article in KV after processing
-        await saveArticleCallback(updatedArticle);
-        console.log(`  ✓ Article processing complete`);
-        
-        processedCount++;
+          // Write updated data back to KV
+          await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
+          console.log(`  ✓ Article updated in KV`);
+          
+          processedCount++;
+        } else {
+          console.warn(`  Article not found in KV: ${articleId}`);
+        }
       } catch (error) {
         console.error(`  ✗ Error processing article:`, error);
         // Continue with next article
@@ -758,18 +753,13 @@ async function handleFetch(request, env) {
     // Process the article
     console.log(`Processing article: "${article.title?.substring(0, 50)}..."`);
     
-    // Create a save callback that updates the article in KV
-    const saveArticleCallback = async (updatedArticle) => {
-      newsData.articles[articleIndex] = updatedArticle;
-      
-      // Write back to KV
-      await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
-    };
+    const updatedArticle = await processArticle(env, article, config);
     
-    const updatedArticle = await processArticle(env, article, config, saveArticleCallback);
+    // Update article in KV
+    newsData.articles[articleIndex] = updatedArticle;
     
-    // Final save
-    await saveArticleCallback(updatedArticle);
+    // Write back to KV
+    await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
     
     console.log(`Article processed and updated in KV`);
     
