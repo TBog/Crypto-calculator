@@ -381,8 +381,9 @@ async function analyzeSentiment(env, article) {
  * Process a single article with AI analysis
  * 
  * Architecture: Phase-based processing across successive cron runs
- * - Phase 1 (no extractedContent): Scrape content, save, exit
- * - Phase 2 (has extractedContent): Run AI summary, save, exit
+ * - Phase 0 (needsSentiment): Analyze sentiment, save, exit
+ * - Phase 1 (no extractedContent): Scrape content (raw/undecoded), save, exit
+ * - Phase 2 (has extractedContent): Decode and run AI summary, save, exit
  * 
  * This splits work naturally without defensive saves during processing.
  * The 1-minute cron schedule ensures phases execute quickly in sequence.
@@ -404,17 +405,29 @@ async function processArticle(env, article, config) {
   const needsSentiment = article.needsSentiment ?? true;
   const needsSummary = article.needsSummary ?? true;
 
-  // Process sentiment if flag is true
+  // PHASE 0: Sentiment Analysis
+  // Process sentiment as a separate phase before scraping/AI
   if (needsSentiment === true) {
     try {
+      console.log(`  Phase 0: Analyzing sentiment...`);
       const sentimentResult = await analyzeSentiment(env, article);
       updates.sentiment = sentimentResult;  // Set actual sentiment value
       updates.needsSentiment = false;       // Clear the flag
       needsUpdate = true;
-      console.log(`  Sentiment: ${sentimentResult}`);
+      console.log(`  ✓ Sentiment: ${sentimentResult}`);
+      
+      // Exit after sentiment phase - scraping/AI will run in next cron call
+      if (needsUpdate) {
+        updates.processedAt = Date.now();
+      }
+      return updates;
     } catch (error) {
       console.error(`  Failed sentiment analysis:`, error.message);
       // Keep flag as true to retry next run
+      if (needsUpdate) {
+        updates.processedAt = Date.now();
+      }
+      return updates;
     }
   }
   
@@ -434,17 +447,18 @@ async function processArticle(env, article, config) {
       let content = updates.extractedContent || null;
       
       if (!content) {
-        // This is the scraping phase - extract content and exit
+        // This is the scraping phase - extract RAW content (undecoded) and exit
         try {
           console.log(`  Phase 1: Fetching article content...`);
           content = await fetchArticleContent(article.link, false, config.MAX_CONTENT_CHARS);
           
           if (content) {
-            // Save extracted content for next run
+            // Save RAW extracted content (undecoded) for next run
+            // HTML entities will be decoded in Phase 2 when actually used
             updates.extractedContent = content;
             updates.summaryError = `scraping_complete (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
             needsUpdate = true;
-            console.log(`  ✓ Content extracted (${content.length} chars) - AI processing in next run`);
+            console.log(`  ✓ Content extracted (${content.length} chars, raw) - AI processing in next run`);
           } else {
             console.log(`  AI Summary: Failed to fetch content`);
             updates.summaryError = `fetch_failed (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
@@ -480,16 +494,18 @@ async function processArticle(env, article, config) {
       }
       
       // PHASE 2: AI Processing
-      // We have content from previous run - process with AI
-      console.log(`  Phase 2: Using previously extracted content (${content.length} chars)`);
+      // We have RAW content from previous run - decode and process with AI
+      console.log(`  Phase 2: Using previously extracted content (${content.length} chars, raw)`);
       
       try {
         console.log(`  Generating AI summary...`);
         
-        // Decode HTML entities in title and content
-        // Content is already normalized by TextExtractor.getText()
+        // Decode HTML entities in title and content ONLY when actually using them
+        // This prevents double-decoding since we store raw content
         const decodedTitle = decodeHTMLEntities(article.title);
         const decodedText = decodeHTMLEntities(content);
+        
+        console.log(`  Decoded content (${decodedText.length} chars)`);
         
         const summary = await generateArticleSummary(env, decodedTitle, decodedText);
         
@@ -791,7 +807,7 @@ async function handleFetch(request, env) {
 }
 
 // Export for testing
-export { TextExtractor, fetchArticleContent, analyzeSentiment, generateArticleSummary };
+export { TextExtractor, fetchArticleContent };
 
 export default {
   async scheduled(event, env, ctx) {
