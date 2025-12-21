@@ -164,7 +164,7 @@ class TextExtractor {
   
   getText() {
     let text = this.textChunks.join(' ');
-    //text = text.replace(/\s+/g, ' ').trim();
+    text = text.replace(/\s+/g, ' ').trim();
     
     if (text.length > this.maxChars) {
       text = text.substring(0, this.maxChars);
@@ -488,10 +488,10 @@ async function processArticle(env, article, config, saveArticleCallback) {
       try {
         console.log(`  Generating AI summary...`);
         
-        // Decode HTML entities in title after content is stored
-        const decodedTitle =  decodeHTMLEntities(article.title).trim();
-        let decodedText = decodeHTMLEntities(content);
-        decodedText = decodedText.replace(/\s+/g, ' ').trim();
+        // Decode HTML entities in title and content after content is stored
+        // Content is already normalized by TextExtractor.getText()
+        const decodedTitle = decodeHTMLEntities(article.title);
+        const decodedText = decodeHTMLEntities(content);
         
         const summary = await generateArticleSummary(env, decodedTitle, decodedText);
         

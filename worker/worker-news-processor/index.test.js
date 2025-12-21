@@ -667,14 +667,6 @@ describe('decodeHTMLEntities', () => {
 
 describe('Circuit Breaker - Pre-emptive Increment', () => {
   it('should increment contentTimeout before processing starts', async () => {
-    const { analyzeSentiment, generateArticleSummary, fetchArticleContent } = await import('./index.js');
-    
-    // Track save callback invocations
-    const saveCallbacks = [];
-    const saveArticleCallback = async (article) => {
-      saveCallbacks.push({ ...article });
-    };
-    
     // Mock article needing summary
     const article = {
       title: 'Test Article',
@@ -682,22 +674,6 @@ describe('Circuit Breaker - Pre-emptive Increment', () => {
       needsSummary: true,
       contentTimeout: 0
     };
-    
-    // Mock env and config
-    const mockEnv = {
-      AI: {
-        run: async () => ({ response: 'SUMMARY: Test summary' })
-      }
-    };
-    
-    const mockConfig = {
-      MAX_CONTENT_FETCH_ATTEMPTS: 5,
-      MAX_CONTENT_CHARS: 1024
-    };
-    
-    // We can't actually call processArticle here due to dependencies,
-    // but we've verified the logic structure ensures contentTimeout
-    // is incremented before any await operations
     
     // Verify the logic: contentTimeout should be incremented first
     const timeoutCount = (article.contentTimeout || 0) + 1;
