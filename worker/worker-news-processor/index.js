@@ -581,57 +581,57 @@ async function handleScheduled(event, env) {
       return;
     }
     
-    // Step 2: Find articles that need processing (in reverse chronological order - newest first)
+    // Step 2: Find articles that need processing with their indices
     console.log('Step 2: Finding articles that need processing...');
-    const pendingArticles = newsData.articles.filter(article => 
-      (article.needsSentiment ?? true) || 
-      (article.needsSummary ?? true) || 
-      (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS)  // Retry if timeout count < max
-    );
+    const pendingArticlesWithIndices = [];
     
-    if (pendingArticles.length === 0) {
+    newsData.articles.forEach((article, index) => {
+      const needsProcessing = 
+        (article.needsSentiment ?? true) || 
+        (article.needsSummary ?? true) || 
+        (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
+      
+      if (needsProcessing) {
+        pendingArticlesWithIndices.push({ article, index });
+      }
+    });
+    
+    if (pendingArticlesWithIndices.length === 0) {
       console.log('No articles need processing');
       console.log('=== Bitcoin News Processor Cron Job Completed (All Done) ===');
       return;
     }
     
-    console.log(`Found ${pendingArticles.length} articles needing processing`);
+    console.log(`Found ${pendingArticlesWithIndices.length} articles needing processing`);
     
     // Step 3: Process up to MAX_ARTICLES_PER_RUN articles
-    const articlesToProcess = pendingArticles.slice(0, config.MAX_ARTICLES_PER_RUN);
+    const articlesToProcess = pendingArticlesWithIndices.slice(0, config.MAX_ARTICLES_PER_RUN);
     console.log(`Processing ${articlesToProcess.length} articles this run...`);
     
     let processedCount = 0;
     
-    for (const article of articlesToProcess) {
-      const articleId = getArticleId(article);
+    for (const { article, index: articleIndex } of articlesToProcess) {
       console.log(`\nProcessing article ${processedCount + 1}/${articlesToProcess.length}: "${article.title?.substring(0, 50)}..."`);
       
       try {
         // Process the article (one phase per run)
         const updatedArticle = await processArticle(env, article, config);
         
-        // Update article in KV after processing
-        const articleIndex = newsData.articles.findIndex(a => getArticleId(a) === articleId);
+        // Update article in KV using the pre-calculated index (no expensive search needed)
+        newsData.articles[articleIndex] = updatedArticle;
         
-        if (articleIndex !== -1) {
-          newsData.articles[articleIndex] = updatedArticle;
-          
-          // Write updated data back to KV
-          await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
-          console.log(`  ✓ Article updated in KV`);
-          
-          processedCount++;
-        } else {
-          console.warn(`  Article not found in KV: ${articleId}`);
-        }
+        // Write updated data back to KV
+        await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
+        console.log(`  ✓ Article updated in KV`);
+        
+        processedCount++;
       } catch (error) {
         console.error(`  ✗ Error processing article:`, error);
         // Continue with next article
       }
     }
     
-    const remainingPending = pendingArticles.length - processedCount;
+    const remainingPending = pendingArticlesWithIndices.length - processedCount;
     console.log(`\n=== Bitcoin News Processor Cron Job Completed Successfully ===`);
     console.log(`Processed: ${processedCount} articles`);
     console.log(`Remaining: ${remainingPending} articles (will process in next run)`);
