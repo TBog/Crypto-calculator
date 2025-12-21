@@ -37,7 +37,8 @@
 import { getArticleId } from '../shared/news-providers.js';
 import { 
   getNewsProcessorConfig,
-  MAX_CONTENT_FETCH_ATTEMPTS 
+  MAX_CONTENT_FETCH_ATTEMPTS,
+  decodeHTMLEntities
 } from '../shared/constants.js';
 
 /**
@@ -486,7 +487,11 @@ async function processArticle(env, article, config, saveArticleCallback) {
       // At this point, we have content (either fresh or from previous attempt)
       try {
         console.log(`  Generating AI summary...`);
-        const summary = await generateArticleSummary(env, article.title, content);
+        
+        // Decode HTML entities in title after content is stored
+        const decodedTitle = decodeHTMLEntities(article.title);
+        
+        const summary = await generateArticleSummary(env, decodedTitle, content);
         
         if (summary) {
           updates.aiSummary = summary;                // Set actual summary text
@@ -593,24 +598,6 @@ async function handleScheduled(event, env) {
           
           if (articleIndex !== -1) {
             newsData.articles[articleIndex] = updatedArticle;
-            
-            // Recalculate sentiment counts (only count actual sentiment values, not flags)
-            const sentimentCounts = {
-              positive: 0,
-              negative: 0,
-              neutral: 0
-            };
-            
-            newsData.articles.forEach(a => {
-              const s = a.sentiment;
-              // Only count if sentiment is a string value (not true/false flag)
-              if (typeof s === 'string' && ['positive', 'negative', 'neutral'].includes(s)) {
-                sentimentCounts[s] = (sentimentCounts[s] || 0) + 1;
-              }
-            });
-            
-            newsData.sentimentCounts = sentimentCounts;
-            newsData.lastUpdatedExternal = Date.now();
             
             // Write updated data back to KV
             await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
@@ -772,23 +759,6 @@ async function handleFetch(request, env) {
     // Create a save callback that updates the article in KV
     const saveArticleCallback = async (updatedArticle) => {
       newsData.articles[articleIndex] = updatedArticle;
-      
-      // Recalculate sentiment counts
-      const sentimentCounts = {
-        positive: 0,
-        negative: 0,
-        neutral: 0
-      };
-      
-      newsData.articles.forEach(a => {
-        const s = a.sentiment;
-        if (typeof s === 'string' && ['positive', 'negative', 'neutral'].includes(s)) {
-          sentimentCounts[s] = (sentimentCounts[s] || 0) + 1;
-        }
-      });
-      
-      newsData.sentimentCounts = sentimentCounts;
-      newsData.lastUpdatedExternal = Date.now();
       
       // Write back to KV
       await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
