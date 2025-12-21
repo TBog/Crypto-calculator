@@ -438,15 +438,15 @@ async function processArticle(env, article, config) {
   
   if (needsSummary === true || shouldRetry) {
     if (article.link) {
-      // Increment timeout counter for crash tracking
-      const timeoutCount = (article.contentTimeout || 0) + 1;
-      updates.contentTimeout = timeoutCount;
-      
       // PHASE 1: Content Scraping
       // Skip if we already have extracted content from a previous run
       let content = updates.extractedContent || null;
       
       if (!content) {
+        // Increment timeout counter for crash tracking only when we actually attempt scraping
+        const timeoutCount = (article.contentTimeout || 0) + 1;
+        updates.contentTimeout = timeoutCount;
+        
         // This is the scraping phase - extract RAW content (undecoded) and exit
         try {
           console.log(`  Phase 1: Fetching article content...`);
