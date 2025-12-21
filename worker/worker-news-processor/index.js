@@ -827,7 +827,7 @@ async function handleFetch(request, env) {
 }
 
 // Export for testing
-export { TextExtractor, fetchArticleContent };
+export { TextExtractor, fetchArticleContent, analyzeSentiment, generateArticleSummary };
 
 export default {
   async scheduled(event, env, ctx) {
