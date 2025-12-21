@@ -136,9 +136,60 @@ async function markArticlesForProcessing(articles) {
 }
 
 /**
- * Store analyzed articles in Cloudflare KV using two-key optimization
- * Write #1: Update full news payload (BTC_ANALYZED_NEWS)
- * Write #2: Update ID index (BTC_ID_INDEX)
+ * Migrate legacy BTC_ANALYZED_NEWS data to individual article storage
+ * This function is called during the transition period to migrate old data
+ * @param {Object} env - Environment variables
+ * @param {Object} config - Configuration values
+ * @returns {Promise<Array>} Array of migrated article IDs
+ */
+async function migrateLegacyData(env, config) {
+  console.log('Checking for legacy BTC_ANALYZED_NEWS data to migrate...');
+  
+  try {
+    const legacyData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' });
+    
+    if (!legacyData || !legacyData.articles || legacyData.articles.length === 0) {
+      console.log('No legacy data found to migrate');
+      return [];
+    }
+    
+    console.log(`Found ${legacyData.articles.length} articles in legacy format, migrating...`);
+    
+    // Store each legacy article individually
+    const writePromises = legacyData.articles.map(article => {
+      const articleId = getArticleId(article);
+      if (!articleId) return Promise.resolve();
+      
+      const articleKey = `article:${articleId}`;
+      return env.CRYPTO_NEWS_CACHE.put(articleKey, JSON.stringify(article), {
+        expirationTtl: config.ID_INDEX_TTL
+      });
+    });
+    
+    await Promise.all(writePromises.filter(p => p));
+    
+    // Extract IDs for the index (in original order - latest first)
+    const migratedIds = legacyData.articles
+      .map(article => getArticleId(article))
+      .filter(id => id);
+    
+    console.log(`✓ Migrated ${migratedIds.length} articles to individual storage`);
+    
+    // Delete the legacy key after successful migration
+    await env.CRYPTO_NEWS_CACHE.delete(config.KV_KEY_NEWS);
+    console.log('✓ Deleted legacy BTC_ANALYZED_NEWS key');
+    
+    return migratedIds;
+  } catch (error) {
+    console.error('Error migrating legacy data:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Store analyzed articles in Cloudflare KV with individual article storage
+ * Each article is stored with key: article:<article_id>
+ * BTC_ID_INDEX stores ordered list of article IDs (latest first)
  * @param {Object} env - Environment variables
  * @param {Array} newArticles - New analyzed articles
  * @param {Object} config - Configuration values
@@ -147,61 +198,65 @@ async function markArticlesForProcessing(articles) {
 async function storeInKV(env, newArticles, config) {
   const timestamp = Date.now();
   
-  // Merge with existing articles to maintain history
-  let allArticles = [...newArticles];
-  
+  // Get existing ID index to maintain history
+  let existingIds = [];
   try {
-    const existingData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' });
-    if (existingData && existingData.articles) {
-      // Keep existing articles (up to a reasonable limit to avoid KV size issues)
-      const existingArticles = existingData.articles.slice(0, config.MAX_STORED_ARTICLES - newArticles.length);
-      allArticles = [...newArticles, ...existingArticles];
-      console.log(`Merged ${newArticles.length} new articles with ${existingArticles.length} existing articles`);
+    const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
+    if (idIndexData && Array.isArray(idIndexData)) {
+      existingIds = idIndexData;
+      console.log(`Found ${existingIds.length} existing article IDs in index`);
+    } else {
+      // DEPRECATION: Attempt to migrate legacy data if no ID index exists
+      const migratedIds = await migrateLegacyData(env, config);
+      if (migratedIds.length > 0) {
+        existingIds = migratedIds;
+        console.log(`Migrated ${migratedIds.length} articles from legacy format`);
+      }
     }
   } catch (error) {
-    console.log('No existing data to merge:', error.message);
+    console.log('No existing ID index found:', error.message);
   }
   
-  // Calculate sentiment distribution
-  const sentimentCounts = {
-    positive: 0,
-    negative: 0,
-    neutral: 0
-  };
-  
-  allArticles.forEach(article => {
-    const sentiment = article.sentiment;
-    // Only count if sentiment is a string value (not true flag for pending processing)
-    if (typeof sentiment === 'string' && ['positive', 'negative', 'neutral'].includes(sentiment)) {
-      sentimentCounts[sentiment] = (sentimentCounts[sentiment] || 0) + 1;
-    }
-  });
-  
-  const finalData = {
-    articles: allArticles,
-    totalArticles: allArticles.length,
-    lastUpdatedExternal: timestamp,
-    sentimentCounts: sentimentCounts
-  };
-  
-  // Write #1: Update full news payload
-  await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(finalData));
-  console.log(`Write #1: Stored ${allArticles.length} articles in KV under key: ${config.KV_KEY_NEWS}`);
-  
-  // Write #2: Update ID index - MUST match the articles actually stored
-  // Extract IDs from the articles we're storing using consistent helper function
-  const storedArticleIds = allArticles
+  // Extract IDs from new articles
+  const newArticleIds = newArticles
     .map(article => getArticleId(article))
     .filter(id => id); // Remove any null/undefined IDs
   
+  // Merge: new IDs first (latest), then existing IDs (keeping order)
+  // Remove duplicates and limit to MAX_STORED_ARTICLES
+  const allIds = [...newArticleIds];
+  for (const existingId of existingIds) {
+    if (!allIds.includes(existingId) && allIds.length < config.MAX_STORED_ARTICLES) {
+      allIds.push(existingId);
+    }
+  }
+  
+  console.log(`Storing ${newArticles.length} new articles individually in KV...`);
+  
+  // Store each new article individually with key: article:<id>
+  const writePromises = newArticles.map(article => {
+    const articleId = getArticleId(article);
+    if (!articleId) return Promise.resolve();
+    
+    const articleKey = `article:${articleId}`;
+    return env.CRYPTO_NEWS_CACHE.put(articleKey, JSON.stringify(article), {
+      expirationTtl: config.ID_INDEX_TTL
+    });
+  });
+  
+  // Wait for all article writes to complete
+  await Promise.all(writePromises.filter(p => p));
+  console.log(`✓ Stored ${newArticles.length} articles individually in KV`);
+  
+  // Update ID index with merged list (latest first)
   await env.CRYPTO_NEWS_CACHE.put(
     config.KV_KEY_IDS, 
-    JSON.stringify(storedArticleIds),
+    JSON.stringify(allIds),
     {
       expirationTtl: config.ID_INDEX_TTL
     }
   );
-  console.log(`Write #2: Stored ${storedArticleIds.length} article IDs in index under key: ${config.KV_KEY_IDS}`);
+  console.log(`✓ Updated ID index with ${allIds.length} article IDs (${newArticleIds.length} new, ${allIds.length - newArticleIds.length} existing)`);
 }
 
 /**
@@ -270,7 +325,7 @@ async function handleScheduled(event, env, ctx) {
  * When called via HTTP (not scheduled), returns JSON with cache info:
  * - Number of articles stored
  * - List of article IDs
- * - Latest 10 articles
+ * - Latest 10 articles (fetched individually from KV)
  * @param {Request} request - HTTP request
  * @param {Object} env - Environment variables
  * @returns {Promise<Response>} JSON response with cache statistics
@@ -279,13 +334,10 @@ async function handleFetch(request, env) {
   const config = getNewsUpdaterConfig(env);
   
   try {
-    // Read both KV keys
-    const [newsData, idIndexData] = await Promise.all([
-      env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' }),
-      env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' })
-    ]);
+    // Read ID index
+    const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
     
-    if (!newsData || !newsData.articles) {
+    if (!idIndexData || !Array.isArray(idIndexData) || idIndexData.length === 0) {
       return new Response(JSON.stringify({
         success: false,
         error: 'No cached articles found',
@@ -301,20 +353,25 @@ async function handleFetch(request, env) {
       });
     }
     
-    // Prepare response data
-    const articleIds = idIndexData && Array.isArray(idIndexData) ? idIndexData : [];
-    const latestArticles = newsData.articles.slice(0, 10).map(article => ({
-      ...article,
-      id: getArticleId(article),
-    }));
+    // Fetch latest 10 articles individually
+    const latestIds = idIndexData.slice(0, 10);
+    const articlePromises = latestIds.map(id => 
+      env.CRYPTO_NEWS_CACHE.get(`article:${id}`, { type: 'json' })
+    );
+    const latestArticlesData = await Promise.all(articlePromises);
+    
+    // Filter out any null results and add ID field
+    const latestArticles = latestArticlesData
+      .filter(article => article !== null)
+      .map(article => ({
+        ...article,
+        id: getArticleId(article),
+      }));
     
     const response = {
       success: true,
-      totalArticles: newsData.totalArticles || newsData.articles.length,
-      lastUpdated: newsData.lastUpdatedExternal,
-      lastUpdatedDate: new Date(newsData.lastUpdatedExternal).toISOString(),
-      sentimentCounts: newsData.sentimentCounts || { positive: 0, negative: 0, neutral: 0 },
-      articleIds: articleIds,
+      totalArticles: idIndexData.length,
+      articleIds: idIndexData,
       latestArticles: latestArticles
     };
     

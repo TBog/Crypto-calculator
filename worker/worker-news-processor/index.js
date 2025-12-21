@@ -570,56 +570,85 @@ async function handleScheduled(event, env) {
   const config = getNewsProcessorConfig(env);
   
   try {
-    // Step 1: Read articles from KV
-    console.log('Step 1: Reading articles from KV...');
-    const newsData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' });
+    // Step 1: Read article IDs from index
+    console.log('Step 1: Reading article IDs from index...');
+    const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
     
-    if (!newsData || !newsData.articles || newsData.articles.length === 0) {
-      console.log('No articles found in KV');
+    if (!idIndexData || !Array.isArray(idIndexData) || idIndexData.length === 0) {
+      console.log('No articles found in ID index');
       console.log('=== Bitcoin News Processor Cron Job Completed (No Articles) ===');
       return;
     }
     
-    // Step 2: Find articles that need processing with their indices
-    console.log('Step 2: Finding articles that need processing...');
-    const pendingArticlesWithIndices = [];
+    console.log(`Found ${idIndexData.length} article IDs in index`);
     
-    newsData.articles.forEach((article, index) => {
+    // Step 2: Read articles individually and find ones that need processing
+    console.log('Step 2: Finding articles that need processing...');
+    const pendingArticles = [];
+    
+    // Read articles in batches to find pending ones
+    // We'll check more articles than MAX_ARTICLES_PER_RUN to ensure we find enough pending ones
+    const checkLimit = Math.min(idIndexData.length, config.MAX_ARTICLES_PER_RUN * 5);
+    const articlePromises = idIndexData.slice(0, checkLimit).map(id => 
+      env.CRYPTO_NEWS_CACHE.get(`article:${id}`, { type: 'json' })
+        .then(article => ({ id, article }))
+    );
+    
+    const articleResults = await Promise.all(articlePromises);
+    
+    for (const { id, article } of articleResults) {
+      if (!article) {
+        console.warn(`Article not found for ID: ${id}`);
+        continue;
+      }
+      
       const needsProcessing = 
         (article.needsSentiment ?? true) || 
         (article.needsSummary ?? true) || 
         (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
       
       if (needsProcessing) {
-        pendingArticlesWithIndices.push({ article, index });
+        pendingArticles.push({ id, article });
       }
-    });
+      
+      // Stop once we have enough pending articles
+      if (pendingArticles.length >= config.MAX_ARTICLES_PER_RUN) {
+        break;
+      }
+    }
     
-    if (pendingArticlesWithIndices.length === 0) {
+    if (pendingArticles.length === 0) {
       console.log('No articles need processing');
       console.log('=== Bitcoin News Processor Cron Job Completed (All Done) ===');
       return;
     }
     
-    console.log(`Found ${pendingArticlesWithIndices.length} articles needing processing`);
+    console.log(`Found ${pendingArticles.length} articles needing processing`);
     
-    // Step 3: Process up to MAX_ARTICLES_PER_RUN articles
-    const articlesToProcess = pendingArticlesWithIndices.slice(0, config.MAX_ARTICLES_PER_RUN);
+    // Step 3: Process articles
+    const articlesToProcess = pendingArticles.slice(0, config.MAX_ARTICLES_PER_RUN);
     console.log(`Processing ${articlesToProcess.length} articles this run...`);
     
     let processedCount = 0;
     
-    // Process all articles and collect updates
+    // Process articles and collect updates
+    const updatePromises = [];
+    
     for (const item of articlesToProcess) {
-      const { article, index: articleIndex } = item;
+      const { id, article } = item;
       console.log(`\nProcessing article ${processedCount + 1}/${articlesToProcess.length}: "${article.title?.substring(0, 50)}..."`);
       
       try {
         // Process the article (one phase per run)
         const updatedArticle = await processArticle(env, article, config);
         
-        // Store updated article in the item for batch update
-        item.updatedArticle = updatedArticle;
+        // Queue the write operation
+        const articleKey = `article:${id}`;
+        updatePromises.push(
+          env.CRYPTO_NEWS_CACHE.put(articleKey, JSON.stringify(updatedArticle), {
+            expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
+          })
+        );
         
         processedCount++;
       } catch (error) {
@@ -628,20 +657,13 @@ async function handleScheduled(event, env) {
       }
     }
     
-    // Batch update: Apply all updates to newsData.articles and write once to KV
-    if (processedCount > 0) {
-      for (const item of articlesToProcess) {
-        if (item.updatedArticle) {
-          newsData.articles[item.index] = item.updatedArticle;
-        }
-      }
-      
-      // Single KV write for all processed articles
-      await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
-      console.log(`\n✓ Batch update: ${processedCount} articles written to KV in single operation`);
+    // Batch write: Execute all updates in parallel
+    if (updatePromises.length > 0) {
+      await Promise.all(updatePromises);
+      console.log(`\n✓ Batch update: ${processedCount} articles written to KV`);
     }
     
-    const remainingPending = pendingArticlesWithIndices.length - processedCount;
+    const remainingPending = pendingArticles.length - processedCount;
     console.log(`\n=== Bitcoin News Processor Cron Job Completed Successfully ===`);
     console.log(`Processed: ${processedCount} articles`);
     console.log(`Remaining: ${remainingPending} articles (will process in next run)`);
@@ -700,26 +722,11 @@ async function handleFetch(request, env) {
     
     console.log(`Processing on-demand request for article: ${articleId}`);
     
-    // Read articles from KV
-    const newsData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' });
+    // Read article from KV
+    const articleKey = `article:${articleId}`;
+    const article = await env.CRYPTO_NEWS_CACHE.get(articleKey, { type: 'json' });
     
-    if (!newsData || !newsData.articles) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'No articles found in KV'
-      }), {
-        status: 404,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
-      });
-    }
-    
-    // Find the article by ID
-    const articleIndex = newsData.articles.findIndex(a => getArticleId(a) === articleId);
-    
-    if (articleIndex === -1) {
+    if (!article) {
       return new Response(JSON.stringify({
         success: false,
         error: `Article not found with ID: ${articleId}`
@@ -731,8 +738,6 @@ async function handleFetch(request, env) {
         }
       });
     }
-    
-    const article = newsData.articles[articleIndex];
 
     // Check if we should return the article text
     if (articleText) {
@@ -781,11 +786,10 @@ async function handleFetch(request, env) {
     
     const updatedArticle = await processArticle(env, article, config);
     
-    // Update article in KV
-    newsData.articles[articleIndex] = updatedArticle;
-    
     // Write back to KV
-    await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
+    await env.CRYPTO_NEWS_CACHE.put(articleKey, JSON.stringify(updatedArticle), {
+      expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
+    });
     
     console.log(`Article processed and updated in KV`);
     

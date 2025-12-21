@@ -173,6 +173,7 @@ export function getNewsProcessorConfig(env) {
   return {
     KV_KEY_NEWS,
     KV_KEY_IDS,
+    ID_INDEX_TTL: getConfig(env, 'ID_INDEX_TTL', ID_INDEX_TTL),
     MAX_ARTICLES_PER_RUN: getConfig(env, 'MAX_ARTICLES_PER_RUN', MAX_ARTICLES_PER_RUN),
     MAX_CONTENT_CHARS: getConfig(env, 'MAX_CONTENT_CHARS', MAX_CONTENT_CHARS),
     MAX_CONTENT_FETCH_ATTEMPTS: getConfig(env, 'MAX_CONTENT_FETCH_ATTEMPTS', MAX_CONTENT_FETCH_ATTEMPTS),
@@ -187,6 +188,7 @@ export function getNewsProcessorConfig(env) {
 export function getAPIWorkerConfig(env) {
   return {
     KV_KEY_NEWS,
+    KV_KEY_IDS,
     SUPPORTED_CURRENCIES_CACHE_TTL: getConfig(env, 'SUPPORTED_CURRENCIES_CACHE_TTL', SUPPORTED_CURRENCIES_CACHE_TTL),
     EXCHANGE_RATE_CACHE_TTL: getConfig(env, 'EXCHANGE_RATE_CACHE_TTL', EXCHANGE_RATE_CACHE_TTL),
     SUMMARY_CACHE_TTL: getConfig(env, 'SUMMARY_CACHE_TTL', SUMMARY_CACHE_TTL),

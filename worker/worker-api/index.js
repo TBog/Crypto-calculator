@@ -26,34 +26,77 @@ const ALLOWED_ORIGINS = [
 
 /**
  * Fetch Bitcoin news from Cloudflare KV (populated by scheduled worker)
- * This endpoint simply reads pre-fetched and pre-analyzed data from KV
+ * This endpoint reads articles stored individually by ID from KV
  * No external API calls are made, ensuring ultra-fast response times
+ * 
+ * DEPRECATION: Also supports legacy BTC_ANALYZED_NEWS format for transition period
+ * 
  * @param {Object} env - Environment variables (includes CRYPTO_NEWS_CACHE KV binding)
  * @param {Object} config - Configuration object with KV keys and cache TTLs
  * @returns {Promise<{data: Object, cacheStatus: string, lastUpdated: number}>} News data with cache status and timestamp
  */
 async function fetchBitcoinNews(env, config) {
   try {
-    // Read from KV namespace
-    const cachedData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' });
+    // Read ID index
+    const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
     
-    if (!cachedData) {
-      // KV key is missing - scheduled worker hasn't run yet or failed
+    // DEPRECATION: Check for legacy BTC_ANALYZED_NEWS format
+    if (!idIndexData || !Array.isArray(idIndexData) || idIndexData.length === 0) {
+      console.log('No ID index found, checking for legacy BTC_ANALYZED_NEWS...');
+      const legacyData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' });
+      
+      if (legacyData && legacyData.articles) {
+        console.log('Found legacy data, returning it (migration needed)');
+        return {
+          data: legacyData,
+          cacheStatus: 'KV-LEGACY',
+          lastUpdated: legacyData.lastUpdatedExternal || Date.now()
+        };
+      }
+      
+      // No data in either format
       throw new Error('News data temporarily unavailable. Please try again later.');
     }
     
-    // Data structure from scheduled worker:
-    // {
-    //   articles: [...],
-    //   totalArticles: number,
-    //   lastUpdatedExternal: timestamp,
-    //   sentimentCounts: { positive, negative, neutral }
-    // }
+    // Read individual articles using the ID index
+    const articlePromises = idIndexData.map(id => 
+      env.CRYPTO_NEWS_CACHE.get(`article:${id}`, { type: 'json' })
+    );
+    const articles = await Promise.all(articlePromises);
+    
+    // Filter out any null results (articles that were deleted or expired)
+    const validArticles = articles.filter(article => article !== null);
+    
+    if (validArticles.length === 0) {
+      throw new Error('News data temporarily unavailable. Please try again later.');
+    }
+    
+    // Calculate sentiment distribution (no longer stored as metadata)
+    const sentimentCounts = {
+      positive: 0,
+      negative: 0,
+      neutral: 0
+    };
+    
+    validArticles.forEach(article => {
+      const sentiment = article.sentiment;
+      if (typeof sentiment === 'string' && ['positive', 'negative', 'neutral'].includes(sentiment)) {
+        sentimentCounts[sentiment]++;
+      }
+    });
+    
+    // Construct response in format compatible with frontend
+    const responseData = {
+      articles: validArticles,
+      totalArticles: validArticles.length,
+      lastUpdatedExternal: Date.now(),
+      sentimentCounts: sentimentCounts
+    };
     
     return {
-      data: cachedData,
+      data: responseData,
       cacheStatus: 'KV',
-      lastUpdated: cachedData.lastUpdatedExternal || Date.now()
+      lastUpdated: Date.now()
     };
   } catch (error) {
     console.error('Failed to fetch Bitcoin news from KV:', error);

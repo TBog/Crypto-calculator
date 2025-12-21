@@ -318,14 +318,13 @@ describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
     });
 
     it('should successfully fetch bitcoin news when KV data is available', async () => {
-      const mockNewsData = {
-        articles: [
-          { title: 'Test Article', sentiment: 'positive' }
-        ],
-        totalArticles: 1,
-        lastUpdatedExternal: Date.now(),
-        sentimentCounts: { positive: 1, negative: 0, neutral: 0 }
+      const mockArticle = { 
+        title: 'Test Article', 
+        sentiment: 'positive',
+        link: 'https://example.com/article1'
       };
+      
+      const articleId = 'article1-id';
 
       const request = new Request('http://localhost/api/bitcoin-news', {
         headers: {
@@ -336,9 +335,18 @@ describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
       const env = {
         CRYPTO_NEWS_CACHE: {
           get: async (key, options) => {
-            expect(key).toBe('BTC_ANALYZED_NEWS');
-            expect(options.type).toBe('json');
-            return mockNewsData;
+            // Return ID index
+            if (key === 'BTC_ID_INDEX') {
+              return [articleId];
+            }
+            
+            // Return individual article
+            if (key === `article:${articleId}`) {
+              return mockArticle;
+            }
+            
+            // Return null for any other key (including legacy BTC_ANALYZED_NEWS)
+            return null;
           }
         }
       };
@@ -354,6 +362,7 @@ describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
       const data = await response.json();
       expect(data.articles).toHaveLength(1);
       expect(data.totalArticles).toBe(1);
+      expect(data.articles[0].title).toBe('Test Article');
     });
 
     it('should handle missing KV data with proper error', async () => {
@@ -385,9 +394,11 @@ describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
   });
 
   describe('KV Storage Architecture', () => {
-    it('should use KV for reading news data', () => {
-      const kvKey = 'BTC_ANALYZED_NEWS';
-      expect(kvKey).toBe('BTC_ANALYZED_NEWS');
+    it('should use individual article storage with ID index', () => {
+      const idIndexKey = 'BTC_ID_INDEX';
+      const articleKeyPattern = 'article:<id>';
+      expect(idIndexKey).toBe('BTC_ID_INDEX');
+      expect(articleKeyPattern).toContain('article:');
     });
 
     it('should return KV cache status', () => {
