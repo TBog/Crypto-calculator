@@ -9,19 +9,7 @@
  * - Currency conversion layer for unsupported currencies
  */
 
-import { 
-  getAPIWorkerConfig,
-  SUPPORTED_CURRENCIES_CACHE_TTL,
-  EXCHANGE_RATE_CACHE_TTL,
-  SUMMARY_CACHE_TTL,
-  PRICE_HISTORY_CACHE_TTL,
-  MARKET_CHART_CACHE_TTL,
-  LLM_MAX_TOKENS,
-  LLM_MAX_WORDS,
-  PRICE_SAMPLE_THRESHOLD,
-  PRICE_LARGE_DATASET_SAMPLES,
-  PRICE_SMALL_DATASET_SAMPLES
-} from '../shared/constants.js';
+import { getAPIWorkerConfig } from '../shared/constants.js';
 
 // Allowed origins for accessing this worker
 // For localhost/127.0.0.1: protocol and hostname must match (any port allowed)
@@ -131,12 +119,12 @@ async function fetchFromCoinGecko(endpoint, cacheKey, cacheTTL, env, ctx) {
  * @param {Object} ctx - Execution context
  * @returns {Promise<Array<string>>} Array of supported currency codes
  */
-async function fetchSupportedCurrencies(env, ctx) {
+async function fetchSupportedCurrencies(env, ctx, config) {
   try {
     const result = await fetchFromCoinGecko(
       '/api/v3/simple/supported_vs_currencies',
       'coingecko-supported-currencies',
-      SUPPORTED_CURRENCIES_CACHE_TTL,
+      config.SUPPORTED_CURRENCIES_CACHE_TTL,
       env,
       ctx
     );
@@ -151,9 +139,10 @@ async function fetchSupportedCurrencies(env, ctx) {
 /**
  * Fetch all supported currencies from ExchangeRate-API
  * @param {Object} ctx - Execution context
+ * @param {Object} config - Configuration object
  * @returns {Promise<Object>} Object with currency codes and their exchange rates
  */
-async function fetchAllExchangeRates(ctx) {
+async function fetchAllExchangeRates(ctx, config) {
   const cacheKey = 'exchange-rate-all-usd';
   const cache = caches.default;
   
@@ -181,7 +170,7 @@ async function fetchAllExchangeRates(ctx) {
     const cacheResponse = new Response(JSON.stringify(data), {
       headers: {
         'Content-Type': 'application/json',
-        'Cache-Control': `public, max-age=${EXCHANGE_RATE_CACHE_TTL}`
+        'Cache-Control': `public, max-age=${config.EXCHANGE_RATE_CACHE_TTL}`
       }
     });
     
@@ -200,14 +189,15 @@ async function fetchAllExchangeRates(ctx) {
  * Uses the consolidated fetchAllExchangeRates to avoid duplicate API calls
  * @param {string} targetCurrency - Target currency code (e.g., 'ron')
  * @param {Object} ctx - Execution context
+ * @param {Object} config - Configuration object
  * @returns {Promise<number>} Exchange rate from USD to target currency
  */
-async function fetchExchangeRate(targetCurrency, ctx) {
+async function fetchExchangeRate(targetCurrency, ctx, config) {
   const upperCurrency = targetCurrency.toUpperCase();
   
   try {
     // Fetch all rates (will use cache if available)
-    const data = await fetchAllExchangeRates(ctx);
+    const data = await fetchAllExchangeRates(ctx, config);
     const rate = data.rates[upperCurrency];
     
     if (!rate) {
@@ -289,15 +279,16 @@ function convertSimplePriceData(data, exchangeRate, targetCurrency) {
  * Uses cache to avoid repeated API calls
  * @param {Object} env - Environment variables
  * @param {Object} ctx - Execution context
+ * @param {Object} config - Configuration object
  * @param {number} days - Number of days of history (1, 7, 30, or 90)
  * @returns {Promise<{data: Object, cacheStatus: string}>} Price history data with cache status
  */
-async function fetchPriceHistory(env, ctx, days = 1) {
+async function fetchPriceHistory(env, ctx, config, days = 1) {
   try {
     return await fetchFromCoinGecko(
       `/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${days}`,
       `price-history-usd-${days}d`,
-      PRICE_HISTORY_CACHE_TTL,
+      config.PRICE_HISTORY_CACHE_TTL,
       env,
       ctx
     );
@@ -311,9 +302,10 @@ async function fetchPriceHistory(env, ctx, days = 1) {
  * Convert price history data to human-readable text for LLM
  * @param {Object} priceData - Price history data from CoinGecko
  * @param {string} periodLabel - Period label (e.g., "Last 24 Hours", "Last 7 Days")
+ * @param {Object} config - Configuration object
  * @returns {string} Human-readable text description
  */
-function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
+function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours", config) {
   if (!priceData || !priceData.prices || priceData.prices.length === 0) {
     return "No price data available.";
   }
@@ -349,7 +341,7 @@ function convertPriceHistoryToText(priceData, periodLabel = "Last 24 Hours") {
   
   // Create hourly summary (sample every few hours for brevity)
   // Adjust sample size based on period length to keep input context manageable
-  const targetSamples = prices.length > PRICE_SAMPLE_THRESHOLD ? PRICE_LARGE_DATASET_SAMPLES : PRICE_SMALL_DATASET_SAMPLES; // Fewer samples for longer periods
+  const targetSamples = prices.length > config.PRICE_SAMPLE_THRESHOLD ? config.PRICE_LARGE_DATASET_SAMPLES : config.PRICE_SMALL_DATASET_SAMPLES; // Fewer samples for longer periods
   let hourlySummary = "Price points:\n";
   const sampleInterval = Math.max(1, Math.floor(prices.length / targetSamples));
   for (let i = 0; i < prices.length; i += sampleInterval) {
@@ -381,10 +373,11 @@ Total data points: ${prices.length}`;
  * Generate LLM summary of Bitcoin price trends
  * @param {Object} env - Environment variables (includes AI binding)
  * @param {Object} ctx - Execution context
+ * @param {Object} workerConfig - Worker configuration object
  * @param {string} period - Time period ('24h', '7d', '30d', '90d')
  * @returns {Promise<{summary: Object, cacheStatus: string}>} Summary response with cache status
  */
-async function generatePriceSummary(env, ctx, period = '24h') {
+async function generatePriceSummary(env, ctx, workerConfig, period = '24h') {
   // Map period to days and labels
   const periodConfig = {
     '24h': { days: 1, label: 'Last 24 Hours' },
@@ -407,11 +400,11 @@ async function generatePriceSummary(env, ctx, period = '24h') {
   }
   
   // Fetch price history (will use cache if available)
-  const priceResult = await fetchPriceHistory(env, ctx, config.days);
+  const priceResult = await fetchPriceHistory(env, ctx, workerConfig, config.days);
   const priceData = priceResult.data;
   
   // Convert to human-readable text
-  const priceText = convertPriceHistoryToText(priceData, config.label);
+  const priceText = convertPriceHistoryToText(priceData, config.label, workerConfig);
   
   // Generate summary using Cloudflare Workers AI
   try {
@@ -419,14 +412,14 @@ async function generatePriceSummary(env, ctx, period = '24h') {
       messages: [
         {
           role: 'system',
-          content: `You are a cryptocurrency market analyst. You write on a website with bullet points instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under ${LLM_MAX_WORDS} words.`
+          content: `You are a cryptocurrency market analyst. You write on a website with bullet points instead of emoji. Analyze the provided Bitcoin price data and provide a concise summary of the trends, including key movements, overall direction, and any notable patterns. Keep your response under ${workerConfig.LLM_MAX_WORDS} words.`
         },
         {
           role: 'user',
           content: priceText
         }
       ],
-      max_tokens: LLM_MAX_TOKENS  // Increased from default 256 to prevent truncation for longer periods
+      max_tokens: workerConfig.LLM_MAX_TOKENS  // Increased from default 256 to prevent truncation for longer periods
     });
     
     const summary = {
@@ -444,7 +437,7 @@ async function generatePriceSummary(env, ctx, period = '24h') {
     const cacheResponse = new Response(JSON.stringify(summary), {
       headers: {
         'Content-Type': 'application/json',
-        'Cache-Control': `public, max-age=${SUMMARY_CACHE_TTL}`
+        'Cache-Control': `public, max-age=${workerConfig.SUMMARY_CACHE_TTL}`
       }
     });
     
@@ -552,14 +545,14 @@ async function handleRequest(request, env, ctx) {
     
     // Special endpoint to get supported currencies from CoinGecko
     if (url.pathname === '/api/v3/simple/supported_vs_currencies') {
-      const supportedCurrencies = await fetchSupportedCurrencies(env, ctx);
+      const supportedCurrencies = await fetchSupportedCurrencies(env, ctx, config);
       
       return new Response(JSON.stringify(supportedCurrencies), {
         status: 200,
         headers: {
           ...corsHeaders,
           'Content-Type': 'application/json',
-          'Cache-Control': `public, max-age=${SUPPORTED_CURRENCIES_CACHE_TTL}`,
+          'Cache-Control': `public, max-age=${config.SUPPORTED_CURRENCIES_CACHE_TTL}`,
           'X-Data-Source': 'CoinGecko API'
         }
       });
@@ -589,14 +582,14 @@ async function handleRequest(request, env, ctx) {
           });
         }
         
-        const result = await generatePriceSummary(env, ctx, period);
+        const result = await generatePriceSummary(env, ctx, config, period);
         
         return new Response(JSON.stringify(result.summary), {
           status: 200,
           headers: {
             ...corsHeaders,
             'Content-Type': 'application/json',
-            'Cache-Control': `public, max-age=${SUMMARY_CACHE_TTL}`,
+            'Cache-Control': `public, max-age=${config.SUMMARY_CACHE_TTL}`,
             'X-Cache-Status': result.cacheStatus,
             'X-Data-Source': 'CoinGecko API + Cloudflare Workers AI',
             'X-Summary-Currency': 'USD',
@@ -651,7 +644,7 @@ async function handleRequest(request, env, ctx) {
     }
     
     // Fetch supported currencies list for validation
-    const supportedCurrencies = await fetchSupportedCurrencies(env, ctx);
+    const supportedCurrencies = await fetchSupportedCurrencies(env, ctx, config);
     
     // Check if this is a request that uses vs_currency parameter
     const vsCurrency = searchParams.get('vs_currency') || searchParams.get('vs_currencies');
@@ -666,7 +659,7 @@ async function handleRequest(request, env, ctx) {
       
       // Fetch exchange rate from USD to target currency
       try {
-        exchangeRate = await fetchExchangeRate(originalCurrency, ctx);
+        exchangeRate = await fetchExchangeRate(originalCurrency, ctx, config);
       } catch (exchangeError) {
         return new Response(JSON.stringify({
           error: 'invalid vs_currency',
@@ -720,7 +713,7 @@ async function handleRequest(request, env, ctx) {
         // Fallback if header is missing - use current time (shouldn't happen with new code)
         newResponse.headers.set('X-Last-Updated', Date.now().toString());
       }
-      newResponse.headers.set('X-Cache-TTL', MARKET_CHART_CACHE_TTL.toString());
+      newResponse.headers.set('X-Cache-TTL', config.MARKET_CHART_CACHE_TTL.toString());
       
       return newResponse;
     }
@@ -792,7 +785,7 @@ async function handleRequest(request, env, ctx) {
     );
 
     // Add cache control header (5 minutes)
-    response.headers.set('Cache-Control', `public, max-age=${MARKET_CHART_CACHE_TTL}`);
+    response.headers.set('Cache-Control', `public, max-age=${config.MARKET_CHART_CACHE_TTL}`);
     
     // Add CORS headers
     Object.entries(corsHeaders).forEach(([key, value]) => {
@@ -804,7 +797,7 @@ async function handleRequest(request, env, ctx) {
 
     // Add cache metadata headers for fresh data
     response.headers.set('X-Last-Updated', Date.now().toString());
-    response.headers.set('X-Cache-TTL', MARKET_CHART_CACHE_TTL.toString());
+    response.headers.set('X-Cache-TTL', config.MARKET_CHART_CACHE_TTL.toString());
     
     // Set proper content type only for JSON responses
     if (responseData) {
