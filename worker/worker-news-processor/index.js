@@ -417,16 +417,12 @@ async function processArticle(env, article, config) {
       console.log(`  ✓ Sentiment: ${sentimentResult}`);
       
       // Exit after sentiment phase - scraping/AI will run in next cron call
-      if (needsUpdate) {
-        updates.processedAt = Date.now();
-      }
+      updates.processedAt = Date.now();
       return updates;
     } catch (error) {
       console.error(`  Failed sentiment analysis:`, error.message);
-      // Keep flag as true to retry next run
-      if (needsUpdate) {
-        updates.processedAt = Date.now();
-      }
+      // Keep flag as true to retry next run, but still record last processing attempt time
+      updates.processedAt = Date.now();
       return updates;
     }
   }
@@ -440,7 +436,7 @@ async function processArticle(env, article, config) {
     if (article.link) {
       // PHASE 1: Content Scraping
       // Skip if we already have extracted content from a previous run
-      let content = updates.extractedContent || null;
+      let content = article.extractedContent || null;
       
       if (!content) {
         // Increment timeout counter for crash tracking only when we actually attempt scraping
