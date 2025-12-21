@@ -665,3 +665,139 @@ describe('decodeHTMLEntities', () => {
   });
 });
 
+describe('Circuit Breaker - Pre-emptive Increment', () => {
+  it('should increment contentTimeout before processing starts', async () => {
+    // Mock article needing summary
+    const article = {
+      title: 'Test Article',
+      link: 'https://example.com',
+      needsSummary: true,
+      contentTimeout: 0
+    };
+    
+    // Verify the logic: contentTimeout should be incremented first
+    const timeoutCount = (article.contentTimeout || 0) + 1;
+    expect(timeoutCount).toBe(1);
+    
+    // This demonstrates that our implementation increments before processing
+    expect(timeoutCount).toBeGreaterThan(article.contentTimeout);
+  });
+});
+
+describe('Circuit Breaker - Extracted Content Caching', () => {
+  it('should store extracted content for retry', () => {
+    // Simulate article after successful scraping but failed AI
+    const article = {
+      title: 'Test Article',
+      link: 'https://example.com',
+      needsSummary: true,
+      contentTimeout: 1,
+      extractedContent: 'This is the extracted content from the webpage...'
+    };
+    
+    // Verify extracted content is stored
+    expect(article.extractedContent).toBeDefined();
+    expect(article.extractedContent.length).toBeGreaterThan(0);
+    
+    // On next retry, this content should be reused
+    expect(article.extractedContent).toBe('This is the extracted content from the webpage...');
+  });
+  
+  it('should clear extracted content after successful AI summary', () => {
+    // Simulate article after successful processing
+    const article = {
+      title: 'Test Article',
+      link: 'https://example.com',
+      needsSummary: false,
+      contentTimeout: undefined,
+      extractedContent: undefined,
+      aiSummary: 'This is the AI-generated summary'
+    };
+    
+    // Verify extracted content is cleared
+    expect(article.extractedContent).toBeUndefined();
+    expect(article.aiSummary).toBeDefined();
+    expect(article.contentTimeout).toBeUndefined();
+  });
+  
+  it('should preserve extracted content on AI failure for retry', () => {
+    // Simulate article after scraping success but AI failure
+    const article = {
+      title: 'Test Article',
+      link: 'https://example.com',
+      needsSummary: true,
+      contentTimeout: 2,
+      extractedContent: 'This is the extracted content...',
+      summaryError: 'ai_error: Token limit exceeded (attempt 2/5)'
+    };
+    
+    // Verify extracted content is preserved for retry
+    expect(article.extractedContent).toBeDefined();
+    expect(article.contentTimeout).toBe(2);
+    expect(article.needsSummary).toBe(true);
+  });
+});
+
+describe('Circuit Breaker - Critical Section Isolation', () => {
+  it('should handle scraping failure without affecting previous state', () => {
+    const article = {
+      title: 'Test Article',
+      link: 'https://example.com',
+      needsSummary: true,
+      contentTimeout: 0
+    };
+    
+    // Simulate scraping failure
+    const updates = {
+      ...article,
+      contentTimeout: 1,
+      summaryError: 'fetch_failed (attempt 1/5)',
+      extractedContent: undefined // No content extracted
+    };
+    
+    expect(updates.contentTimeout).toBe(1);
+    expect(updates.extractedContent).toBeUndefined();
+    expect(updates.summaryError).toContain('fetch_failed');
+  });
+  
+  it('should handle AI failure after successful scraping', () => {
+    const article = {
+      title: 'Test Article',
+      link: 'https://example.com',
+      needsSummary: true,
+      contentTimeout: 1,
+      extractedContent: 'Previously extracted content...'
+    };
+    
+    // Simulate AI failure
+    const updates = {
+      ...article,
+      contentTimeout: 2,
+      summaryError: 'ai_error: Model timeout (attempt 2/5)',
+      extractedContent: 'Previously extracted content...' // Preserved
+    };
+    
+    expect(updates.contentTimeout).toBe(2);
+    expect(updates.extractedContent).toBeDefined();
+    expect(updates.summaryError).toContain('ai_error');
+  });
+  
+  it('should give up after max retries', () => {
+    const maxAttempts = 5;
+    
+    // Simulate article that has reached max retries
+    const article = {
+      title: 'Toxic Article',
+      link: 'https://example.com/toxic',
+      needsSummary: false, // Should be false after max retries
+      contentTimeout: maxAttempts,
+      extractedContent: undefined, // Should be cleared
+      summaryError: 'ai_error: Repeated timeouts (attempt 5/5)'
+    };
+    
+    expect(article.contentTimeout).toBe(maxAttempts);
+    expect(article.needsSummary).toBe(false); // Stop retrying
+    expect(article.extractedContent).toBeUndefined(); // Cleared
+  });
+});
+

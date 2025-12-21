@@ -37,7 +37,8 @@
 import { getArticleId } from '../shared/news-providers.js';
 import { 
   getNewsProcessorConfig,
-  MAX_CONTENT_FETCH_ATTEMPTS 
+  MAX_CONTENT_FETCH_ATTEMPTS,
+  decodeHTMLEntities
 } from '../shared/constants.js';
 
 /**
@@ -163,7 +164,8 @@ class TextExtractor {
   
   getText() {
     let text = this.textChunks.join(' ');
-    text = text.replace(/\s+/g, ' ').trim();
+    // replacing multiple space type characters with one space may take too long on large webpages
+    //text = text.replace(/\s+/g, ' ').trim();
     
     if (text.length > this.maxChars) {
       text = text.substring(0, this.maxChars);
@@ -378,13 +380,23 @@ async function analyzeSentiment(env, article) {
 
 /**
  * Process a single article with AI analysis
+ * 
+ * Architecture: Phase-based processing across successive cron runs
+ * - Phase 0 (needsSentiment): Analyze sentiment, save, exit
+ * - Phase 1 (no extractedContent): Scrape content (raw/undecoded), save, exit
+ * - Phase 2 (has extractedContent): Decode and run AI summary, save, exit
+ * 
+ * This splits work naturally without defensive saves during processing.
+ * The 1-minute cron schedule ensures phases execute quickly in sequence.
+ * 
  * Checks postprocessing flags and processes accordingly:
  * - needsSentiment: true → needs sentiment analysis
  * - needsSummary: true → needs AI summary generation
- * - contentTimeout: true → previous fetch timed out, retry
+ * - contentTimeout: integer → number of failed attempts (retry if < MAX_ATTEMPTS)
  * 
  * @param {Object} env - Environment variables
  * @param {Object} article - Article to process
+ * @param {Object} config - Configuration object
  * @returns {Promise<Object>} Processed article with updates
  */
 async function processArticle(env, article, config) {
@@ -394,18 +406,29 @@ async function processArticle(env, article, config) {
   const needsSentiment = article.needsSentiment ?? true;
   const needsSummary = article.needsSummary ?? true;
 
-  // Process sentiment if flag is true
+  // PHASE 0: Sentiment Analysis
+  // Process sentiment as a separate phase before scraping/AI
   if (needsSentiment === true) {
     try {
+      console.log(`  Phase 0: Analyzing sentiment...`);
       const sentimentResult = await analyzeSentiment(env, article);
       updates.sentiment = sentimentResult;  // Set actual sentiment value
       updates.needsSentiment = false;       // Clear the flag
       needsUpdate = true;
-      console.log(`  Sentiment: ${sentimentResult}`);
+      console.log(`  ✓ Sentiment: ${sentimentResult}`);
+      
     } catch (error) {
       console.error(`  Failed sentiment analysis:`, error.message);
-      // Keep flag as true to retry next run
+      // Keep flag as true to retry next run, but still record last processing attempt time
+      updates.processedAt = Date.now();
+      return updates;
     }
+  }
+
+  if (needsUpdate) {
+      // Exit after sentiment phase - scraping/AI will run in next cron call
+      updates.processedAt = Date.now();
+      return updates;
   }
   
   // Process AI summary if flag is true OR if we're retrying after contentTimeout
@@ -415,54 +438,104 @@ async function processArticle(env, article, config) {
   
   if (needsSummary === true || shouldRetry) {
     if (article.link) {
-      try {
-        const content = await fetchArticleContent(article.link, false, config.MAX_CONTENT_CHARS);
+      // PHASE 1: Content Scraping
+      // Skip if we already have extracted content from a previous run
+      let content = article.extractedContent || null;
+      
+      if (!content) {
+        // Increment timeout counter for crash tracking only when we actually attempt scraping
+        const timeoutCount = (article.contentTimeout || 0) + 1;
+        updates.contentTimeout = timeoutCount;
         
-        if (content) {
-          const summary = await generateArticleSummary(env, article.title, content);
+        // This is the scraping phase - extract RAW content (undecoded) and exit
+        try {
+          console.log(`  Phase 1: Fetching article content...`);
+          content = await fetchArticleContent(article.link, false, config.MAX_CONTENT_CHARS);
           
-          if (summary) {
-            updates.aiSummary = summary;         // Set actual summary text
-            updates.needsSummary = false;        // Clear the flag
-            updates.contentTimeout = undefined;  // Clear timeout counter
-            updates.summaryError = undefined;    // Clear any previous error
+          if (content) {
+            // Save RAW extracted content (undecoded) for next run
+            // HTML entities will be decoded in Phase 2 when actually used
+            updates.extractedContent = content;
+            updates.summaryError = `scraping_complete (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
             needsUpdate = true;
-            console.log(`  AI Summary: Generated (${summary.length} chars)`);
+            console.log(`  ✓ Content extracted (${content.length} chars, raw) - AI processing in next run`);
           } else {
-            console.log(`  AI Summary: Content mismatch or too short`);
-            // Set flag to false (don't retry - content doesn't match)
-            updates.needsSummary = false;
-            updates.contentTimeout = undefined;
-            updates.summaryError = 'content_mismatch';  // Store reason for failure
+            console.log(`  AI Summary: Failed to fetch content`);
+            updates.summaryError = `fetch_failed (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
+            
+            // If we've hit max retries, stop trying
+            if (timeoutCount >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
+              console.log(`  AI Summary: Max retries (${timeoutCount}) reached, giving up`);
+              updates.needsSummary = false;  // Stop retrying
+              updates.contentTimeout = undefined;
+            }
+            
             needsUpdate = true;
           }
-        } else {
-          console.log(`  AI Summary: Failed to fetch content`);
-          // Increment timeout counter (start at 1 if undefined)
-          const timeoutCount = (article.contentTimeout || 0) + 1;
-          updates.contentTimeout = timeoutCount;
-          updates.summaryError = `fetch_failed (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
+        } catch (error) {
+          console.error(`  Failed to fetch content:`, error.message);
+          updates.summaryError = `fetch_error: ${error.message.substring(0, 100)} (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
           
           // If we've hit max retries, stop trying
           if (timeoutCount >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
             console.log(`  AI Summary: Max retries (${timeoutCount}) reached, giving up`);
             updates.needsSummary = false;  // Stop retrying
+            updates.contentTimeout = undefined;
           }
           
           needsUpdate = true;
         }
+        
+        // Exit after scraping phase - AI will run in next cron call
+        if (needsUpdate) {
+          updates.processedAt = Date.now();
+        }
+        return updates;
+      }
+      
+      // PHASE 2: AI Processing
+      // We have RAW content from previous run - decode and process with AI
+      console.log(`  Phase 2: Using previously extracted content (${content.length} chars, raw)`);
+      
+      try {
+        console.log(`  Generating AI summary...`);
+        
+        // Decode HTML entities in content ONLY when actually using it
+        // This prevents double-decoding since we store raw content
+        const decodedText = decodeHTMLEntities(content).replace(/\s+/g, ' ').trim();
+        
+        console.log(`  Decoded content (${decodedText.length} chars)`);
+        
+        const summary = await generateArticleSummary(env, article.title, decodedText);
+        
+        if (summary) {
+          updates.aiSummary = summary;                // Set actual summary text
+          updates.needsSummary = false;               // Clear the flag
+          updates.contentTimeout = undefined;         // Clear timeout counter
+          updates.summaryError = undefined;           // Clear any previous error
+          updates.extractedContent = undefined;       // Clear cached content (no longer needed)
+          needsUpdate = true;
+          console.log(`  ✓ AI Summary: Generated (${summary.length} chars)`);
+        } else {
+          console.log(`  AI Summary: Content mismatch or too short`);
+          // Set flag to false (don't retry - content doesn't match)
+          updates.needsSummary = false;
+          updates.contentTimeout = undefined;
+          updates.extractedContent = undefined;       // Clear cached content
+          updates.summaryError = 'content_mismatch';  // Store reason for failure
+          needsUpdate = true;
+        }
       } catch (error) {
-        console.error(`  Failed summary generation:`, error.message);
-        // Increment timeout counter
-        const timeoutCount = (article.contentTimeout || 0) + 1;
-        updates.contentTimeout = timeoutCount;
-        // Store detailed error reason for diagnosis
-        updates.summaryError = `error: ${error.message.substring(0, 100)} (attempt ${timeoutCount}/5)`;
+        console.error(`  Failed AI summary generation:`, error.message);
+        // Keep the extracted content for next retry
+        updates.summaryError = `ai_error: ${error.message.substring(0, 100)} (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
         
         // If we've hit max retries, stop trying
-        if (timeoutCount >= 5) {
+        if (timeoutCount >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
           console.log(`  AI Summary: Max retries (${timeoutCount}) reached, giving up`);
-          updates.needsSummary = false;  // Stop retrying
+          updates.needsSummary = false;               // Stop retrying
+          updates.contentTimeout = undefined;
+          updates.extractedContent = undefined;       // Clear cached content
         }
         
         needsUpdate = true;
@@ -507,76 +580,68 @@ async function handleScheduled(event, env) {
       return;
     }
     
-    // Step 2: Find articles that need processing (in reverse chronological order - newest first)
+    // Step 2: Find articles that need processing with their indices
     console.log('Step 2: Finding articles that need processing...');
-    const pendingArticles = newsData.articles.filter(article => 
-      (article.needsSentiment ?? true) || 
-      (article.needsSummary ?? true) || 
-      (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS)  // Retry if timeout count < max
-    );
+    const pendingArticlesWithIndices = [];
     
-    if (pendingArticles.length === 0) {
+    newsData.articles.forEach((article, index) => {
+      const needsProcessing = 
+        (article.needsSentiment ?? true) || 
+        (article.needsSummary ?? true) || 
+        (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
+      
+      if (needsProcessing) {
+        pendingArticlesWithIndices.push({ article, index });
+      }
+    });
+    
+    if (pendingArticlesWithIndices.length === 0) {
       console.log('No articles need processing');
       console.log('=== Bitcoin News Processor Cron Job Completed (All Done) ===');
       return;
     }
     
-    console.log(`Found ${pendingArticles.length} articles needing processing`);
+    console.log(`Found ${pendingArticlesWithIndices.length} articles needing processing`);
     
     // Step 3: Process up to MAX_ARTICLES_PER_RUN articles
-    const articlesToProcess = pendingArticles.slice(0, config.MAX_ARTICLES_PER_RUN);
+    const articlesToProcess = pendingArticlesWithIndices.slice(0, config.MAX_ARTICLES_PER_RUN);
     console.log(`Processing ${articlesToProcess.length} articles this run...`);
     
     let processedCount = 0;
     
-    for (const article of articlesToProcess) {
-      const articleId = getArticleId(article);
+    // Process all articles and collect updates
+    for (const item of articlesToProcess) {
+      const { article, index: articleIndex } = item;
       console.log(`\nProcessing article ${processedCount + 1}/${articlesToProcess.length}: "${article.title?.substring(0, 50)}..."`);
       
       try {
-        // Process the article
+        // Process the article (one phase per run)
         const updatedArticle = await processArticle(env, article, config);
         
-        // Step 4: Update article in KV after processing (incremental write)
-        // Find and replace the article in the array
-        const articleIndex = newsData.articles.findIndex(a => getArticleId(a) === articleId);
+        // Store updated article in the item for batch update
+        item.updatedArticle = updatedArticle;
         
-        if (articleIndex !== -1) {
-          newsData.articles[articleIndex] = updatedArticle;
-          
-          // Recalculate sentiment counts (only count actual sentiment values, not flags)
-          const sentimentCounts = {
-            positive: 0,
-            negative: 0,
-            neutral: 0
-          };
-          
-          newsData.articles.forEach(a => {
-            const s = a.sentiment;
-            // Only count if sentiment is a string value (not true/false flag)
-            if (typeof s === 'string' && ['positive', 'negative', 'neutral'].includes(s)) {
-              sentimentCounts[s] = (sentimentCounts[s] || 0) + 1;
-            }
-          });
-          
-          newsData.sentimentCounts = sentimentCounts;
-          newsData.lastUpdatedExternal = Date.now();
-          
-          // Write updated data back to KV
-          await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
-          console.log(`  ✓ Article updated in KV`);
-          
-          processedCount++;
-        } else {
-          console.warn(`  Article not found in KV: ${articleId}`);
-        }
+        processedCount++;
       } catch (error) {
         console.error(`  ✗ Error processing article:`, error);
         // Continue with next article
       }
     }
     
-    const remainingPending = pendingArticles.length - processedCount;
+    // Batch update: Apply all updates to newsData.articles and write once to KV
+    if (processedCount > 0) {
+      for (const item of articlesToProcess) {
+        if (item.updatedArticle) {
+          newsData.articles[item.index] = item.updatedArticle;
+        }
+      }
+      
+      // Single KV write for all processed articles
+      await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
+      console.log(`\n✓ Batch update: ${processedCount} articles written to KV in single operation`);
+    }
+    
+    const remainingPending = pendingArticlesWithIndices.length - processedCount;
     console.log(`\n=== Bitcoin News Processor Cron Job Completed Successfully ===`);
     console.log(`Processed: ${processedCount} articles`);
     console.log(`Remaining: ${remainingPending} articles (will process in next run)`);
@@ -713,27 +778,11 @@ async function handleFetch(request, env) {
     
     // Process the article
     console.log(`Processing article: "${article.title?.substring(0, 50)}..."`);
+    
     const updatedArticle = await processArticle(env, article, config);
     
     // Update article in KV
     newsData.articles[articleIndex] = updatedArticle;
-    
-    // Recalculate sentiment counts
-    const sentimentCounts = {
-      positive: 0,
-      negative: 0,
-      neutral: 0
-    };
-    
-    newsData.articles.forEach(a => {
-      const s = a.sentiment;
-      if (typeof s === 'string' && ['positive', 'negative', 'neutral'].includes(s)) {
-        sentimentCounts[s] = (sentimentCounts[s] || 0) + 1;
-      }
-    });
-    
-    newsData.sentimentCounts = sentimentCounts;
-    newsData.lastUpdatedExternal = Date.now();
     
     // Write back to KV
     await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
