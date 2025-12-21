@@ -385,9 +385,10 @@ async function analyzeSentiment(env, article) {
  * 
  * @param {Object} env - Environment variables
  * @param {Object} article - Article to process
+ * @param {Function} saveArticleCallback - Callback to save article to KV after each critical section
  * @returns {Promise<Object>} Processed article with updates
  */
-async function processArticle(env, article, config) {
+async function processArticle(env, article, config, saveArticleCallback) {
   const updates = { ...article };
   let needsUpdate = false;
   
@@ -415,33 +416,56 @@ async function processArticle(env, article, config) {
   
   if (needsSummary === true || shouldRetry) {
     if (article.link) {
-      try {
-        const content = await fetchArticleContent(article.link, false, config.MAX_CONTENT_CHARS);
-        
-        if (content) {
-          const summary = await generateArticleSummary(env, article.title, content);
+      // PRE-EMPTIVE INCREMENT: Increment contentTimeout BEFORE processing
+      // This acts as a "poison pill" - if the worker crashes during processing,
+      // the next run will see the incremented counter and know a previous attempt failed
+      const timeoutCount = (article.contentTimeout || 0) + 1;
+      updates.contentTimeout = timeoutCount;
+      updates.summaryError = `processing (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
+      needsUpdate = true;
+      
+      // Save the pre-emptive increment immediately to KV
+      if (saveArticleCallback) {
+        await saveArticleCallback(updates);
+        console.log(`  ✓ Pre-emptive contentTimeout increment saved (attempt ${timeoutCount})`);
+      }
+      
+      // CRITICAL SECTION 1: Content Scraping
+      // Skip scraping if we already have extracted content from a previous attempt
+      let content = updates.extractedContent || null;
+      
+      if (!content) {
+        try {
+          console.log(`  Fetching article content...`);
+          content = await fetchArticleContent(article.link, false, config.MAX_CONTENT_CHARS);
           
-          if (summary) {
-            updates.aiSummary = summary;         // Set actual summary text
-            updates.needsSummary = false;        // Clear the flag
-            updates.contentTimeout = undefined;  // Clear timeout counter
-            updates.summaryError = undefined;    // Clear any previous error
+          if (content) {
+            // Save extracted content to avoid re-scraping on retry
+            updates.extractedContent = content;
             needsUpdate = true;
-            console.log(`  AI Summary: Generated (${summary.length} chars)`);
+            console.log(`  ✓ Content extracted (${content.length} chars)`);
+            
+            // Save to KV after successful scraping
+            if (saveArticleCallback) {
+              await saveArticleCallback(updates);
+              console.log(`  ✓ Extracted content saved to KV`);
+            }
           } else {
-            console.log(`  AI Summary: Content mismatch or too short`);
-            // Set flag to false (don't retry - content doesn't match)
-            updates.needsSummary = false;
-            updates.contentTimeout = undefined;
-            updates.summaryError = 'content_mismatch';  // Store reason for failure
+            console.log(`  AI Summary: Failed to fetch content`);
+            updates.summaryError = `fetch_failed (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
+            
+            // If we've hit max retries, stop trying
+            if (timeoutCount >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
+              console.log(`  AI Summary: Max retries (${timeoutCount}) reached, giving up`);
+              updates.needsSummary = false;  // Stop retrying
+            }
+            
             needsUpdate = true;
+            return updates;
           }
-        } else {
-          console.log(`  AI Summary: Failed to fetch content`);
-          // Increment timeout counter (start at 1 if undefined)
-          const timeoutCount = (article.contentTimeout || 0) + 1;
-          updates.contentTimeout = timeoutCount;
-          updates.summaryError = `fetch_failed (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
+        } catch (error) {
+          console.error(`  Failed to fetch content:`, error.message);
+          updates.summaryError = `fetch_error: ${error.message.substring(0, 100)} (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
           
           // If we've hit max retries, stop trying
           if (timeoutCount >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
@@ -450,19 +474,45 @@ async function processArticle(env, article, config) {
           }
           
           needsUpdate = true;
+          return updates;
+        }
+      } else {
+        console.log(`  Using previously extracted content (${content.length} chars)`);
+      }
+      
+      // CRITICAL SECTION 2: AI Processing
+      // At this point, we have content (either fresh or from previous attempt)
+      try {
+        console.log(`  Generating AI summary...`);
+        const summary = await generateArticleSummary(env, article.title, content);
+        
+        if (summary) {
+          updates.aiSummary = summary;                // Set actual summary text
+          updates.needsSummary = false;               // Clear the flag
+          updates.contentTimeout = undefined;         // Clear timeout counter
+          updates.summaryError = undefined;           // Clear any previous error
+          updates.extractedContent = undefined;       // Clear cached content (no longer needed)
+          needsUpdate = true;
+          console.log(`  ✓ AI Summary: Generated (${summary.length} chars)`);
+        } else {
+          console.log(`  AI Summary: Content mismatch or too short`);
+          // Set flag to false (don't retry - content doesn't match)
+          updates.needsSummary = false;
+          updates.contentTimeout = undefined;
+          updates.extractedContent = undefined;       // Clear cached content
+          updates.summaryError = 'content_mismatch';  // Store reason for failure
+          needsUpdate = true;
         }
       } catch (error) {
-        console.error(`  Failed summary generation:`, error.message);
-        // Increment timeout counter
-        const timeoutCount = (article.contentTimeout || 0) + 1;
-        updates.contentTimeout = timeoutCount;
-        // Store detailed error reason for diagnosis
-        updates.summaryError = `error: ${error.message.substring(0, 100)} (attempt ${timeoutCount}/5)`;
+        console.error(`  Failed AI summary generation:`, error.message);
+        // Keep the extracted content for next retry
+        updates.summaryError = `ai_error: ${error.message.substring(0, 100)} (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
         
         // If we've hit max retries, stop trying
-        if (timeoutCount >= 5) {
+        if (timeoutCount >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
           console.log(`  AI Summary: Max retries (${timeoutCount}) reached, giving up`);
-          updates.needsSummary = false;  // Stop retrying
+          updates.needsSummary = false;               // Stop retrying
+          updates.extractedContent = undefined;       // Clear cached content
         }
         
         needsUpdate = true;
@@ -534,42 +584,45 @@ async function handleScheduled(event, env) {
       console.log(`\nProcessing article ${processedCount + 1}/${articlesToProcess.length}: "${article.title?.substring(0, 50)}..."`);
       
       try {
-        // Process the article
-        const updatedArticle = await processArticle(env, article, config);
+        // Create a save callback that updates the article in KV
+        // This will be called after each critical section (pre-emptive increment, scraping, AI)
+        const saveArticleCallback = async (updatedArticle) => {
+          const articleIndex = newsData.articles.findIndex(a => getArticleId(a) === articleId);
+          
+          if (articleIndex !== -1) {
+            newsData.articles[articleIndex] = updatedArticle;
+            
+            // Recalculate sentiment counts (only count actual sentiment values, not flags)
+            const sentimentCounts = {
+              positive: 0,
+              negative: 0,
+              neutral: 0
+            };
+            
+            newsData.articles.forEach(a => {
+              const s = a.sentiment;
+              // Only count if sentiment is a string value (not true/false flag)
+              if (typeof s === 'string' && ['positive', 'negative', 'neutral'].includes(s)) {
+                sentimentCounts[s] = (sentimentCounts[s] || 0) + 1;
+              }
+            });
+            
+            newsData.sentimentCounts = sentimentCounts;
+            newsData.lastUpdatedExternal = Date.now();
+            
+            // Write updated data back to KV
+            await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
+          }
+        };
         
-        // Step 4: Update article in KV after processing (incremental write)
-        // Find and replace the article in the array
-        const articleIndex = newsData.articles.findIndex(a => getArticleId(a) === articleId);
+        // Process the article with save callback
+        const updatedArticle = await processArticle(env, article, config, saveArticleCallback);
         
-        if (articleIndex !== -1) {
-          newsData.articles[articleIndex] = updatedArticle;
-          
-          // Recalculate sentiment counts (only count actual sentiment values, not flags)
-          const sentimentCounts = {
-            positive: 0,
-            negative: 0,
-            neutral: 0
-          };
-          
-          newsData.articles.forEach(a => {
-            const s = a.sentiment;
-            // Only count if sentiment is a string value (not true/false flag)
-            if (typeof s === 'string' && ['positive', 'negative', 'neutral'].includes(s)) {
-              sentimentCounts[s] = (sentimentCounts[s] || 0) + 1;
-            }
-          });
-          
-          newsData.sentimentCounts = sentimentCounts;
-          newsData.lastUpdatedExternal = Date.now();
-          
-          // Write updated data back to KV
-          await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
-          console.log(`  ✓ Article updated in KV`);
-          
-          processedCount++;
-        } else {
-          console.warn(`  Article not found in KV: ${articleId}`);
-        }
+        // Step 4: Final update of article in KV after processing
+        await saveArticleCallback(updatedArticle);
+        console.log(`  ✓ Article processing complete`);
+        
+        processedCount++;
       } catch (error) {
         console.error(`  ✗ Error processing article:`, error);
         // Continue with next article
@@ -713,30 +766,36 @@ async function handleFetch(request, env) {
     
     // Process the article
     console.log(`Processing article: "${article.title?.substring(0, 50)}..."`);
-    const updatedArticle = await processArticle(env, article, config);
     
-    // Update article in KV
-    newsData.articles[articleIndex] = updatedArticle;
-    
-    // Recalculate sentiment counts
-    const sentimentCounts = {
-      positive: 0,
-      negative: 0,
-      neutral: 0
+    // Create a save callback that updates the article in KV
+    const saveArticleCallback = async (updatedArticle) => {
+      newsData.articles[articleIndex] = updatedArticle;
+      
+      // Recalculate sentiment counts
+      const sentimentCounts = {
+        positive: 0,
+        negative: 0,
+        neutral: 0
+      };
+      
+      newsData.articles.forEach(a => {
+        const s = a.sentiment;
+        if (typeof s === 'string' && ['positive', 'negative', 'neutral'].includes(s)) {
+          sentimentCounts[s] = (sentimentCounts[s] || 0) + 1;
+        }
+      });
+      
+      newsData.sentimentCounts = sentimentCounts;
+      newsData.lastUpdatedExternal = Date.now();
+      
+      // Write back to KV
+      await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
     };
     
-    newsData.articles.forEach(a => {
-      const s = a.sentiment;
-      if (typeof s === 'string' && ['positive', 'negative', 'neutral'].includes(s)) {
-        sentimentCounts[s] = (sentimentCounts[s] || 0) + 1;
-      }
-    });
+    const updatedArticle = await processArticle(env, article, config, saveArticleCallback);
     
-    newsData.sentimentCounts = sentimentCounts;
-    newsData.lastUpdatedExternal = Date.now();
-    
-    // Write back to KV
-    await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
+    // Final save
+    await saveArticleCallback(updatedArticle);
     
     console.log(`Article processed and updated in KV`);
     
