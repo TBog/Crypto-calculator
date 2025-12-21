@@ -164,7 +164,8 @@ class TextExtractor {
   
   getText() {
     let text = this.textChunks.join(' ');
-    text = text.replace(/\s+/g, ' ').trim();
+    // replacing multiple space type characters with one space may take too long on large webpages
+    //text = text.replace(/\s+/g, ' ').trim();
     
     if (text.length > this.maxChars) {
       text = text.substring(0, this.maxChars);
@@ -416,15 +417,18 @@ async function processArticle(env, article, config) {
       needsUpdate = true;
       console.log(`  ✓ Sentiment: ${sentimentResult}`);
       
-      // Exit after sentiment phase - scraping/AI will run in next cron call
-      updates.processedAt = Date.now();
-      return updates;
     } catch (error) {
       console.error(`  Failed sentiment analysis:`, error.message);
       // Keep flag as true to retry next run, but still record last processing attempt time
       updates.processedAt = Date.now();
       return updates;
     }
+  }
+
+  if (needsUpdate) {
+      // Exit after sentiment phase - scraping/AI will run in next cron call
+      updates.processedAt = Date.now();
+      return updates;
   }
   
   // Process AI summary if flag is true OR if we're retrying after contentTimeout
@@ -496,14 +500,13 @@ async function processArticle(env, article, config) {
       try {
         console.log(`  Generating AI summary...`);
         
-        // Decode HTML entities in title and content ONLY when actually using them
+        // Decode HTML entities in content ONLY when actually using it
         // This prevents double-decoding since we store raw content
-        const decodedTitle = decodeHTMLEntities(article.title);
-        const decodedText = decodeHTMLEntities(content);
+        const decodedText = decodeHTMLEntities(content).replace(/\s+/g, ' ').trim();
         
         console.log(`  Decoded content (${decodedText.length} chars)`);
         
-        const summary = await generateArticleSummary(env, decodedTitle, decodedText);
+        const summary = await generateArticleSummary(env, article.title, decodedText);
         
         if (summary) {
           updates.aiSummary = summary;                // Set actual summary text
