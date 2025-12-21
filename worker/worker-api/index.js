@@ -9,7 +9,19 @@
  * - Currency conversion layer for unsupported currencies
  */
 
-import { getAPIWorkerConfig } from '../shared/constants.js';
+import { 
+  getAPIWorkerConfig,
+  SUPPORTED_CURRENCIES_CACHE_TTL,
+  EXCHANGE_RATE_CACHE_TTL,
+  SUMMARY_CACHE_TTL,
+  PRICE_HISTORY_CACHE_TTL,
+  MARKET_CHART_CACHE_TTL,
+  LLM_MAX_TOKENS,
+  LLM_MAX_WORDS,
+  PRICE_SAMPLE_THRESHOLD,
+  PRICE_LARGE_DATASET_SAMPLES,
+  PRICE_SMALL_DATASET_SAMPLES
+} from '../shared/constants.js';
 
 // Allowed origins for accessing this worker
 // For localhost/127.0.0.1: protocol and hostname must match (any port allowed)
@@ -609,18 +621,18 @@ async function handleRequest(request, env, ctx) {
     // Special endpoint for Bitcoin news feed - reads from KV (populated by scheduled worker)
     if (url.pathname === '/api/bitcoin-news') {
       try {
-        const result = await fetchBitcoinNews(env);
+        const result = await fetchBitcoinNews(env, config);
         
         return new Response(JSON.stringify(result.data), {
           status: 200,
           headers: {
             ...corsHeaders,
             'Content-Type': 'application/json',
-            'Cache-Control': `public, max-age=${BITCOIN_NEWS_CACHE_TTL}`,
+            'Cache-Control': `public, max-age=${config.BITCOIN_NEWS_CACHE_TTL}`,
             'X-Cache-Status': result.cacheStatus,
             'X-Data-Source': 'Cloudflare KV (updated by scheduled worker)',
             'X-Last-Updated': result.lastUpdated.toString(),
-            'X-Cache-TTL': BITCOIN_NEWS_CACHE_TTL.toString()
+            'X-Cache-TTL': config.BITCOIN_NEWS_CACHE_TTL.toString()
           }
         });
       } catch (error) {
