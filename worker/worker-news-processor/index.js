@@ -418,16 +418,18 @@ async function processArticle(env, article, config, saveArticleCallback) {
     if (article.link) {
       // PRE-EMPTIVE INCREMENT: Increment contentTimeout BEFORE processing
       // This acts as a "poison pill" - if the worker crashes during processing,
-      // the next run will see the incremented counter and know a previous attempt failed
+      // the next run will see the incremented counter and know a previous attempt failed.
+      // After MAX_CONTENT_FETCH_ATTEMPTS failures, circuit breaker stops retrying to prevent
+      // infinite retry loops on toxic articles that repeatedly crash the Worker.
       const timeoutCount = (article.contentTimeout || 0) + 1;
       updates.contentTimeout = timeoutCount;
       updates.summaryError = `processing (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
       needsUpdate = true;
       
-      // Save the pre-emptive increment immediately to KV
+      // Save the pre-emptive increment immediately to KV (circuit breaker activation)
       if (saveArticleCallback) {
         await saveArticleCallback(updates);
-        console.log(`  ✓ Pre-emptive contentTimeout increment saved (attempt ${timeoutCount})`);
+        console.log(`  ✓ Circuit breaker: Pre-emptive increment saved (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`);
       }
       
       // CRITICAL SECTION 1: Content Scraping
