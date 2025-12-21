@@ -609,25 +609,36 @@ async function handleScheduled(event, env) {
     
     let processedCount = 0;
     
-    for (const { article, index: articleIndex } of articlesToProcess) {
+    // Process all articles and collect updates
+    for (const item of articlesToProcess) {
+      const { article, index: articleIndex } = item;
       console.log(`\nProcessing article ${processedCount + 1}/${articlesToProcess.length}: "${article.title?.substring(0, 50)}..."`);
       
       try {
         // Process the article (one phase per run)
         const updatedArticle = await processArticle(env, article, config);
         
-        // Update article in KV using the pre-calculated index (no expensive search needed)
-        newsData.articles[articleIndex] = updatedArticle;
-        
-        // Write updated data back to KV
-        await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
-        console.log(`  ✓ Article updated in KV`);
+        // Store updated article in the item for batch update
+        item.updatedArticle = updatedArticle;
         
         processedCount++;
       } catch (error) {
         console.error(`  ✗ Error processing article:`, error);
         // Continue with next article
       }
+    }
+    
+    // Batch update: Apply all updates to newsData.articles and write once to KV
+    if (processedCount > 0) {
+      for (const item of articlesToProcess) {
+        if (item.updatedArticle) {
+          newsData.articles[item.index] = item.updatedArticle;
+        }
+      }
+      
+      // Single KV write for all processed articles
+      await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_NEWS, JSON.stringify(newsData));
+      console.log(`\n✓ Batch update: ${processedCount} articles written to KV in single operation`);
     }
     
     const remainingPending = pendingArticlesWithIndices.length - processedCount;
