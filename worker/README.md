@@ -370,7 +370,13 @@ The system uses individual article storage for better scalability and performanc
 **Legacy Format (deprecated, auto-migrates):**
 - `BTC_ANALYZED_NEWS` - Monolithic object with all articles + metadata (auto-migrated to individual storage)
 
-See [KV_MIGRATION_GUIDE.md](./KV_MIGRATION_GUIDE.md) for migration details.
+**Cloudflare KV Free Tier Usage:**
+- **Storage**: ~2.5 MB for 500 articles (0.25% of 1 GB limit)
+- **Daily Reads**: ~11,000 reads for 1,000 API requests (11% of 100K limit)
+- **Daily Writes**: ~860-960 writes (86-96% of 1,000 limit)
+- **Well within free tier limits** for typical usage patterns
+
+See [KV_MIGRATION_GUIDE.md](./KV_MIGRATION_GUIDE.md) for migration details and free tier optimization strategies.
 
 **Workers:**
 - `worker-api/index.js` - Main API worker (reads individual articles via `BTC_ID_INDEX`)

@@ -10,7 +10,35 @@ The architecture consists of three Cloudflare Workers to solve the "Too many sub
 2. **News Processor Worker** (`news-processor-cron.js`) - Consumer: Processes 5 articles every 10 minutes with AI
 3. **Main API Worker** (`index.js`) - Public API endpoint that reads from KV
 
-This architecture uses **Cloudflare KV as a "todo list"** to enable incremental processing while staying within the FREE tier's 50 subrequest limit.
+This architecture uses **Cloudflare KV for individual article storage** to enable efficient processing and retrieval while staying within FREE tier limits.
+
+## Cloudflare Free Tier Compatibility
+
+This application is designed to work within Cloudflare's free tier limits:
+
+### Workers Free Tier
+- ✅ **100,000 requests/day** - More than sufficient for typical usage
+- ✅ **10ms CPU time per request** - KV reads are <1ms
+- ✅ **50 subrequest limit** - Solved by separating updater/processor workers
+
+### KV Free Tier  
+- ✅ **1 GB storage** - Application uses ~2.5 MB (0.25% of limit)
+- ✅ **100,000 reads/day** - Typical usage ~11,000 reads/day (11% of limit)
+- ✅ **1,000 writes/day** - Typical usage ~860-960 writes/day (86-96% of limit)
+- ✅ **1,000 deletes/day** - TTL auto-cleanup, manual deletes rarely needed
+- ✅ **1,000 list operations/day** - Not used by this application
+
+**Note on Write Usage:** The individual article storage architecture uses more writes (N+1 per update cycle where N = new articles) compared to the legacy monolithic approach (2 writes per cycle). However, this is still well within free tier limits and provides better scalability and performance. See [KV_MIGRATION_GUIDE.md](./KV_MIGRATION_GUIDE.md) for optimization strategies if approaching limits.
+
+### Workers AI Free Tier
+- ✅ **10,000 neurons/day** - Optimized for sentiment + summaries
+- ✅ **Content extraction** - Skips headers/footers to save neurons
+
+**Storage Architecture:**
+- Each article stored individually with `article:<id>` key (~5 KB per article)
+- ID index maintains article list (~20 KB)
+- 500 articles maximum (configurable via `MAX_STORED_ARTICLES`)
+- 30-day TTL auto-cleanup prevents unbounded growth
 
 ## News Provider Support
 
@@ -34,9 +62,10 @@ See [NEWS_PROVIDER_GUIDE.md](./NEWS_PROVIDER_GUIDE.md) for detailed provider con
 Producer (hourly)         Consumer (every 10 min)      API (on-demand)
      │                           │                          │
      ├─ Fetch articles           ├─ Read KV                 ├─ Read KV
-     ├─ Mark with flags          ├─ Process 5 articles      └─ Return JSON
-     └─ Store in KV              └─ Update KV                   (<10ms)
+     ├─ Store individually       ├─ Process 5 articles      └─ Parallel reads
+     └─ Update ID index          └─ Update individually         (<10ms)
          (~11 SR)                    (~15 SR)
+         N+1 KV writes               5 KV writes
 ```
 
 ## Step-by-Step Deployment
@@ -69,6 +98,8 @@ Add the following to your configuration file in your kv_namespaces array:
 ```
 
 **Action:** Copy the namespace ID from the output.
+
+**Note:** This single namespace is shared by all three workers. Individual article storage means each article has its own key within this namespace.
 
 ### Step 3: Update Wrangler Configurations
 

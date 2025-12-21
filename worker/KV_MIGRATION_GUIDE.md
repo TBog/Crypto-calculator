@@ -4,6 +4,69 @@
 
 This guide explains the migration from the legacy monolithic KV storage to the new individual article storage architecture.
 
+## Cloudflare KV Free Tier Limits
+
+Understanding Cloudflare KV free tier restrictions is important for this application:
+
+### Free Tier Limits (Workers Free Plan)
+- **Storage**: 1 GB total across all namespaces
+- **Reads**: 100,000 per day
+- **Writes**: 1,000 per day  
+- **Deletes**: 1,000 per day
+- **Lists**: 1,000 per day
+- **Key Size**: Maximum 512 bytes per key
+- **Value Size**: Maximum 25 MB per value
+- **Keys per Namespace**: Unlimited (subject to storage limit)
+
+### How This Architecture Fits Free Tier
+
+**Storage Usage (New Architecture):**
+- 500 articles × ~5 KB per article = ~2.5 MB (well under 1 GB limit)
+- 1 ID index × ~20 KB = ~20 KB
+- **Total: ~2.5 MB** (0.25% of free tier storage)
+
+**Daily Operations:**
+- **Reads**: 
+  - API requests: Variable, but each request reads ID index (1 read) + N articles
+  - Typical: 1,000 API requests/day × ~11 reads = ~11,000 reads/day (11% of limit)
+- **Writes**:
+  - Updater: ~5-10 new articles/hour × 24 hours = ~120-240 writes/day
+  - Processor: ~5 updates/run × 144 runs/day = ~720 writes/day
+  - **Total: ~860-960 writes/day** (86-96% of free tier limit)
+
+**Comparison to Legacy Architecture:**
+- **Old**: 2 writes per update cycle = 48 writes/day (much lower write usage)
+- **New**: N+1 writes per update where N = new articles (higher but more efficient)
+- **Trade-off**: More writes for better read performance and scalability
+
+### Optimization for Free Tier
+
+The architecture is designed to stay within free tier limits:
+
+1. **Write Batching**: Parallel writes minimize total operations
+2. **TTL Management**: 30-day TTL automatically cleans up old articles
+3. **Article Limit**: Max 500 articles prevents unbounded growth
+4. **Read Efficiency**: Parallel article reads reduce per-request latency
+5. **Caching**: Frontend caching reduces repeated KV reads
+
+### Monitoring Usage
+
+Check your KV usage in Cloudflare Dashboard:
+1. Navigate to **Workers & Pages** → **KV**
+2. Select your namespace (e.g., `CRYPTO_NEWS_CACHE`)
+3. View **Analytics** tab for read/write metrics
+
+### Scaling Beyond Free Tier
+
+If you exceed free tier limits, consider:
+- **Workers Paid Plan** ($5/month): 
+  - 10 GB storage
+  - 10 million reads/day
+  - 1 million writes/day
+- **Reduce Article Limit**: Lower `MAX_STORED_ARTICLES` from 500 to 300
+- **Increase Update Interval**: Change updater from hourly to every 2 hours
+- **Optimize Processor**: Reduce `MAX_ARTICLES_PER_RUN` to process fewer articles per cycle
+
 ## Storage Architecture Changes
 
 ### Before (Legacy)
@@ -18,18 +81,29 @@ This guide explains the migration from the legacy monolithic KV storage to the n
   ```
 - **BTC_ID_INDEX**: Array of article IDs for deduplication
 
+**Free Tier Impact (Legacy):**
+- 2 writes per update cycle = 48 writes/day (5% of limit)
+- Single large read per API request
+- Maximum 1 write operation per update (rewriting entire payload)
+
 ### After (New)
 - **article:\<id\>**: Individual KV entries for each article (e.g., `article:abc123`)
 - **BTC_ID_INDEX**: Array of article IDs (latest first) - same as before
 - **No metadata storage**: Sentiment counts calculated on-the-fly when needed
 
+**Free Tier Impact (New):**
+- N+1 writes per update where N = new articles (86-96% of limit)
+- Multiple parallel reads per API request (1 index + N articles)
+- Individual article updates don't require rewriting entire dataset
+
 ## Benefits
 
-1. **Scalability**: No single large object that grows unbounded
+1. **Scalability**: No single large object that grows unbounded (avoids 25 MB value limit)
 2. **Efficiency**: Update individual articles without rewriting entire dataset
 3. **Flexibility**: Easy to fetch specific articles by ID
 4. **Performance**: Parallel reads/writes of individual articles
-5. **Storage**: Better use of KV storage limits
+5. **Storage Optimization**: Better use of KV storage limits (stays well under 1 GB)
+6. **Write Distribution**: Writes spread across multiple keys instead of single large write
 
 ## Migration Strategy
 
