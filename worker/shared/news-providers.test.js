@@ -9,48 +9,8 @@ import {
   NewsDataProvider,
   APITubeProvider,
   createNewsProvider,
-  getArticleId,
-  formatSourceName
+  getArticleId
 } from './news-providers.js';
-
-describe('formatSourceName', () => {
-  it('should format simple lowercase source IDs', () => {
-    expect(formatSourceName('coindesk')).toBe('Coindesk');
-    expect(formatSourceName('cointelegraph')).toBe('Cointelegraph');
-  });
-
-  it('should format hyphenated source IDs', () => {
-    expect(formatSourceName('bbc-news')).toBe('BBC News');
-    expect(formatSourceName('crypto-news')).toBe('Crypto News');
-    expect(formatSourceName('the-block')).toBe('The Block');
-  });
-
-  it('should format underscore-separated source IDs', () => {
-    expect(formatSourceName('crypto_news')).toBe('Crypto News');
-    expect(formatSourceName('btc_times')).toBe('BTC Times');
-  });
-
-  it('should handle camelCase source IDs', () => {
-    expect(formatSourceName('coinDesk')).toBe('Coin Desk');
-    expect(formatSourceName('bitcoinMagazine')).toBe('Bitcoin Magazine');
-  });
-
-  it('should recognize common acronyms', () => {
-    expect(formatSourceName('bbc')).toBe('BBC');
-    expect(formatSourceName('cnn')).toBe('CNN');
-    expect(formatSourceName('btc-news')).toBe('BTC News');
-  });
-
-  it('should handle empty or null values', () => {
-    expect(formatSourceName('')).toBe('');
-    expect(formatSourceName(null)).toBe('');
-    expect(formatSourceName(undefined)).toBe('');
-  });
-
-  it('should handle mixed formats', () => {
-    expect(formatSourceName('bbc-crypto_news')).toBe('BBC Crypto News');
-  });
-});
 
 describe('getArticleId', () => {
   it('should return article_id if available', () => {
@@ -86,7 +46,7 @@ describe('NewsDataProvider', () => {
   });
 
   describe('normalizeArticle', () => {
-    it('should normalize NewsData article correctly', () => {
+    it('should normalize NewsData article correctly with all source fields', () => {
       const rawArticle = {
         article_id: '123',
         title: 'Bitcoin hits new high',
@@ -94,45 +54,54 @@ describe('NewsDataProvider', () => {
         link: 'https://example.com/article',
         pubDate: '2025-01-01',
         source_id: 'coindesk',
+        source_name: 'CoinDesk',
         source_url: 'https://coindesk.com',
         source_icon: 'https://coindesk.com/favicon.ico',
-        image_url: 'https://example.com/image.jpg'
+        image_url: 'https://example.com/image.jpg',
+        language: 'en',
+        country: ['us'],
+        category: ['business']
       };
 
       const normalized = provider.normalizeArticle(rawArticle);
 
       expect(normalized.article_id).toBe('123');
       expect(normalized.title).toBe('Bitcoin hits new high');
+      expect(normalized.description).toBe('Bitcoin reached $50k today');
+      expect(normalized.link).toBe('https://example.com/article');
+      expect(normalized.pubDate).toBe('2025-01-01');
+      
+      // Verify ALL source fields are mapped correctly
       expect(normalized.source_id).toBe('coindesk');
-      expect(normalized.source_name).toBe('Coindesk'); // Derived from source_id
+      expect(normalized.source_name).toBe('CoinDesk');
       expect(normalized.source_url).toBe('https://coindesk.com');
       expect(normalized.source_icon).toBe('https://coindesk.com/favicon.ico');
+      
+      expect(normalized.image_url).toBe('https://example.com/image.jpg');
+      expect(normalized.language).toBe('en');
+      expect(normalized.country).toEqual(['us']);
+      expect(normalized.category).toEqual(['business']);
       expect(normalized.needsSentiment).toBe(true);
       expect(normalized.needsSummary).toBe(true);
       expect(normalized.queuedAt).toBeDefined();
     });
 
-    it('should derive source_name from source_id with proper formatting', () => {
+    it('should handle missing optional source fields gracefully', () => {
       const rawArticle = {
         article_id: '456',
         title: 'Test Article',
         link: 'https://example.com/test',
-        source_id: 'crypto-news-daily'
+        source_id: 'test-source',
+        source_name: 'Test Source',
+        // source_url and source_icon might be missing
       };
 
       const normalized = provider.normalizeArticle(rawArticle);
-      expect(normalized.source_name).toBe('Crypto News Daily');
-    });
-
-    it('should handle missing source_id gracefully', () => {
-      const rawArticle = {
-        article_id: '789',
-        title: 'Test Article',
-        link: 'https://example.com/test'
-      };
-
-      const normalized = provider.normalizeArticle(rawArticle);
-      expect(normalized.source_name).toBe('');
+      
+      expect(normalized.source_id).toBe('test-source');
+      expect(normalized.source_name).toBe('Test Source');
+      expect(normalized.source_url).toBeUndefined();
+      expect(normalized.source_icon).toBeUndefined();
     });
   });
 

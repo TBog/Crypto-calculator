@@ -46,40 +46,6 @@ function getArticleId(article) {
 }
 
 /**
- * Common acronyms that should be fully capitalized in source names
- */
-const COMMON_ACRONYMS = ['BBC', 'CNN', 'ABC', 'NBC', 'CBS', 'BTC', 'ETH'];
-
-/**
- * Format source_id into a readable source name
- * Converts identifiers like "coindesk" to "Coindesk", "bbc-news" to "BBC News"
- * @param {string} sourceId - Source identifier (e.g., "coindesk", "cointelegraph")
- * @returns {string} Formatted source name
- */
-function formatSourceName(sourceId) {
-  if (!sourceId) return '';
-  
-  // Split on hyphens, underscores, or camelCase boundaries
-  const words = sourceId
-    .replace(/([a-z])([A-Z])/g, '$1 $2') // Handle camelCase
-    .split(/[-_\s]+/) // Split on hyphens, underscores, spaces
-    .filter(word => word.length > 0);
-  
-  // Capitalize each word
-  return words
-    .map(word => {
-      // Handle common acronyms
-      const upper = word.toUpperCase();
-      if (COMMON_ACRONYMS.includes(upper)) {
-        return upper;
-      }
-      // Capitalize first letter, lowercase rest
-      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-    })
-    .join(' ');
-}
-
-/**
  * NewsData.io Provider
  * Fetches Bitcoin news from NewsData.io API
  */
@@ -113,6 +79,26 @@ class NewsDataProvider {
     
     const data = await response.json();
     
+    // Log field availability for first article in first page to help debug
+    if (!nextPage && data.results && data.results.length > 0) {
+      const firstArticle = data.results[0];
+      const sourceFields = {
+        source_id: firstArticle.source_id !== undefined,
+        source_name: firstArticle.source_name !== undefined,
+        source_url: firstArticle.source_url !== undefined,
+        source_icon: firstArticle.source_icon !== undefined
+      };
+      console.log('[NewsData.io] First article source fields:', sourceFields);
+      
+      // Log actual values (truncated) for debugging
+      console.log('[NewsData.io] Sample values:', {
+        source_id: firstArticle.source_id,
+        source_name: firstArticle.source_name || '(missing)',
+        source_url: firstArticle.source_url ? firstArticle.source_url.substring(0, 50) + '...' : '(missing)',
+        source_icon: firstArticle.source_icon ? firstArticle.source_icon.substring(0, 50) + '...' : '(missing)'
+      });
+    }
+    
     return {
       articles: data.results || [],
       nextPage: data.nextPage || null,
@@ -124,13 +110,27 @@ class NewsDataProvider {
    * Normalize article to standard format
    * NewsData.io articles don't include sentiment, so we mark them for processing
    * 
-   * Note: NewsData.io API does not provide a source_name field.
-   * We derive it from source_id using formatSourceName().
+   * According to NewsData.io API documentation (https://newsdata.io/documentation/crypto),
+   * all source fields (source_id, source_name, source_url, source_icon) should be included
+   * in the API response. If any are missing, we log a warning for debugging.
    * 
    * @param {Object} article - Raw article from provider
    * @returns {Object} Normalized article
    */
   normalizeArticle(article) {
+    // Validate critical source fields according to API documentation
+    if (!article.source_id) {
+      console.warn('[NewsData.io] Missing source_id for article:', article.article_id || article.title);
+    }
+    if (!article.source_name) {
+      console.warn('[NewsData.io] Missing source_name for article:', article.article_id || article.title, 
+                   '(source_id:', article.source_id, ')');
+    }
+    if (!article.source_url) {
+      console.warn('[NewsData.io] Missing source_url for article:', article.article_id || article.title,
+                   '(source_id:', article.source_id, ')');
+    }
+    
     return {
       article_id: article.article_id,
       title: article.title,
@@ -138,7 +138,7 @@ class NewsDataProvider {
       link: article.link,
       pubDate: article.pubDate,
       source_id: article.source_id,
-      source_name: formatSourceName(article.source_id),
+      source_name: article.source_name,
       source_url: article.source_url,
       source_icon: article.source_icon,
       image_url: article.image_url,
@@ -375,6 +375,5 @@ export {
   NewsDataProvider,
   APITubeProvider,
   createNewsProvider,
-  getArticleId,
-  formatSourceName
+  getArticleId
 };

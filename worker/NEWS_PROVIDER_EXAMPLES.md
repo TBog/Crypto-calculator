@@ -4,8 +4,6 @@ This document provides examples of how articles are processed by different news 
 
 ## Example: NewsData.io Provider
 
-**Important Note**: The NewsData.io API does not provide a `source_name` field directly. The provider derives it from `source_id` by formatting the identifier into a human-readable name (e.g., "coindesk" becomes "Coindesk", "crypto-news" becomes "Crypto News").
-
 ### Raw API Response
 ```json
 {
@@ -17,6 +15,7 @@ This document provides examples of how articles are processed by different news 
       "link": "https://example.com/bitcoin-surges",
       "pubDate": "2025-01-15 10:30:00",
       "source_id": "cryptonews",
+      "source_name": "Crypto News Daily",
       "source_url": "https://cryptonews.com",
       "source_icon": "https://cryptonews.com/icon.png",
       "image_url": "https://example.com/bitcoin-image.jpg",
@@ -39,7 +38,7 @@ This document provides examples of how articles are processed by different news 
   "link": "https://example.com/bitcoin-surges",
   "pubDate": "2025-01-15 10:30:00",
   "source_id": "cryptonews",
-  "source_name": "Cryptonews",  // ← Derived from source_id by the provider
+  "source_name": "Crypto News Daily",
   "source_url": "https://cryptonews.com",
   "source_icon": "https://cryptonews.com/icon.png",
   "image_url": "https://example.com/bitcoin-image.jpg",
@@ -63,7 +62,7 @@ This document provides examples of how articles are processed by different news 
   "link": "https://example.com/bitcoin-surges",
   "pubDate": "2025-01-15 10:30:00",
   "source_id": "cryptonews",
-  "source_name": "Cryptonews",  // ← Derived from source_id
+  "source_name": "Crypto News Daily",
   "source_url": "https://cryptonews.com",
   "source_icon": "https://cryptonews.com/icon.png",
   "image_url": "https://example.com/bitcoin-image.jpg",
