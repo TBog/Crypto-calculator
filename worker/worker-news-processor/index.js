@@ -629,9 +629,9 @@ async function handleScheduled(event, env) {
       const batchSize = Math.min(10, idIndexData.length - currentIndex);
       const batchIds = idIndexData.slice(currentIndex, currentIndex + batchSize);
       
-      const articlePromises = batchIds.map(id => 
+      const articlePromises = batchIds.map((id, batchOffset) => 
         env.CRYPTO_NEWS_CACHE.get(`article:${id}`, { type: 'json' })
-          .then(article => ({ id, article, index: currentIndex + batchIds.indexOf(id) }))
+          .then(article => ({ id, article, index: currentIndex + batchOffset }))
       );
       
       const articleResults = await Promise.all(articlePromises);

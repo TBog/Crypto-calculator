@@ -801,3 +801,57 @@ describe('Circuit Breaker - Critical Section Isolation', () => {
   });
 });
 
+describe('Resume-based Article Processing', () => {
+  it('should track index correctly when processing articles in order', () => {
+    // Simulate multiple articles in the index
+    const articleIds = ['id1', 'id2', 'id3', 'id4', 'id5', 'id6', 'id7', 'id8'];
+    
+    // First run: process articles 0-4 (indices 0-4)
+    let lastProcessedIndex = 0;
+    const articlesToProcess = articleIds.slice(lastProcessedIndex, lastProcessedIndex + 5);
+    lastProcessedIndex = lastProcessedIndex + articlesToProcess.length;
+    
+    expect(articlesToProcess).toEqual(['id1', 'id2', 'id3', 'id4', 'id5']);
+    expect(lastProcessedIndex).toBe(5);
+    
+    // Second run: process articles 5-7 (indices 5-7)
+    const articlesToProcess2 = articleIds.slice(lastProcessedIndex, lastProcessedIndex + 5);
+    lastProcessedIndex = lastProcessedIndex + articlesToProcess2.length;
+    
+    expect(articlesToProcess2).toEqual(['id6', 'id7', 'id8']);
+    expect(lastProcessedIndex).toBe(8);
+    
+    // Third run: no more articles, should reset to 0
+    if (lastProcessedIndex >= articleIds.length) {
+      lastProcessedIndex = 0;
+    }
+    
+    expect(lastProcessedIndex).toBe(0);
+  });
+  
+  it('should handle resuming from middle of index', () => {
+    const articleIds = ['id1', 'id2', 'id3', 'id4', 'id5', 'id6'];
+    
+    // Start from index 2
+    let lastProcessedIndex = 2;
+    const articlesToProcess = articleIds.slice(lastProcessedIndex, lastProcessedIndex + 3);
+    lastProcessedIndex = lastProcessedIndex + articlesToProcess.length;
+    
+    expect(articlesToProcess).toEqual(['id3', 'id4', 'id5']);
+    expect(lastProcessedIndex).toBe(5);
+  });
+  
+  it('should reset to 0 when reaching end of articles', () => {
+    const articleIds = ['id1', 'id2', 'id3'];
+    let lastProcessedIndex = 3; // Already at end
+    
+    // Check if we've reached the end
+    if (lastProcessedIndex >= articleIds.length) {
+      lastProcessedIndex = 0;
+    }
+    
+    expect(lastProcessedIndex).toBe(0);
+  });
+});
+
+
