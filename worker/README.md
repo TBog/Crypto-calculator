@@ -61,12 +61,14 @@ worker/
   - Three-worker system: Producer (scheduled) → KV → Consumer (AI processing)
   - Each article processed in separate worker invocation with fresh subrequest budget
   - Early-exit optimization: Stops fetching when hitting known articles
-  - Two-key KV structure: ID index for deduplication + full payload for API
+  - Individual article storage: Each article stored separately in KV with its own key
+  - ID index maintains article order (latest first) for listing and deduplication
   - Maintains up to 500 articles with sentiment tags and AI summaries
-  - API endpoint reads from KV (millisecond latency)
+  - API endpoint reads from KV (millisecond latency) via parallel article fetches
   - Scales to process unlimited articles without hitting subrequest limits
   - See [NEWS_PROVIDER_GUIDE.md](./NEWS_PROVIDER_GUIDE.md) for provider configuration
   - See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for setup instructions
+  - See [KV_MIGRATION_GUIDE.md](./KV_MIGRATION_GUIDE.md) for storage migration details
 
 ## Testing
 
@@ -301,19 +303,21 @@ Returns Bitcoin-related news articles with AI-powered sentiment analysis from a 
 **Architecture:**
 - **Scheduled Worker**: Runs hourly with early-exit pagination optimization
 - **Early Exit**: Stops fetching when hitting a known article (saves API credits)
-- **Two-Key KV**: Separate ID index for O(1) deduplication + full payload for API
+- **Individual Article Storage**: Each article stored separately with `article:<id>` key
+- **ID Index**: Ordered array of article IDs (latest first) for O(1) deduplication
 - **Workers AI Sentiment**: Each article analyzed using Cloudflare Workers AI (Llama 3.1 8B)
-- **Exactly 2 KV Writes**: Updates both ID index and full payload per run
-- **Ultra-Fast API**: Endpoint reads from KV (millisecond latency)
+- **Parallel Operations**: Articles written/read in parallel for better performance
+- **Ultra-Fast API**: Endpoint reads from KV (millisecond latency) with parallel fetches
 
 **Features:**
 - **Hourly Updates**: Fresh news aggregated every hour by cron job
 - **Smart Pagination**: Early-exit when encountering known articles
 - **Up to 500 Articles**: Maintains larger history than previous 200-article limit
 - **AI-Powered Sentiment**: Edge-native sentiment classification (positive, negative, neutral)
-- **Optimized for Free Tier**: Minimal API credits (early exit) and KV writes (2 per run)
+- **Optimized for Free Tier**: Minimal API credits (early exit) and efficient KV usage
 - **Deduplication**: ID index enables fast O(1) duplicate detection
-- **Sentiment Distribution**: Includes counts of articles by sentiment
+- **On-Demand Sentiment Counts**: Calculated dynamically from individual articles
+- **Auto-Migration**: Legacy storage format automatically migrates to new structure
 
 **Deployment:**
 See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for complete setup instructions.
@@ -353,16 +357,31 @@ Response format:
 - Response Time: <10ms (KV read only)
 - Data Freshness: Updated hourly by scheduled worker with early-exit optimization
 - API Credits: Variable (early-exit saves credits), typically 1-5 per hour
-- KV Writes: Exactly 2 per run (48/day total, well under 1,000/day limit)
+- KV Writes: N+1 writes per run where N = number of new articles (individual article storage)
 - Scalability: Unlimited user requests with fixed backend cost
 
-**KV Keys:**
-- `BTC_ANALYZED_NEWS` - Full articles payload (read by API)
-- `BTC_ID_INDEX` - Article ID index for deduplication (read/write by scheduled worker)
+**KV Storage Architecture:**
+
+The system uses individual article storage for better scalability and performance:
+
+- `article:<article_id>` - Individual KV entry for each article (e.g., `article:abc123`)
+- `BTC_ID_INDEX` - Ordered array of article IDs (latest first) for listing and deduplication
+
+**Legacy Format (deprecated, auto-migrates):**
+- `BTC_ANALYZED_NEWS` - Monolithic object with all articles + metadata (auto-migrated to individual storage)
+
+**Cloudflare KV Free Tier Usage:**
+- **Storage**: ~2.5 MB for 500 articles (0.25% of 1 GB limit)
+- **Daily Reads**: ~11,000 reads for 1,000 API requests (11% of 100K limit)
+- **Daily Writes**: ~860-960 writes (86-96% of 1,000 limit)
+- **Well within free tier limits** for typical usage patterns
+
+See [KV_MIGRATION_GUIDE.md](./KV_MIGRATION_GUIDE.md) for migration details and free tier optimization strategies.
 
 **Workers:**
-- `index.js` - Main API worker (reads `BTC_ANALYZED_NEWS` from KV)
-- `news-updater-cron.js` - Scheduled worker (updates both KV keys)
+- `worker-api/index.js` - Main API worker (reads individual articles via `BTC_ID_INDEX`)
+- `worker-news-updater/index.js` - Scheduled worker (stores articles individually, maintains index)
+- `worker-news-processor/index.js` - Processing worker (updates individual articles)
 
 **Get All Supported Currencies from ExchangeRate-API:**
 ```
