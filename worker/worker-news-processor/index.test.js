@@ -918,67 +918,6 @@ describe('Resume-based Article Processing', () => {
     const nextBatch = articleIds.slice(nextStartIndex, nextStartIndex + MAX_ARTICLES_PER_RUN);
     expect(nextBatch).toEqual(['id4', 'id5']);
   });
-  
-  it('should eventually process all articles when more than 15 are added to a filled list', () => {
-    const MAX_ARTICLES_PER_RUN = 5;
-    
-    // Start with 10 already processed articles
-    const existingArticles = Array.from({ length: 10 }, (_, i) => `existing_${i + 1}`);
-    
-    // Add 20 new articles (more than 15, and 4x MAX_ARTICLES_PER_RUN) at the beginning
-    const newArticles = Array.from({ length: 20 }, (_, i) => `new_${i + 1}`);
-    const articleIds = [...newArticles, ...existingArticles];
-    
-    // Simulate that existing articles are already processed (don't need processing)
-    // and new articles need processing
-    const articlesNeedingProcessing = new Set(newArticles);
-    
-    expect(articleIds.length).toBe(30);
-    expect(articlesNeedingProcessing.size).toBe(20);
-    
-    // Simulate multiple processor runs
-    let lastProcessedId = null;
-    const processedArticles = [];
-    let runCount = 0;
-    const maxRuns = 10; // Safety limit to prevent infinite loop
-    
-    while (processedArticles.length < newArticles.length && runCount < maxRuns) {
-      runCount++;
-      
-      // Find start index based on last processed ID
-      let startIndex = 0;
-      if (lastProcessedId) {
-        const lastIndex = articleIds.indexOf(lastProcessedId);
-        if (lastIndex !== -1) {
-          startIndex = lastIndex + 1;
-        }
-      }
-      
-      // Reached end of list, reset to beginning
-      if (startIndex >= articleIds.length) {
-        startIndex = 0;
-      }
-      
-      // Load batch
-      const batchSize = Math.min(MAX_ARTICLES_PER_RUN, articleIds.length - startIndex);
-      const loadedBatch = articleIds.slice(startIndex, startIndex + batchSize);
-      
-      // Process all articles in batch that need processing
-      const batchToProcess = loadedBatch.filter(id => articlesNeedingProcessing.has(id));
-      processedArticles.push(...batchToProcess);
-      
-      // Update last processed to last loaded article
-      lastProcessedId = loadedBatch[loadedBatch.length - 1];
-    }
-    
-    // Verify all new articles were eventually processed
-    expect(processedArticles.length).toBe(20);
-    expect(new Set(processedArticles).size).toBe(20); // No duplicates
-    expect(runCount).toBeLessThanOrEqual(5); // Should take at most 5 runs (20 articles / 4 per batch on average)
-    
-    // Verify we processed them in order
-    expect(processedArticles).toEqual(newArticles);
-  });
 });
 
 describe('processArticlesBatch with Mock KV', () => {
@@ -1191,6 +1130,102 @@ describe('processArticlesBatch with Mock KV', () => {
     expect(result.loadedCount).toBe(2);
     expect(result.processedCount).toBe(2); // id1 and id2
     expect(result.lastProcessedId).toBe('id2');
+  });
+  
+  it('should eventually process all articles when more than 15 are added to a filled list', async () => {
+    const MAX_ARTICLES_PER_RUN = 5;
+    
+    // Start with 10 already processed articles
+    const existingArticles = Array.from({ length: 10 }, (_, i) => `existing_${i + 1}`);
+    
+    // Add 20 new articles (more than 15, and 4x MAX_ARTICLES_PER_RUN) at the beginning
+    const newArticles = Array.from({ length: 20 }, (_, i) => `new_${i + 1}`);
+    const articleIds = [...newArticles, ...existingArticles];
+    
+    // Initialize mock KV with article index and articles
+    const initialData = {
+      'BTC_ID_INDEX': articleIds
+    };
+    
+    // Add existing articles (already processed - no flags)
+    existingArticles.forEach(id => {
+      initialData[`article:${id}`] = {
+        title: `Existing Article ${id}`,
+        needsSentiment: false,
+        needsSummary: false
+      };
+    });
+    
+    // Add new articles (need processing)
+    newArticles.forEach(id => {
+      initialData[`article:${id}`] = {
+        title: `New Article ${id}`,
+        needsSentiment: true,
+        needsSummary: true
+      };
+    });
+    
+    const mockKV = createMockKV(initialData);
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      MAX_ARTICLES_PER_RUN: MAX_ARTICLES_PER_RUN,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    expect(articleIds.length).toBe(30);
+    
+    // Simulate multiple processor runs
+    const processedArticles = [];
+    let runCount = 0;
+    const maxRuns = 10; // Safety limit to prevent infinite loop
+    
+    while (processedArticles.length < newArticles.length && runCount < maxRuns) {
+      runCount++;
+      
+      const result = await processArticlesBatch(mockKV, mockEnv, config);
+      
+      // Track which articles were processed in this run
+      // In reality, processArticlesBatch modifies articles in KV
+      // For this test, we'll count articles that needed processing in the loaded batch
+      if (result.processedCount > 0) {
+        // Get the loaded batch to see which ones were processed
+        const kvData = mockKV.getData();
+        const lastProcessedId = kvData['BTC_LAST_PROCESSED_ID'];
+        const lastIndex = lastProcessedId ? articleIds.indexOf(lastProcessedId) : -1;
+        
+        // Determine which articles were in this batch
+        const batchStart = lastIndex - result.loadedCount + 1;
+        const batchIds = articleIds.slice(Math.max(0, batchStart), lastIndex + 1);
+        
+        // Add newly processed articles to our tracking list
+        batchIds.forEach(id => {
+          if (newArticles.includes(id) && !processedArticles.includes(id)) {
+            processedArticles.push(id);
+          }
+        });
+      }
+      
+      // Stop if no more processing needed
+      if (result.status === 'no_processing_needed' || result.status === 'no_articles') {
+        // Check if we've processed all new articles
+        const allProcessed = newArticles.every(id => {
+          const article = mockKV.getData()[`article:${id}`];
+          return article && !article.needsSentiment && !article.needsSummary;
+        });
+        if (allProcessed) break;
+      }
+    }
+    
+    // Verify all new articles were eventually processed
+    expect(processedArticles.length).toBe(20);
+    expect(new Set(processedArticles).size).toBe(20); // No duplicates
+    expect(runCount).toBeLessThanOrEqual(5); // Should take at most 5 runs (20 articles / 4 per batch on average)
+    
+    // Verify we processed them in order
+    expect(processedArticles).toEqual(newArticles);
   });
 });
 
