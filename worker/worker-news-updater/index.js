@@ -267,6 +267,31 @@ async function storeInKV(env, newArticles, config) {
     }
   );
   console.log(`✓ Updated ID index with ${allIds.length} article IDs (${newArticleIds.length} new, ${allIds.length - newArticleIds.length} existing)`);
+  
+  // Add new articles to pending queue for processing
+  if (newArticleIds.length > 0) {
+    let pendingQueue = [];
+    try {
+      const existingQueue = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_PENDING_QUEUE, { type: 'json' });
+      if (existingQueue && Array.isArray(existingQueue)) {
+        pendingQueue = existingQueue;
+      }
+    } catch (error) {
+      console.log('No existing pending queue found, creating new one');
+    }
+    
+    // Append new articles to the end of the queue
+    pendingQueue.push(...newArticleIds);
+    
+    await env.CRYPTO_NEWS_CACHE.put(
+      config.KV_KEY_PENDING_QUEUE,
+      JSON.stringify(pendingQueue),
+      {
+        expirationTtl: config.ID_INDEX_TTL
+      }
+    );
+    console.log(`✓ Added ${newArticleIds.length} articles to pending queue (total: ${pendingQueue.length})`);
+  }
 }
 
 /**
