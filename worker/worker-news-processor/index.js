@@ -660,13 +660,15 @@ async function handleScheduled(event, env) {
       
       // Update to the last article we checked, so we continue from next batch
       const lastCheckedId = idsToLoad[idsToLoad.length - 1];
-      await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_LAST_PROCESSED, lastCheckedId);
-      console.log(`Updated last processed to: ${lastCheckedId}`);
       
       // If we've reached the end of all articles, reset for next cycle
       if (startIndex + articlesToLoad >= idIndexData.length) {
         console.log('Reached end of all articles, resetting to beginning for next run');
         await env.CRYPTO_NEWS_CACHE.delete(config.KV_KEY_LAST_PROCESSED);
+      } else {
+        // Otherwise, save the last checked article ID to resume from next batch
+        await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_LAST_PROCESSED, lastCheckedId);
+        console.log(`Updated last processed to: ${lastCheckedId}, will continue from next batch`);
       }
       
       console.log('=== Bitcoin News Processor Cron Job Completed (No Processing Needed) ===');
@@ -679,7 +681,6 @@ async function handleScheduled(event, env) {
     console.log(`Step 5: Processing all ${pendingArticles.length} pending articles...`);
     
     let processedCount = 0;
-    let lastProcessedArticleId = null;
     
     // Process articles and collect updates
     const updatePromises = [];
@@ -701,7 +702,6 @@ async function handleScheduled(event, env) {
         );
         
         processedCount++;
-        lastProcessedArticleId = id;
       } catch (error) {
         console.error(`  ✗ Error processing article:`, error);
         // Continue with next article
@@ -717,12 +717,15 @@ async function handleScheduled(event, env) {
     // Update last processed article ID to the last article in the loaded batch
     // This ensures we continue from the next batch even if some articles didn't need processing
     const lastLoadedId = idsToLoad[idsToLoad.length - 1];
-    await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_LAST_PROCESSED, lastLoadedId);
-    console.log(`Updated last processed article ID to: ${lastLoadedId}`);
     
     // If we've reached the end of all articles, reset for next cycle
     if (startIndex + articlesToLoad >= idIndexData.length) {
-      console.log('Reached end of all articles, will reset to beginning on next run');
+      console.log('Reached end of all articles, resetting to beginning for next run');
+      await env.CRYPTO_NEWS_CACHE.delete(config.KV_KEY_LAST_PROCESSED);
+    } else {
+      // Otherwise, save the last loaded article ID to resume from next batch
+      await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_LAST_PROCESSED, lastLoadedId);
+      console.log(`Updated last processed article ID to: ${lastLoadedId}`);
     }
     
     console.log(`\n=== Bitcoin News Processor Cron Job Completed Successfully ===`);
