@@ -17,6 +17,7 @@
 
 export const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';  // Full articles payload
 export const KV_KEY_IDS = 'BTC_ID_INDEX';         // ID index for deduplication
+export const KV_KEY_LAST_PROCESSED = 'BTC_LAST_PROCESSED_INDEX';  // Last processed article index
 
 // =============================================================================
 // News Updater Worker Configuration
@@ -173,6 +174,7 @@ export function getNewsProcessorConfig(env) {
   return {
     KV_KEY_NEWS,
     KV_KEY_IDS,
+    KV_KEY_LAST_PROCESSED,
     ID_INDEX_TTL: getConfig(env, 'ID_INDEX_TTL', ID_INDEX_TTL),
     MAX_ARTICLES_PER_RUN: getConfig(env, 'MAX_ARTICLES_PER_RUN', MAX_ARTICLES_PER_RUN),
     MAX_CONTENT_CHARS: getConfig(env, 'MAX_CONTENT_CHARS', MAX_CONTENT_CHARS),
