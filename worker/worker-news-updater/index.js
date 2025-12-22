@@ -166,7 +166,15 @@ async function migrateLegacyData(env, config) {
       });
     });
     
-    await Promise.all(writePromises.filter(p => p));
+    // Use allSettled so we can detect partial failures explicitly
+    const writeResults = await Promise.allSettled(writePromises.filter(p => p));
+    const failedWrites = writeResults.filter(result => result.status === 'rejected');
+    
+    if (failedWrites.length > 0) {
+      console.error(`✗ Failed to migrate ${failedWrites.length} legacy articles`);
+      // Keep legacy key intact by treating this as a migration failure
+      throw new Error('Legacy data migration failed for some articles');
+    }
     
     // Extract IDs for the index (in original order - latest first)
     const migratedIds = legacyData.articles
