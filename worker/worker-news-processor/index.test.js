@@ -982,6 +982,7 @@ describe('processArticlesBatch with Mock KV', () => {
       KV_KEY_IDS: 'BTC_ID_INDEX',
       KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
       KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
       MAX_ARTICLES_PER_RUN: 3,
       MAX_CONTENT_FETCH_ATTEMPTS: 5,
       ID_INDEX_TTL: 86400
@@ -1015,6 +1016,7 @@ describe('processArticlesBatch with Mock KV', () => {
       KV_KEY_IDS: 'BTC_ID_INDEX',
       KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
       KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
       MAX_ARTICLES_PER_RUN: 2,
       MAX_CONTENT_FETCH_ATTEMPTS: 5,
       ID_INDEX_TTL: 86400
@@ -1045,6 +1047,7 @@ describe('processArticlesBatch with Mock KV', () => {
       KV_KEY_IDS: 'BTC_ID_INDEX',
       KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
       KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
       MAX_ARTICLES_PER_RUN: 5,
       MAX_CONTENT_FETCH_ATTEMPTS: 5,
       ID_INDEX_TTL: 86400
@@ -1075,6 +1078,7 @@ describe('processArticlesBatch with Mock KV', () => {
       KV_KEY_IDS: 'BTC_ID_INDEX',
       KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
       KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
       MAX_ARTICLES_PER_RUN: 2,
       MAX_CONTENT_FETCH_ATTEMPTS: 5,
       ID_INDEX_TTL: 86400
@@ -1098,6 +1102,7 @@ describe('processArticlesBatch with Mock KV', () => {
       KV_KEY_IDS: 'BTC_ID_INDEX',
       KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
       KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
       MAX_ARTICLES_PER_RUN: 5,
       MAX_CONTENT_FETCH_ATTEMPTS: 5,
       ID_INDEX_TTL: 86400
@@ -1124,6 +1129,7 @@ describe('processArticlesBatch with Mock KV', () => {
       KV_KEY_IDS: 'BTC_ID_INDEX',
       KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
       KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
       MAX_ARTICLES_PER_RUN: 2,
       MAX_CONTENT_FETCH_ATTEMPTS: 5,
       ID_INDEX_TTL: 86400
@@ -1177,6 +1183,7 @@ describe('processArticlesBatch with Mock KV', () => {
       KV_KEY_IDS: 'BTC_ID_INDEX',
       KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
       KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
       MAX_ARTICLES_PER_RUN: MAX_ARTICLES_PER_RUN,
       MAX_CONTENT_FETCH_ATTEMPTS: 5,
       ID_INDEX_TTL: 86400
@@ -1219,6 +1226,47 @@ describe('processArticlesBatch with Mock KV', () => {
     // Verify all new articles were eventually processed
     expect(processedArticleIds.size).toBe(20);
     expect(runCount).toBeLessThanOrEqual(10); // Should process all articles within reasonable time
+  });
+  
+  it('should merge pending additions from staging area into main queue', async () => {
+    // Test the conflict-free merge mechanism
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3', 'id4', 'id5'],
+      'BTC_PENDING_QUEUE': ['id1', 'id2'], // Main queue
+      'BTC_PENDING_ADDITIONS': ['id3', 'id4', 'id5'], // Staging area with new additions
+      'article:id1': { title: 'Article 1', needsSentiment: true, needsSummary: true },
+      'article:id2': { title: 'Article 2', needsSentiment: true, needsSummary: true },
+      'article:id3': { title: 'Article 3', needsSentiment: true, needsSummary: true },
+      'article:id4': { title: 'Article 4', needsSentiment: true, needsSummary: true },
+      'article:id5': { title: 'Article 5', needsSentiment: true, needsSummary: true }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
+      MAX_ARTICLES_PER_RUN: 2,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('success');
+    expect(result.processedCount).toBe(2); // Processed id1 and id2
+    
+    // Verify staging area was cleared
+    const kvData = mockKV.getData();
+    expect(kvData['BTC_PENDING_ADDITIONS']).toBeUndefined();
+    
+    // Verify main queue now contains merged items
+    const finalQueue = JSON.parse(kvData['BTC_PENDING_QUEUE']);
+    expect(finalQueue.length).toBeGreaterThanOrEqual(3); // At least id1, id2 (still processing), and id3, id4, id5 (merged)
+    expect(finalQueue).toContain('id3');
+    expect(finalQueue).toContain('id4');
+    expect(finalQueue).toContain('id5');
   });
 });
 

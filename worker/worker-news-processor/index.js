@@ -560,7 +560,7 @@ async function processArticle(env, article, config) {
 }
 
 /**
- * Process articles batch using priority queue
+ * Process articles batch using priority queue with conflict detection
  * 
  * This is the core processing logic extracted for testability.
  * Uses a KV-based queue to prioritize articles needing processing.
@@ -571,13 +571,19 @@ async function processArticle(env, article, config) {
  * - On fetch timeout, moves article to end of queue for retry
  * - Removes articles from queue when fully processed
  * 
+ * Conflict handling:
+ * - Uses separate KV keys for processor operations vs updater appends
+ * - BTC_PENDING_QUEUE: Main queue (processor reads/modifies front)
+ * - BTC_PENDING_ADDITIONS: Staging area (updater appends new IDs)
+ * - Processor merges additions into main queue during each run
+ * 
  * @param {Object} kv - KV interface with get/put/delete methods
  * @param {Object} env - Environment for AI processing
  * @param {Object} config - Configuration object
  * @returns {Promise<Object>} Result with processedCount and queue info
  */
 async function processArticlesBatch(kv, env, config) {
-  // Step 1: Read pending queue
+  // Step 1: Read pending queue and merge any new additions
   let pendingQueue = [];
   try {
     const queueData = await kv.get(config.KV_KEY_PENDING_QUEUE, { type: 'json' });
@@ -586,6 +592,20 @@ async function processArticlesBatch(kv, env, config) {
     }
   } catch (error) {
     console.error('Error reading pending queue:', error);
+  }
+  
+  // Step 1b: Check for and merge pending additions from updater
+  try {
+    const additionsData = await kv.get(config.KV_KEY_PENDING_ADDITIONS, { type: 'json' });
+    if (additionsData && Array.isArray(additionsData) && additionsData.length > 0) {
+      // Merge additions to end of queue
+      pendingQueue.push(...additionsData);
+      // Clear the additions queue
+      await kv.delete(config.KV_KEY_PENDING_ADDITIONS);
+      console.log(`Merged ${additionsData.length} new articles from additions queue`);
+    }
+  } catch (error) {
+    console.error('Error reading/merging pending additions:', error);
   }
   
   if (pendingQueue.length === 0) {
@@ -678,8 +698,8 @@ async function processArticlesBatch(kv, env, config) {
     await Promise.all(updatePromises);
   }
   
-  // Step 5: Update the queue
-  // Remove processed articles and articles to be moved
+  // Step 5: Update the queue (only modify items we processed)
+  // Remove processed articles and articles to be moved from pendingQueue
   let newQueue = pendingQueue.filter(id => 
     !idsToRemoveFromQueue.includes(id) && !idsToMoveToEnd.includes(id)
   );
