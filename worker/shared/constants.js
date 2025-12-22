@@ -36,8 +36,7 @@ export const ID_INDEX_TTL = 60 * 60 * 24 * 30;  // 2592000 seconds
 // News Processor Worker Configuration
 // =============================================================================
 
-// Maximum articles to process per run (stay within subrequest limits)
-// 5 articles × 3 subrequests (fetch + 2 AI calls) = 15 subrequests (well under 50 limit)
+// Number of articles to load from KV per cron run (all loaded articles that need processing will be processed)
 export const MAX_ARTICLES_PER_RUN = 5;
 
 // Maximum characters to extract from webpage (128KB limit for AI context)
