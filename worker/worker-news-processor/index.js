@@ -561,9 +561,9 @@ async function processArticle(env, article, config) {
  * Main scheduled event handler for processing pending articles
  * 
  * Uses a resume-based approach to process all articles:
- * - Tracks last processed index position in KV
- * - Resumes from last position on each run
- * - Resets to start when no pending articles found or end reached
+ * - Tracks last processed article ID in KV
+ * - Resumes from that article ID position on each run
+ * - Resets to start when no pending articles found or ID not found
  * 
  * @param {Event} event - Scheduled event
  * @param {Object} env - Environment variables
@@ -588,34 +588,40 @@ async function handleScheduled(event, env) {
     
     console.log(`Found ${idIndexData.length} article IDs in index`);
     
-    // Step 2: Get last processed index to resume from
-    console.log('Step 2: Reading last processed index...');
-    let lastProcessedIndex = 0;
+    // Step 2: Get last processed article ID to resume from
+    console.log('Step 2: Reading last processed article ID...');
+    let startIndex = 0;
     try {
-      const storedIndex = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_LAST_PROCESSED);
-      if (storedIndex !== null) {
-        lastProcessedIndex = parseInt(storedIndex, 10);
-        if (isNaN(lastProcessedIndex) || lastProcessedIndex < 0) {
-          lastProcessedIndex = 0;
+      const lastProcessedId = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_LAST_PROCESSED);
+      if (lastProcessedId) {
+        // Find the index of the last processed article
+        const lastIndex = idIndexData.indexOf(lastProcessedId);
+        if (lastIndex !== -1) {
+          // Start from the next article after the last processed one
+          startIndex = lastIndex + 1;
+          console.log(`Found last processed article ID: ${lastProcessedId} at index ${lastIndex}`);
+        } else {
+          console.log(`Last processed article ID ${lastProcessedId} not found in current index, starting from beginning`);
+          startIndex = 0;
         }
       }
     } catch (error) {
-      console.log('No last processed index found, starting from beginning');
-      lastProcessedIndex = 0;
+      console.log('No last processed article ID found, starting from beginning');
+      startIndex = 0;
     }
     
     // If we've reached or passed the end, reset to beginning
-    if (lastProcessedIndex >= idIndexData.length) {
-      console.log(`Last processed index (${lastProcessedIndex}) >= total articles (${idIndexData.length}), resetting to 0`);
-      lastProcessedIndex = 0;
+    if (startIndex >= idIndexData.length) {
+      console.log(`Start index (${startIndex}) >= total articles (${idIndexData.length}), resetting to 0`);
+      startIndex = 0;
     }
     
-    console.log(`Resuming from index ${lastProcessedIndex}`);
+    console.log(`Resuming from index ${startIndex}`);
     
-    // Step 3: Find articles that need processing, starting from last processed index
+    // Step 3: Find articles that need processing, starting from last processed position
     console.log('Step 3: Finding articles that need processing...');
     const pendingArticles = [];
-    let currentIndex = lastProcessedIndex;
+    let currentIndex = startIndex;
     let checkedCount = 0;
     
     // We'll check up to MAX_ARTICLES_PER_RUN * 5 articles to find pending ones
@@ -664,7 +670,7 @@ async function handleScheduled(event, env) {
     // If no pending articles found after checking, reset to beginning for next run
     if (pendingArticles.length === 0) {
       console.log('No articles need processing, resetting to beginning');
-      await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_LAST_PROCESSED, '0');
+      await env.CRYPTO_NEWS_CACHE.delete(config.KV_KEY_LAST_PROCESSED);
       console.log('=== Bitcoin News Processor Cron Job Completed (All Done) ===');
       return;
     }
@@ -676,7 +682,7 @@ async function handleScheduled(event, env) {
     console.log(`Processing ${articlesToProcess.length} articles this run...`);
     
     let processedCount = 0;
-    let lastProcessedArticleIndex = lastProcessedIndex;
+    let lastProcessedArticleId = null;
     
     // Process articles and collect updates
     const updatePromises = [];
@@ -698,7 +704,7 @@ async function handleScheduled(event, env) {
         );
         
         processedCount++;
-        lastProcessedArticleIndex = index;
+        lastProcessedArticleId = id;
       } catch (error) {
         console.error(`  ✗ Error processing article:`, error);
         // Continue with next article
@@ -711,17 +717,17 @@ async function handleScheduled(event, env) {
       console.log(`\n✓ Batch update: ${processedCount} articles written to KV`);
     }
     
-    // Update last processed index to continue from next position
-    // Add 1 to move past the last processed article
-    const nextIndex = lastProcessedArticleIndex + 1;
-    await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_LAST_PROCESSED, nextIndex.toString());
-    console.log(`Updated last processed index to ${nextIndex}`);
+    // Update last processed article ID to continue from next position
+    if (lastProcessedArticleId) {
+      await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_LAST_PROCESSED, lastProcessedArticleId);
+      console.log(`Updated last processed article ID to: ${lastProcessedArticleId}`);
+    }
     
     const remainingPending = pendingArticles.length - processedCount;
     console.log(`\n=== Bitcoin News Processor Cron Job Completed Successfully ===`);
     console.log(`Processed: ${processedCount} articles`);
     console.log(`Remaining in current batch: ${remainingPending} articles`);
-    console.log(`Next run will resume from index ${nextIndex}`);
+    console.log(`Next run will resume from article: ${lastProcessedArticleId}`);
     
   } catch (error) {
     console.error('=== Bitcoin News Processor Cron Job Failed ===');

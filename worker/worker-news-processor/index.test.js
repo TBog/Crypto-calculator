@@ -802,55 +802,86 @@ describe('Circuit Breaker - Critical Section Isolation', () => {
 });
 
 describe('Resume-based Article Processing', () => {
-  it('should track index correctly when processing articles in order', () => {
+  it('should find article ID in index and resume from next position', () => {
     // Simulate multiple articles in the index
     const articleIds = ['id1', 'id2', 'id3', 'id4', 'id5', 'id6', 'id7', 'id8'];
     
-    // First run: process articles 0-4 (indices 0-4)
-    let lastProcessedIndex = 0;
-    const articlesToProcess = articleIds.slice(lastProcessedIndex, lastProcessedIndex + 5);
-    lastProcessedIndex = lastProcessedIndex + articlesToProcess.length;
+    // First run: process articles starting from beginning
+    const lastProcessedId = null;
+    let startIndex = 0;
     
-    expect(articlesToProcess).toEqual(['id1', 'id2', 'id3', 'id4', 'id5']);
-    expect(lastProcessedIndex).toBe(5);
-    
-    // Second run: process articles 5-7 (indices 5-7)
-    const articlesToProcess2 = articleIds.slice(lastProcessedIndex, lastProcessedIndex + 5);
-    lastProcessedIndex = lastProcessedIndex + articlesToProcess2.length;
-    
-    expect(articlesToProcess2).toEqual(['id6', 'id7', 'id8']);
-    expect(lastProcessedIndex).toBe(8);
-    
-    // Third run: no more articles, should reset to 0
-    if (lastProcessedIndex >= articleIds.length) {
-      lastProcessedIndex = 0;
+    if (lastProcessedId) {
+      const lastIndex = articleIds.indexOf(lastProcessedId);
+      if (lastIndex !== -1) {
+        startIndex = lastIndex + 1;
+      }
     }
     
-    expect(lastProcessedIndex).toBe(0);
+    expect(startIndex).toBe(0);
+    
+    // Process 5 articles
+    const articlesToProcess = articleIds.slice(startIndex, startIndex + 5);
+    expect(articlesToProcess).toEqual(['id1', 'id2', 'id3', 'id4', 'id5']);
+    
+    // Last processed is 'id5'
+    const newLastProcessedId = 'id5';
+    
+    // Second run: resume from 'id5'
+    const lastIndex = articleIds.indexOf(newLastProcessedId);
+    expect(lastIndex).toBe(4);
+    
+    startIndex = lastIndex + 1;
+    expect(startIndex).toBe(5);
+    
+    const articlesToProcess2 = articleIds.slice(startIndex, startIndex + 5);
+    expect(articlesToProcess2).toEqual(['id6', 'id7', 'id8']);
   });
   
-  it('should handle resuming from middle of index', () => {
+  it('should handle resuming from middle using article ID', () => {
     const articleIds = ['id1', 'id2', 'id3', 'id4', 'id5', 'id6'];
     
-    // Start from index 2
-    let lastProcessedIndex = 2;
-    const articlesToProcess = articleIds.slice(lastProcessedIndex, lastProcessedIndex + 3);
-    lastProcessedIndex = lastProcessedIndex + articlesToProcess.length;
+    // Start from 'id2' (index 1), so next article is at index 2
+    const lastProcessedId = 'id2';
+    const lastIndex = articleIds.indexOf(lastProcessedId);
+    expect(lastIndex).toBe(1);
     
+    const startIndex = lastIndex + 1;
+    expect(startIndex).toBe(2);
+    
+    const articlesToProcess = articleIds.slice(startIndex, startIndex + 3);
     expect(articlesToProcess).toEqual(['id3', 'id4', 'id5']);
-    expect(lastProcessedIndex).toBe(5);
   });
   
-  it('should reset to 0 when reaching end of articles', () => {
+  it('should reset to beginning when last processed ID not found', () => {
     const articleIds = ['id1', 'id2', 'id3'];
-    let lastProcessedIndex = 3; // Already at end
+    const lastProcessedId = 'id_old'; // Not in current index
     
-    // Check if we've reached the end
-    if (lastProcessedIndex >= articleIds.length) {
-      lastProcessedIndex = 0;
-    }
+    const lastIndex = articleIds.indexOf(lastProcessedId);
+    expect(lastIndex).toBe(-1);
     
-    expect(lastProcessedIndex).toBe(0);
+    // When not found, start from beginning
+    const startIndex = lastIndex === -1 ? 0 : lastIndex + 1;
+    expect(startIndex).toBe(0);
+  });
+  
+  it('should handle new articles being prepended to index', () => {
+    // Original index after processing 'id3'
+    const originalIds = ['id1', 'id2', 'id3', 'id4', 'id5'];
+    const lastProcessedId = 'id3';
+    
+    // New articles get added to the beginning
+    const updatedIds = ['id_new1', 'id_new2', 'id1', 'id2', 'id3', 'id4', 'id5'];
+    
+    // Find where we left off
+    const lastIndex = updatedIds.indexOf(lastProcessedId);
+    expect(lastIndex).toBe(4); // 'id3' is now at index 4
+    
+    const startIndex = lastIndex + 1;
+    expect(startIndex).toBe(5);
+    
+    // Resume processing from 'id4' onward
+    const nextArticles = updatedIds.slice(startIndex, startIndex + 2);
+    expect(nextArticles).toEqual(['id4', 'id5']);
   });
 });
 

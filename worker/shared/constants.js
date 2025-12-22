@@ -17,7 +17,7 @@
 
 export const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';  // Full articles payload
 export const KV_KEY_IDS = 'BTC_ID_INDEX';         // ID index for deduplication
-export const KV_KEY_LAST_PROCESSED = 'BTC_LAST_PROCESSED_INDEX';  // Last processed article index
+export const KV_KEY_LAST_PROCESSED = 'BTC_LAST_PROCESSED_ID';  // Last processed article ID
 
 // =============================================================================
 // News Updater Worker Configuration
