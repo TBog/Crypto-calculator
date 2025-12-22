@@ -560,6 +560,150 @@ async function processArticle(env, article, config) {
 }
 
 /**
+ * Process articles batch with resume-based tracking
+ * 
+ * This is the core processing logic extracted for testability.
+ * It can be tested with a mock KV interface.
+ * 
+ * @param {Object} kv - KV interface with get/put/delete methods
+ * @param {Object} env - Environment for AI processing
+ * @param {Object} config - Configuration object
+ * @returns {Promise<Object>} Result with processedCount and loaded article info
+ */
+async function processArticlesBatch(kv, env, config) {
+  // Step 1: Read article IDs from index
+  const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
+  
+  if (!idIndexData || !Array.isArray(idIndexData) || idIndexData.length === 0) {
+    return { processedCount: 0, loadedCount: 0, status: 'no_articles' };
+  }
+  
+  // Step 2: Get last processed article ID to resume from
+  let startIndex = 0;
+  try {
+    const lastProcessedId = await kv.get(config.KV_KEY_LAST_PROCESSED);
+    if (lastProcessedId) {
+      // Find the index of the last processed article
+      const lastIndex = idIndexData.indexOf(lastProcessedId);
+      if (lastIndex !== -1) {
+        // Start from the next article after the last processed one
+        startIndex = lastIndex + 1;
+      } else {
+        startIndex = 0;
+      }
+    }
+  } catch (error) {
+    startIndex = 0;
+  }
+  
+  // If we've reached or passed the end, reset to beginning
+  if (startIndex >= idIndexData.length) {
+    startIndex = 0;
+  }
+  
+  // Step 3: Load MAX_ARTICLES_PER_RUN articles from KV
+  const articlesToLoad = Math.min(config.MAX_ARTICLES_PER_RUN, idIndexData.length - startIndex);
+  const idsToLoad = idIndexData.slice(startIndex, startIndex + articlesToLoad);
+  
+  const articlePromises = idsToLoad.map((id, offset) => 
+    kv.get(`article:${id}`, { type: 'json' })
+      .then(article => ({ id, article, index: startIndex + offset }))
+  );
+  
+  const articleResults = await Promise.all(articlePromises);
+  
+  // Step 4: Find all loaded articles that need processing
+  const pendingArticles = [];
+  
+  for (const { id, article, index } of articleResults) {
+    if (!article) {
+      continue;
+    }
+    
+    const needsProcessing = 
+      (article.needsSentiment ?? true) || 
+      (article.needsSummary ?? true) || 
+      (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
+    
+    if (needsProcessing) {
+      pendingArticles.push({ id, article, index });
+    }
+  }
+  
+  if (pendingArticles.length === 0) {
+    // Update to the last article we checked, so we continue from next batch
+    const lastCheckedId = idsToLoad[idsToLoad.length - 1];
+    
+    // If we've reached the end of all articles, reset for next cycle
+    if (startIndex + articlesToLoad >= idIndexData.length) {
+      await kv.delete(config.KV_KEY_LAST_PROCESSED);
+    } else {
+      // Otherwise, save the last checked article ID to resume from next batch
+      await kv.put(config.KV_KEY_LAST_PROCESSED, lastCheckedId);
+    }
+    
+    return { 
+      processedCount: 0, 
+      loadedCount: idsToLoad.length, 
+      status: 'no_processing_needed',
+      lastProcessedId: lastCheckedId
+    };
+  }
+  
+  // Step 5: Process ALL pending articles from this batch
+  let processedCount = 0;
+  
+  // Process articles and collect updates
+  const updatePromises = [];
+  
+  for (const item of pendingArticles) {
+    const { id, article } = item;
+    
+    try {
+      // Process the article (one phase per run)
+      const updatedArticle = await processArticle(env, article, config);
+      
+      // Queue the write operation
+      const articleKey = `article:${id}`;
+      updatePromises.push(
+        kv.put(articleKey, JSON.stringify(updatedArticle), {
+          expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
+        })
+      );
+      
+      processedCount++;
+    } catch (error) {
+      console.error(`Error processing article ${id}:`, error);
+      // Continue with next article
+    }
+  }
+  
+  // Batch write: Execute all updates in parallel
+  if (updatePromises.length > 0) {
+    await Promise.all(updatePromises);
+  }
+  
+  // Update last processed article ID to the last article in the loaded batch
+  // This ensures we continue from the next batch even if some articles didn't need processing
+  const lastLoadedId = idsToLoad[idsToLoad.length - 1];
+  
+  // If we've reached the end of all articles, reset for next cycle
+  if (startIndex + articlesToLoad >= idIndexData.length) {
+    await kv.delete(config.KV_KEY_LAST_PROCESSED);
+  } else {
+    // Otherwise, save the last loaded article ID to resume from next batch
+    await kv.put(config.KV_KEY_LAST_PROCESSED, lastLoadedId);
+  }
+  
+  return {
+    processedCount,
+    loadedCount: idsToLoad.length,
+    status: 'success',
+    lastProcessedId: lastLoadedId
+  };
+}
+
+/**
  * Main scheduled event handler for processing pending articles
  * 
  * Uses a resume-based approach to process all articles:
@@ -579,159 +723,25 @@ async function handleScheduled(event, env) {
   const config = getNewsProcessorConfig(env);
   
   try {
-    // Step 1: Read article IDs from index
-    console.log('Step 1: Reading article IDs from index...');
-    const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
+    const result = await processArticlesBatch(env.CRYPTO_NEWS_CACHE, env, config);
     
-    if (!idIndexData || !Array.isArray(idIndexData) || idIndexData.length === 0) {
+    if (result.status === 'no_articles') {
       console.log('No articles found in ID index');
       console.log('=== Bitcoin News Processor Cron Job Completed (No Articles) ===');
       return;
     }
     
-    console.log(`Found ${idIndexData.length} article IDs in index`);
-    
-    // Step 2: Get last processed article ID to resume from
-    console.log('Step 2: Reading last processed article ID...');
-    let startIndex = 0;
-    try {
-      const lastProcessedId = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_LAST_PROCESSED);
-      if (lastProcessedId) {
-        // Find the index of the last processed article
-        const lastIndex = idIndexData.indexOf(lastProcessedId);
-        if (lastIndex !== -1) {
-          // Start from the next article after the last processed one
-          startIndex = lastIndex + 1;
-          console.log(`Found last processed article ID: ${lastProcessedId} at index ${lastIndex}`);
-        } else {
-          console.log(`Last processed article ID ${lastProcessedId} not found in current index, starting from beginning`);
-          startIndex = 0;
-        }
-      }
-    } catch (error) {
-      console.log('No last processed article ID found, starting from beginning');
-      startIndex = 0;
-    }
-    
-    // If we've reached or passed the end, reset to beginning
-    if (startIndex >= idIndexData.length) {
-      console.log(`Start index (${startIndex}) >= total articles (${idIndexData.length}), resetting to 0`);
-      startIndex = 0;
-    }
-    
-    console.log(`Resuming from index ${startIndex}`);
-    
-    // Step 3: Load MAX_ARTICLES_PER_RUN articles from KV
-    console.log(`Step 3: Loading ${config.MAX_ARTICLES_PER_RUN} articles from KV...`);
-    const articlesToLoad = Math.min(config.MAX_ARTICLES_PER_RUN, idIndexData.length - startIndex);
-    const idsToLoad = idIndexData.slice(startIndex, startIndex + articlesToLoad);
-    
-    console.log(`Loading ${idsToLoad.length} articles starting from index ${startIndex}`);
-    
-    const articlePromises = idsToLoad.map((id, offset) => 
-      env.CRYPTO_NEWS_CACHE.get(`article:${id}`, { type: 'json' })
-        .then(article => ({ id, article, index: startIndex + offset }))
-    );
-    
-    const articleResults = await Promise.all(articlePromises);
-    
-    // Step 4: Find all loaded articles that need processing
-    console.log('Step 4: Checking which loaded articles need processing...');
-    const pendingArticles = [];
-    
-    for (const { id, article, index } of articleResults) {
-      if (!article) {
-        console.warn(`Article not found for ID: ${id}`);
-        continue;
-      }
-      
-      const needsProcessing = 
-        (article.needsSentiment ?? true) || 
-        (article.needsSummary ?? true) || 
-        (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
-      
-      if (needsProcessing) {
-        pendingArticles.push({ id, article, index });
-      }
-    }
-    
-    if (pendingArticles.length === 0) {
+    if (result.status === 'no_processing_needed') {
       console.log('No articles need processing in this batch');
-      
-      // Update to the last article we checked, so we continue from next batch
-      const lastCheckedId = idsToLoad[idsToLoad.length - 1];
-      
-      // If we've reached the end of all articles, reset for next cycle
-      if (startIndex + articlesToLoad >= idIndexData.length) {
-        console.log('Reached end of all articles, resetting to beginning for next run');
-        await env.CRYPTO_NEWS_CACHE.delete(config.KV_KEY_LAST_PROCESSED);
-      } else {
-        // Otherwise, save the last checked article ID to resume from next batch
-        await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_LAST_PROCESSED, lastCheckedId);
-        console.log(`Updated last processed to: ${lastCheckedId}, will continue from next batch`);
-      }
-      
+      console.log(`Updated last processed to: ${result.lastProcessedId}, will continue from next batch`);
       console.log('=== Bitcoin News Processor Cron Job Completed (No Processing Needed) ===');
       return;
     }
     
-    console.log(`Found ${pendingArticles.length} articles needing processing out of ${idsToLoad.length} loaded`);
-    
-    // Step 5: Process ALL pending articles from this batch
-    console.log(`Step 5: Processing all ${pendingArticles.length} pending articles...`);
-    
-    let processedCount = 0;
-    
-    // Process articles and collect updates
-    const updatePromises = [];
-    
-    for (const item of pendingArticles) {
-      const { id, article, index } = item;
-      console.log(`\nProcessing article ${processedCount + 1}/${pendingArticles.length} at index ${index}: "${article.title?.substring(0, 50)}..."`);
-      
-      try {
-        // Process the article (one phase per run)
-        const updatedArticle = await processArticle(env, article, config);
-        
-        // Queue the write operation
-        const articleKey = `article:${id}`;
-        updatePromises.push(
-          env.CRYPTO_NEWS_CACHE.put(articleKey, JSON.stringify(updatedArticle), {
-            expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
-          })
-        );
-        
-        processedCount++;
-      } catch (error) {
-        console.error(`  ✗ Error processing article:`, error);
-        // Continue with next article
-      }
-    }
-    
-    // Batch write: Execute all updates in parallel
-    if (updatePromises.length > 0) {
-      await Promise.all(updatePromises);
-      console.log(`\n✓ Batch update: ${processedCount} articles written to KV`);
-    }
-    
-    // Update last processed article ID to the last article in the loaded batch
-    // This ensures we continue from the next batch even if some articles didn't need processing
-    const lastLoadedId = idsToLoad[idsToLoad.length - 1];
-    
-    // If we've reached the end of all articles, reset for next cycle
-    if (startIndex + articlesToLoad >= idIndexData.length) {
-      console.log('Reached end of all articles, resetting to beginning for next run');
-      await env.CRYPTO_NEWS_CACHE.delete(config.KV_KEY_LAST_PROCESSED);
-    } else {
-      // Otherwise, save the last loaded article ID to resume from next batch
-      await env.CRYPTO_NEWS_CACHE.put(config.KV_KEY_LAST_PROCESSED, lastLoadedId);
-      console.log(`Updated last processed article ID to: ${lastLoadedId}`);
-    }
-    
     console.log(`\n=== Bitcoin News Processor Cron Job Completed Successfully ===`);
-    console.log(`Loaded: ${idsToLoad.length} articles`);
-    console.log(`Processed: ${processedCount} articles`);
-    console.log(`Next run will resume from article: ${lastLoadedId}`);
+    console.log(`Loaded: ${result.loadedCount} articles`);
+    console.log(`Processed: ${result.processedCount} articles`);
+    console.log(`Next run will resume from article: ${result.lastProcessedId}`);
     
   } catch (error) {
     console.error('=== Bitcoin News Processor Cron Job Failed ===');
@@ -886,7 +896,7 @@ async function handleFetch(request, env) {
 }
 
 // Export for testing
-export { TextExtractor, fetchArticleContent };
+export { TextExtractor, fetchArticleContent, processArticlesBatch };
 
 export default {
   async scheduled(event, env, ctx) {

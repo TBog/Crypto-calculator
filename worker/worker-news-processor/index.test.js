@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TextExtractor, fetchArticleContent } from './index.js';
-import { decodeHTMLEntities } from '../shared/constants.js';
+import { TextExtractor, fetchArticleContent, processArticlesBatch } from './index.js';
+import { decodeHTMLEntities, getNewsProcessorConfig } from '../shared/constants.js';
 
 describe('TextExtractor - Debug Mode Functionality', () => {
   describe('Debug Output Mode', () => {
@@ -978,6 +978,219 @@ describe('Resume-based Article Processing', () => {
     
     // Verify we processed them in order
     expect(processedArticles).toEqual(newArticles);
+  });
+});
+
+describe('processArticlesBatch with Mock KV', () => {
+  /**
+   * Create a mock KV interface for testing
+   */
+  function createMockKV(initialData = {}) {
+    const data = { ...initialData };
+    
+    return {
+      async get(key, options) {
+        const value = data[key];
+        if (value === undefined) return null;
+        if (options?.type === 'json') {
+          return typeof value === 'string' ? JSON.parse(value) : value;
+        }
+        return value;
+      },
+      
+      async put(key, value, options) {
+        data[key] = value;
+      },
+      
+      async delete(key) {
+        delete data[key];
+      },
+      
+      // Helper to inspect state
+      getData() {
+        return data;
+      }
+    };
+  }
+  
+  /**
+   * Create a mock environment for AI processing
+   */
+  function createMockEnv() {
+    return {
+      AI: {
+        async run(model, params) {
+          // Mock AI response for testing
+          return { response: 'Mock AI response' };
+        }
+      }
+    };
+  }
+  
+  it('should process articles from the beginning when no last processed ID exists', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3', 'id4', 'id5'],
+      'article:id1': { title: 'Article 1', needsSentiment: true, needsSummary: true },
+      'article:id2': { title: 'Article 2', needsSentiment: true, needsSummary: true },
+      'article:id3': { title: 'Article 3', needsSentiment: false, needsSummary: false },
+      'article:id4': { title: 'Article 4', needsSentiment: true, needsSummary: true },
+      'article:id5': { title: 'Article 5', needsSentiment: false, needsSummary: false }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      MAX_ARTICLES_PER_RUN: 3,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('success');
+    expect(result.loadedCount).toBe(3);
+    expect(result.processedCount).toBe(2); // id1 and id2 need processing
+    expect(result.lastProcessedId).toBe('id3');
+    
+    const kvData = mockKV.getData();
+    expect(kvData['BTC_LAST_PROCESSED_ID']).toBe('id3');
+  });
+  
+  it('should resume from last processed ID', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3', 'id4', 'id5'],
+      'BTC_LAST_PROCESSED_ID': 'id2',
+      'article:id1': { title: 'Article 1', needsSentiment: false, needsSummary: false },
+      'article:id2': { title: 'Article 2', needsSentiment: false, needsSummary: false },
+      'article:id3': { title: 'Article 3', needsSentiment: true, needsSummary: true },
+      'article:id4': { title: 'Article 4', needsSentiment: true, needsSummary: true },
+      'article:id5': { title: 'Article 5', needsSentiment: false, needsSummary: false }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      MAX_ARTICLES_PER_RUN: 2,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('success');
+    expect(result.loadedCount).toBe(2); // id3, id4
+    expect(result.processedCount).toBe(2); // both need processing
+    expect(result.lastProcessedId).toBe('id4');
+    
+    const kvData = mockKV.getData();
+    expect(kvData['BTC_LAST_PROCESSED_ID']).toBe('id4');
+  });
+  
+  it('should reset to beginning when reaching end of articles', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3'],
+      'BTC_LAST_PROCESSED_ID': 'id2',
+      'article:id1': { title: 'Article 1', needsSentiment: false, needsSummary: false },
+      'article:id2': { title: 'Article 2', needsSentiment: false, needsSummary: false },
+      'article:id3': { title: 'Article 3', needsSentiment: true, needsSummary: true }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      MAX_ARTICLES_PER_RUN: 5,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('success');
+    expect(result.loadedCount).toBe(1); // only id3 left
+    expect(result.processedCount).toBe(1);
+    
+    // Should delete the last processed ID when reaching end
+    const kvData = mockKV.getData();
+    expect(kvData['BTC_LAST_PROCESSED_ID']).toBeUndefined();
+  });
+  
+  it('should handle batch where no articles need processing', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3'],
+      'article:id1': { title: 'Article 1', needsSentiment: false, needsSummary: false },
+      'article:id2': { title: 'Article 2', needsSentiment: false, needsSummary: false },
+      'article:id3': { title: 'Article 3', needsSentiment: false, needsSummary: false }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      MAX_ARTICLES_PER_RUN: 2,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('no_processing_needed');
+    expect(result.loadedCount).toBe(2);
+    expect(result.processedCount).toBe(0);
+    expect(result.lastProcessedId).toBe('id2');
+    
+    const kvData = mockKV.getData();
+    expect(kvData['BTC_LAST_PROCESSED_ID']).toBe('id2');
+  });
+  
+  it('should return no_articles status when index is empty', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': []
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      MAX_ARTICLES_PER_RUN: 5,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('no_articles');
+    expect(result.processedCount).toBe(0);
+    expect(result.loadedCount).toBe(0);
+  });
+  
+  it('should handle last processed ID not found in current index', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3'],
+      'BTC_LAST_PROCESSED_ID': 'id_old', // Not in current index
+      'article:id1': { title: 'Article 1', needsSentiment: true, needsSummary: true },
+      'article:id2': { title: 'Article 2', needsSentiment: true, needsSummary: true },
+      'article:id3': { title: 'Article 3', needsSentiment: false, needsSummary: false }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      MAX_ARTICLES_PER_RUN: 2,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    // Should start from beginning when last processed ID not found
+    expect(result.status).toBe('success');
+    expect(result.loadedCount).toBe(2);
+    expect(result.processedCount).toBe(2); // id1 and id2
+    expect(result.lastProcessedId).toBe('id2');
   });
 });
 
