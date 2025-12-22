@@ -1,0 +1,20 @@
+{
+  "name": "crypto-calculator",
+  "version": "1.0.0",
+  "description": "A beautiful, real-time cryptocurrency profit calculator with live Bitcoin price fetching and animated results. Calculate your potential profits or losses from Bitcoin investments with support for multiple currencies.",
+  "main": "script.js",
+  "scripts": {
+    "build:css": "tailwindcss -i src/input.css -o dist/output.css --minify",
+    "dev:css": "tailwindcss -i src/input.css -o dist/output.css",
+    "watch:css": "tailwindcss -i src/input.css -o dist/output.css --watch",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.18"
+  }
+}
