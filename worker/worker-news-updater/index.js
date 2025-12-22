@@ -233,9 +233,11 @@ async function storeInKV(env, newArticles, config) {
   // Merge: new IDs first (latest), then existing IDs (keeping order)
   // Remove duplicates and limit to MAX_STORED_ARTICLES
   const allIds = [...newArticleIds];
+  const allIdSet = new Set(allIds);
   for (const existingId of existingIds) {
-    if (!allIds.includes(existingId) && allIds.length < config.MAX_STORED_ARTICLES) {
+    if (!allIdSet.has(existingId) && allIds.length < config.MAX_STORED_ARTICLES) {
       allIds.push(existingId);
+      allIdSet.add(existingId);
     }
   }
   
