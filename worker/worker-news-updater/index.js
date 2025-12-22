@@ -267,6 +267,32 @@ async function storeInKV(env, newArticles, config) {
     }
   );
   console.log(`✓ Updated ID index with ${allIds.length} article IDs (${newArticleIds.length} new, ${allIds.length - newArticleIds.length} existing)`);
+  
+  // Add new articles to pending additions staging area (conflict-free)
+  // Processor will merge these into main queue during its next run
+  if (newArticleIds.length > 0) {
+    let pendingAdditions = [];
+    try {
+      const existingAdditions = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_PENDING_ADDITIONS, { type: 'json' });
+      if (existingAdditions && Array.isArray(existingAdditions)) {
+        pendingAdditions = existingAdditions;
+      }
+    } catch (error) {
+      console.log('No existing pending additions found, creating new staging area');
+    }
+    
+    // Append new articles to the staging area
+    pendingAdditions.push(...newArticleIds);
+    
+    await env.CRYPTO_NEWS_CACHE.put(
+      config.KV_KEY_PENDING_ADDITIONS,
+      JSON.stringify(pendingAdditions),
+      {
+        expirationTtl: config.ID_INDEX_TTL
+      }
+    );
+    console.log(`✓ Added ${newArticleIds.length} articles to pending additions staging area (total: ${pendingAdditions.length})`);
+  }
 }
 
 /**

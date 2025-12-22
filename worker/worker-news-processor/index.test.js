@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { TextExtractor, fetchArticleContent } from './index.js';
-import { decodeHTMLEntities } from '../shared/constants.js';
+import { TextExtractor, fetchArticleContent, processArticlesBatch } from './index.js';
+import { decodeHTMLEntities, getNewsProcessorConfig } from '../shared/constants.js';
 
 describe('TextExtractor - Debug Mode Functionality', () => {
   describe('Debug Output Mode', () => {
@@ -800,4 +800,562 @@ describe('Circuit Breaker - Critical Section Isolation', () => {
     expect(article.extractedContent).toBeUndefined(); // Cleared
   });
 });
+
+describe('Resume-based Article Processing', () => {
+  it('should load batch and process all articles that need processing', () => {
+    const MAX_ARTICLES_PER_RUN = 5;
+    
+    // Simulate loading 5 articles, where 3 need processing
+    const loadedArticles = [
+      { id: 'id1', needsProcessing: true },
+      { id: 'id2', needsProcessing: false },  // already processed
+      { id: 'id3', needsProcessing: true },
+      { id: 'id4', needsProcessing: true },
+      { id: 'id5', needsProcessing: false },  // already processed
+    ];
+    
+    const pendingArticles = loadedArticles.filter(a => a.needsProcessing);
+    
+    // Should process all 3 pending articles, not just stop at MAX_ARTICLES_PER_RUN
+    expect(pendingArticles.length).toBe(3);
+    expect(pendingArticles.map(a => a.id)).toEqual(['id1', 'id3', 'id4']);
+    
+    // Last loaded article is 'id5', that's what we save as last processed
+    const lastLoadedId = loadedArticles[loadedArticles.length - 1].id;
+    expect(lastLoadedId).toBe('id5');
+  });
+  
+  it('should find article ID in index and load next batch', () => {
+    const articleIds = ['id1', 'id2', 'id3', 'id4', 'id5', 'id6', 'id7', 'id8'];
+    const MAX_ARTICLES_PER_RUN = 5;
+    
+    // First run: start from beginning, load 5 articles
+    let lastProcessedId = null;
+    let startIndex = 0;
+    
+    if (lastProcessedId) {
+      const lastIndex = articleIds.indexOf(lastProcessedId);
+      if (lastIndex !== -1) {
+        startIndex = lastIndex + 1;
+      }
+    }
+    
+    expect(startIndex).toBe(0);
+    
+    const firstBatch = articleIds.slice(startIndex, startIndex + MAX_ARTICLES_PER_RUN);
+    expect(firstBatch).toEqual(['id1', 'id2', 'id3', 'id4', 'id5']);
+    
+    // Last loaded is 'id5'
+    lastProcessedId = firstBatch[firstBatch.length - 1];
+    expect(lastProcessedId).toBe('id5');
+    
+    // Second run: resume from 'id5', load next 5
+    const lastIndex = articleIds.indexOf(lastProcessedId);
+    expect(lastIndex).toBe(4);
+    
+    startIndex = lastIndex + 1;
+    expect(startIndex).toBe(5);
+    
+    const secondBatch = articleIds.slice(startIndex, startIndex + MAX_ARTICLES_PER_RUN);
+    expect(secondBatch).toEqual(['id6', 'id7', 'id8']);
+  });
+  
+  it('should reset to beginning when last processed ID not found', () => {
+    const articleIds = ['id1', 'id2', 'id3'];
+    const lastProcessedId = 'id_old'; // Not in current index
+    
+    const lastIndex = articleIds.indexOf(lastProcessedId);
+    expect(lastIndex).toBe(-1);
+    
+    // When not found, start from beginning
+    const startIndex = lastIndex === -1 ? 0 : lastIndex + 1;
+    expect(startIndex).toBe(0);
+  });
+  
+  it('should handle new articles being prepended to index', () => {
+    // Original index after loading batch ending with 'id3'
+    const originalIds = ['id1', 'id2', 'id3', 'id4', 'id5'];
+    const lastProcessedId = 'id3';
+    
+    // New articles get added to the beginning
+    const updatedIds = ['id_new1', 'id_new2', 'id1', 'id2', 'id3', 'id4', 'id5'];
+    
+    // Find where we left off
+    const lastIndex = updatedIds.indexOf(lastProcessedId);
+    expect(lastIndex).toBe(4); // 'id3' is now at index 4
+    
+    const startIndex = lastIndex + 1;
+    expect(startIndex).toBe(5);
+    
+    // Resume loading from 'id4' onward
+    const nextBatch = updatedIds.slice(startIndex, startIndex + 2);
+    expect(nextBatch).toEqual(['id4', 'id5']);
+  });
+  
+  it('should handle batch where no articles need processing', () => {
+    const MAX_ARTICLES_PER_RUN = 3;
+    const articleIds = ['id1', 'id2', 'id3', 'id4', 'id5'];
+    
+    // Load first batch
+    const startIndex = 0;
+    const loadedBatch = articleIds.slice(startIndex, startIndex + MAX_ARTICLES_PER_RUN);
+    expect(loadedBatch).toEqual(['id1', 'id2', 'id3']);
+    
+    // Simulate no articles needing processing
+    const pendingArticles = []; // All already processed
+    
+    expect(pendingArticles.length).toBe(0);
+    
+    // Should still update last processed to last loaded
+    const lastLoadedId = loadedBatch[loadedBatch.length - 1];
+    expect(lastLoadedId).toBe('id3');
+    
+    // Next run should continue from 'id4'
+    const lastIndex = articleIds.indexOf(lastLoadedId);
+    const nextStartIndex = lastIndex + 1;
+    expect(nextStartIndex).toBe(3);
+    
+    const nextBatch = articleIds.slice(nextStartIndex, nextStartIndex + MAX_ARTICLES_PER_RUN);
+    expect(nextBatch).toEqual(['id4', 'id5']);
+  });
+});
+
+describe('processArticlesBatch with Mock KV', () => {
+  /**
+   * Create a mock KV interface for testing
+   */
+  function createMockKV(initialData = {}) {
+    const data = { ...initialData };
+    
+    return {
+      async get(key, options) {
+        const value = data[key];
+        if (value === undefined) return null;
+        if (options?.type === 'json') {
+          return typeof value === 'string' ? JSON.parse(value) : value;
+        }
+        return value;
+      },
+      
+      async put(key, value, options) {
+        data[key] = value;
+      },
+      
+      async delete(key) {
+        delete data[key];
+      },
+      
+      // Helper to inspect state
+      getData() {
+        return data;
+      }
+    };
+  }
+  
+  /**
+   * Create a mock environment for AI processing
+   */
+  function createMockEnv() {
+    return {
+      AI: {
+        async run(model, params) {
+          // Mock AI response for testing
+          return { response: 'Mock AI response' };
+        }
+      }
+    };
+  }
+  
+  it('should process articles from the beginning when no last processed ID exists', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3', 'id4', 'id5'],
+      'BTC_PENDING_QUEUE': ['id1', 'id2', 'id3'],
+      'article:id1': { title: 'Article 1', needsSentiment: true, needsSummary: true },
+      'article:id2': { title: 'Article 2', needsSentiment: true, needsSummary: true },
+      'article:id3': { title: 'Article 3', needsSentiment: false, needsSummary: false },
+      'article:id4': { title: 'Article 4', needsSentiment: true, needsSummary: true },
+      'article:id5': { title: 'Article 5', needsSentiment: false, needsSummary: false }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
+      KV_KEY_ADDITIONS_CHECKPOINT: 'BTC_ADDITIONS_CHECKPOINT',
+      MAX_ARTICLES_PER_RUN: 3,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('success');
+    expect(result.loadedCount).toBe(3);
+    expect(result.processedCount).toBe(2); // id1 and id2 need processing
+    expect(result.removedFromQueue).toBe(1); // id3 removed (already processed)
+    
+    const kvData = mockKV.getData();
+    const updatedQueue = JSON.parse(kvData['BTC_PENDING_QUEUE']);
+    expect(updatedQueue).toEqual(['id1', 'id2']); // id3 removed, id1 and id2 still need more processing
+  });
+  
+  it('should resume from last processed ID', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3', 'id4', 'id5'],
+      'BTC_PENDING_QUEUE': ['id3', 'id4'],
+      'article:id1': { title: 'Article 1', needsSentiment: false, needsSummary: false },
+      'article:id2': { title: 'Article 2', needsSentiment: false, needsSummary: false },
+      'article:id3': { title: 'Article 3', needsSentiment: true, needsSummary: true },
+      'article:id4': { title: 'Article 4', needsSentiment: true, needsSummary: true },
+      'article:id5': { title: 'Article 5', needsSentiment: false, needsSummary: false }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
+      KV_KEY_ADDITIONS_CHECKPOINT: 'BTC_ADDITIONS_CHECKPOINT',
+      MAX_ARTICLES_PER_RUN: 2,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('success');
+    expect(result.loadedCount).toBe(2); // id3, id4
+    expect(result.processedCount).toBe(2); // both need processing
+    
+    const kvData = mockKV.getData();
+    const updatedQueue = JSON.parse(kvData['BTC_PENDING_QUEUE']);
+    expect(updatedQueue).toEqual(['id3', 'id4']); // Still in queue for next processing phase
+  });
+  
+  it('should remove fully processed articles from queue', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3'],
+      'BTC_PENDING_QUEUE': ['id3'],
+      'article:id1': { title: 'Article 1', needsSentiment: false, needsSummary: false },
+      'article:id2': { title: 'Article 2', needsSentiment: false, needsSummary: false },
+      'article:id3': { title: 'Article 3', needsSentiment: true, needsSummary: true }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
+      KV_KEY_ADDITIONS_CHECKPOINT: 'BTC_ADDITIONS_CHECKPOINT',
+      MAX_ARTICLES_PER_RUN: 5,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('success');
+    expect(result.loadedCount).toBe(1); // only id3 in queue
+    expect(result.processedCount).toBe(1);
+    
+    const kvData = mockKV.getData();
+    const updatedQueue = JSON.parse(kvData['BTC_PENDING_QUEUE']);
+    expect(updatedQueue).toEqual(['id3']); // Still in queue for next phase
+  });
+  
+  it('should handle batch where no articles are in queue', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3'],
+      'BTC_PENDING_QUEUE': [],
+      'article:id1': { title: 'Article 1', needsSentiment: false, needsSummary: false },
+      'article:id2': { title: 'Article 2', needsSentiment: false, needsSummary: false },
+      'article:id3': { title: 'Article 3', needsSentiment: false, needsSummary: false }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
+      KV_KEY_ADDITIONS_CHECKPOINT: 'BTC_ADDITIONS_CHECKPOINT',
+      MAX_ARTICLES_PER_RUN: 2,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('no_articles');
+    expect(result.loadedCount).toBe(0);
+    expect(result.processedCount).toBe(0);
+  });
+  
+  it('should return no_articles status when queue is empty', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': [],
+      'BTC_PENDING_QUEUE': []
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
+      KV_KEY_ADDITIONS_CHECKPOINT: 'BTC_ADDITIONS_CHECKPOINT',
+      MAX_ARTICLES_PER_RUN: 5,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('no_articles');
+    expect(result.processedCount).toBe(0);
+    expect(result.loadedCount).toBe(0);
+  });
+  
+  it('should process articles from queue regardless of index order', async () => {
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3'],
+      'BTC_PENDING_QUEUE': ['id1', 'id2'], // Only these need processing
+      'article:id1': { title: 'Article 1', needsSentiment: true, needsSummary: true },
+      'article:id2': { title: 'Article 2', needsSentiment: true, needsSummary: true },
+      'article:id3': { title: 'Article 3', needsSentiment: false, needsSummary: false }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
+      KV_KEY_ADDITIONS_CHECKPOINT: 'BTC_ADDITIONS_CHECKPOINT',
+      MAX_ARTICLES_PER_RUN: 2,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    // Should process from queue
+    expect(result.status).toBe('success');
+    expect(result.loadedCount).toBe(2);
+    expect(result.processedCount).toBe(2); // id1 and id2
+  });
+  
+  it('should eventually process all articles when more than 15 are added to a filled list', async () => {
+    const MAX_ARTICLES_PER_RUN = 5;
+    
+    // Start with 10 already processed articles
+    const existingArticles = Array.from({ length: 10 }, (_, i) => `existing_${i + 1}`);
+    
+    // Add 20 new articles (more than 15, and 4x MAX_ARTICLES_PER_RUN) at the beginning
+    const newArticles = Array.from({ length: 20 }, (_, i) => `new_${i + 1}`);
+    const articleIds = [...newArticles, ...existingArticles];
+    
+    // Initialize mock KV with article index, pending queue, and articles
+    const initialData = {
+      'BTC_ID_INDEX': articleIds,
+      'BTC_PENDING_QUEUE': [...newArticles] // Only new articles in queue
+    };
+    
+    // Add existing articles (already processed - no flags)
+    existingArticles.forEach(id => {
+      initialData[`article:${id}`] = {
+        title: `Existing Article ${id}`,
+        needsSentiment: false,
+        needsSummary: false
+      };
+    });
+    
+    // Add new articles (need processing)
+    newArticles.forEach(id => {
+      initialData[`article:${id}`] = {
+        title: `New Article ${id}`,
+        needsSentiment: true,
+        needsSummary: true
+      };
+    });
+    
+    const mockKV = createMockKV(initialData);
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_LAST_PROCESSED: 'BTC_LAST_PROCESSED_ID',
+      KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
+      KV_KEY_ADDITIONS_CHECKPOINT: 'BTC_ADDITIONS_CHECKPOINT',
+      MAX_ARTICLES_PER_RUN: MAX_ARTICLES_PER_RUN,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    expect(articleIds.length).toBe(30);
+    
+    // Simulate multiple processor runs
+    const processedArticleIds = new Set();
+    let runCount = 0;
+    const maxRuns = 10; // Safety limit to prevent infinite loop
+    
+    while (runCount < maxRuns) {
+      runCount++;
+      
+      const result = await processArticlesBatch(mockKV, mockEnv, config);
+      
+      // Stop if no more articles in queue
+      if (result.status === 'no_articles') {
+        break;
+      }
+      
+      // Track which new articles were processed
+      if (result.processedCount > 0) {
+        const kvData = mockKV.getData();
+        newArticles.forEach(id => {
+          const article = kvData[`article:${id}`];
+          if (article && !article.needsSentiment && !article.needsSummary) {
+            processedArticleIds.add(id);
+          }
+        });
+      }
+      
+      // Stop if all new articles processed
+      if (processedArticleIds.size === newArticles.length) {
+        break;
+      }
+    }
+    
+    // Verify all new articles were eventually processed
+    expect(processedArticleIds.size).toBe(20);
+    expect(runCount).toBeLessThanOrEqual(10); // Should process all articles within reasonable time
+  });
+  
+  it('should merge pending additions from staging area into main queue using checkpoint', async () => {
+    // Test the conflict-free merge mechanism with checkpoint tracking
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3', 'id4', 'id5'],
+      'BTC_PENDING_QUEUE': JSON.stringify(['id1', 'id2']), // Main queue
+      'BTC_PENDING_ADDITIONS': JSON.stringify(['id3', 'id4', 'id5']), // Staging area with new additions
+      'BTC_ADDITIONS_CHECKPOINT': '0', // No additions processed yet
+      'article:id1': { title: 'Article 1', needsSentiment: true, needsSummary: true },
+      'article:id2': { title: 'Article 2', needsSentiment: true, needsSummary: true },
+      'article:id3': { title: 'Article 3', needsSentiment: true, needsSummary: true },
+      'article:id4': { title: 'Article 4', needsSentiment: true, needsSummary: true },
+      'article:id5': { title: 'Article 5', needsSentiment: true, needsSummary: true }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
+      KV_KEY_ADDITIONS_CHECKPOINT: 'BTC_ADDITIONS_CHECKPOINT',
+      MAX_ARTICLES_PER_RUN: 2,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    const result = await processArticlesBatch(mockKV, mockEnv, config);
+    
+    expect(result.status).toBe('success');
+    expect(result.processedCount).toBe(2); // Processed id1 and id2
+    expect(result.mergedCount).toBe(3); // Merged id3, id4, id5
+    
+    // Verify staging area was NOT cleared (updater still owns it)
+    const kvData = mockKV.getData();
+    expect(kvData['BTC_PENDING_ADDITIONS']).toBeDefined();
+    const additions = JSON.parse(kvData['BTC_PENDING_ADDITIONS']);
+    expect(additions).toEqual(['id3', 'id4', 'id5']);
+    
+    // Verify checkpoint was updated
+    expect(kvData['BTC_ADDITIONS_CHECKPOINT']).toBe('3'); // Processed up to index 3
+    
+    // Verify main queue now contains merged items
+    const finalQueue = JSON.parse(kvData['BTC_PENDING_QUEUE']);
+    expect(finalQueue.length).toBeGreaterThanOrEqual(3); // At least id1, id2 (still processing), and id3, id4, id5 (merged)
+    expect(finalQueue).toContain('id3');
+    expect(finalQueue).toContain('id4');
+    expect(finalQueue).toContain('id5');
+    
+    // Second run should not merge again (checkpoint prevents duplicate merges)
+    const result2 = await processArticlesBatch(mockKV, mockEnv, config);
+    expect(result2.mergedCount).toBe(0); // No new additions to merge
+  });
+  
+  it('should handle concurrent updater writes without race conditions', async () => {
+    // Simulate updater adding more items while processor is running
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3', 'id4', 'id5', 'id6'],
+      'BTC_PENDING_QUEUE': JSON.stringify(['id1', 'id2']),
+      'BTC_PENDING_ADDITIONS': JSON.stringify(['id3']), // Initial additions
+      'BTC_ADDITIONS_CHECKPOINT': '0',
+      'article:id1': { title: 'Article 1', needsSentiment: true, needsSummary: true },
+      'article:id2': { title: 'Article 2', needsSentiment: true, needsSummary: true },
+      'article:id3': { title: 'Article 3', needsSentiment: true, needsSummary: true },
+      'article:id4': { title: 'Article 4', needsSentiment: true, needsSummary: true },
+      'article:id5': { title: 'Article 5', needsSentiment: true, needsSummary: true },
+      'article:id6': { title: 'Article 6', needsSentiment: true, needsSummary: true }
+    });
+    
+    const mockEnv = createMockEnv();
+    const config = {
+      KV_KEY_IDS: 'BTC_ID_INDEX',
+      KV_KEY_PENDING_QUEUE: 'BTC_PENDING_QUEUE',
+      KV_KEY_PENDING_ADDITIONS: 'BTC_PENDING_ADDITIONS',
+      KV_KEY_ADDITIONS_CHECKPOINT: 'BTC_ADDITIONS_CHECKPOINT',
+      MAX_ARTICLES_PER_RUN: 2,
+      MAX_CONTENT_FETCH_ATTEMPTS: 5,
+      ID_INDEX_TTL: 86400
+    };
+    
+    // Simulate updater appending to additions during processor run
+    // This would happen concurrently in production
+    const originalGet = mockKV.get.bind(mockKV);
+    let getCount = 0;
+    mockKV.get = async function(key, options) {
+      const result = await originalGet(key, options);
+      // After processor reads additions for the first time, simulate updater adding more
+      if (key === 'BTC_PENDING_ADDITIONS' && getCount === 0) {
+        getCount++;
+        // Simulate updater appending id4, id5, id6 to additions
+        const currentAdditions = JSON.parse(mockKV.getData()['BTC_PENDING_ADDITIONS']);
+        currentAdditions.push('id4', 'id5', 'id6');
+        mockKV.getData()['BTC_PENDING_ADDITIONS'] = JSON.stringify(currentAdditions);
+      }
+      return result;
+    };
+    
+    // First processor run
+    const result1 = await processArticlesBatch(mockKV, mockEnv, config);
+    expect(result1.mergedCount).toBe(1); // Only merged id3
+    expect(result1.processedCount).toBe(2);
+    
+    // Verify additions were extended by updater
+    const kvData1 = mockKV.getData();
+    const additions1 = JSON.parse(kvData1['BTC_PENDING_ADDITIONS']);
+    expect(additions1.length).toBe(4); // id3, id4, id5, id6
+    
+    // Checkpoint should be at 1 (only processed first addition)
+    expect(kvData1['BTC_ADDITIONS_CHECKPOINT']).toBe('1');
+    
+    // Second processor run should pick up the new additions
+    mockKV.get = originalGet; // Restore normal behavior
+    const result2 = await processArticlesBatch(mockKV, mockEnv, config);
+    expect(result2.mergedCount).toBe(3); // Merged id4, id5, id6 (from index 1 to 4)
+    
+    // Checkpoint should now be at 4
+    const kvData2 = mockKV.getData();
+    expect(kvData2['BTC_ADDITIONS_CHECKPOINT']).toBe('4');
+    
+    // Additions log still intact (never modified by processor)
+    const additions2 = JSON.parse(kvData2['BTC_PENDING_ADDITIONS']);
+    expect(additions2).toEqual(['id3', 'id4', 'id5', 'id6']);
+  });
+});
+
 

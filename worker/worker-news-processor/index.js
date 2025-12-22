@@ -1,10 +1,11 @@
 /**
  * Scheduled Cloudflare Worker for Processing Pending Bitcoin News Articles
  * 
- * This worker runs on a cron schedule (every 10 minutes) to:
- * 1. Read articles from KV that need processing (check postprocessing flags)
- * 2. Process up to 5 articles per run (to stay within subrequest limits)
+ * This worker runs on a cron schedule (every minute) to:
+ * 1. Load MAX_ARTICLES_PER_RUN articles from KV (starting from last processed position)
+ * 2. Process ALL loaded articles that need processing (not limited to MAX_ARTICLES_PER_RUN)
  * 3. Update each article in KV after processing (incremental writes for reliability)
+ * 4. Track last processed article ID to resume from that position in next run
  * 
  * Also supports on-demand processing via HTTP GET:
  * - URL: GET /process?articleId=<id>
@@ -23,10 +24,11 @@
  * - "no_link" → article has no URL
  * - "error: <msg> (attempt X/5)" → AI generation error with retry count
  * 
- * This approach solves the "Too many subrequests" error by:
- * - Processing articles in small batches (5 at a time)
- * - Running frequently (every 10 minutes) to keep articles up-to-date
- * - Using free KV storage instead of paid Queues
+ * Resume-based processing approach:
+ * - Loads articles in batches (MAX_ARTICLES_PER_RUN per run)
+ * - Processes ALL loaded articles that need work
+ * - Tracks last loaded article ID in KV to resume from next batch
+ * - Cycles through entire article list, then resets to beginning
  * 
  * Neuron Budget Optimization:
  * - Content extraction skips headers, footers, navigation, ads, and sidebars
@@ -558,7 +560,209 @@ async function processArticle(env, article, config) {
 }
 
 /**
+ * Process articles batch using priority queue with conflict detection
+ * 
+ * This is the core processing logic extracted for testability.
+ * Uses a KV-based queue to prioritize articles needing processing.
+ * 
+ * Queue behavior:
+ * - Processes articles from the front of the queue
+ * - Keeps articles in queue until all processing phases complete
+ * - On fetch timeout, moves article to end of queue for retry
+ * - Removes articles from queue when fully processed
+ * 
+ * Conflict handling (staging area pattern):
+ * - BTC_PENDING_QUEUE: Main queue (processor manages)
+ * - BTC_PENDING_ADDITIONS: Append-only log (updater writes, processor reads)
+ * - BTC_ADDITIONS_CHECKPOINT: Last processed addition index (processor manages)
+ * - Updater only appends to additions, never reads/deletes
+ * - Processor reads new additions since checkpoint, merges to queue
+ * 
+ * @param {Object} kv - KV interface with get/put/delete methods
+ * @param {Object} env - Environment for AI processing
+ * @param {Object} config - Configuration object
+ * @returns {Promise<Object>} Result with processedCount and queue info
+ */
+async function processArticlesBatch(kv, env, config) {
+  // Step 1: Read pending queue
+  let pendingQueue = [];
+  try {
+    const queueData = await kv.get(config.KV_KEY_PENDING_QUEUE, { type: 'json' });
+    if (queueData && Array.isArray(queueData)) {
+      pendingQueue = queueData;
+    }
+  } catch (error) {
+    console.error('Error reading pending queue:', error);
+  }
+  
+  // Step 1b: Check for and merge new additions from updater
+  let mergedCount = 0;
+  try {
+    const additionsData = await kv.get(config.KV_KEY_PENDING_ADDITIONS, { type: 'json' });
+    if (additionsData && Array.isArray(additionsData) && additionsData.length > 0) {
+      // Read checkpoint to know which additions we've already processed
+      let checkpoint = 0;
+      try {
+        const checkpointData = await kv.get(config.KV_KEY_ADDITIONS_CHECKPOINT);
+        if (checkpointData) {
+          checkpoint = parseInt(checkpointData, 10) || 0;
+        }
+      } catch (error) {
+        console.error('Error reading checkpoint:', error);
+      }
+      
+      // Only process additions after checkpoint
+      if (checkpoint < additionsData.length) {
+        const newAdditions = additionsData.slice(checkpoint);
+        pendingQueue.push(...newAdditions);
+        mergedCount = newAdditions.length;
+        
+        // Update checkpoint to current length
+        await kv.put(
+          config.KV_KEY_ADDITIONS_CHECKPOINT,
+          additionsData.length.toString(),
+          {
+            expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
+          }
+        );
+        console.log(`Merged ${newAdditions.length} new articles from additions (checkpoint: ${checkpoint} -> ${additionsData.length})`);
+      }
+    }
+  } catch (error) {
+    console.error('Error reading/merging pending additions:', error);
+  }
+  
+  if (pendingQueue.length === 0) {
+    return { 
+      processedCount: 0, 
+      loadedCount: 0, 
+      queueLength: 0,
+      mergedCount: 0,
+      status: 'no_articles' 
+    };
+  }
+  
+  // Step 2: Load articles from front of queue
+  const articlesToLoad = Math.min(config.MAX_ARTICLES_PER_RUN, pendingQueue.length);
+  const idsToLoad = pendingQueue.slice(0, articlesToLoad);
+  
+  const articlePromises = idsToLoad.map(id => 
+    kv.get(`article:${id}`, { type: 'json' })
+      .then(article => ({ id, article }))
+  );
+  
+  const articleResults = await Promise.all(articlePromises);
+  
+  // Step 3: Process each article and track queue changes
+  let processedCount = 0;
+  const updatePromises = [];
+  const idsToRemoveFromQueue = [];
+  const idsToMoveToEnd = [];
+  
+  for (const { id, article } of articleResults) {
+    if (!article) {
+      console.warn(`Article not found for ID: ${id}, removing from queue`);
+      idsToRemoveFromQueue.push(id);
+      continue;
+    }
+    
+    // Check if article still needs processing
+    const needsProcessing = 
+      (article.needsSentiment ?? true) || 
+      (article.needsSummary ?? true) || 
+      (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
+    
+    if (!needsProcessing) {
+      // Article is fully processed, remove from queue
+      idsToRemoveFromQueue.push(id);
+      continue;
+    }
+    
+    try {
+      // Process the article (one phase per run)
+      const updatedArticle = await processArticle(env, article, config);
+      
+      // Check if processing resulted in a fetch timeout
+      const hadTimeout = updatedArticle.contentTimeout > (article.contentTimeout || 0);
+      
+      if (hadTimeout && updatedArticle.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS) {
+        // Move to end of queue for retry
+        idsToMoveToEnd.push(id);
+      } else {
+        // Check if article is now fully processed
+        const stillNeedsProcessing = 
+          (updatedArticle.needsSentiment ?? false) || 
+          (updatedArticle.needsSummary ?? false) || 
+          (updatedArticle.contentTimeout && updatedArticle.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
+        
+        if (!stillNeedsProcessing) {
+          // Fully processed, remove from queue
+          idsToRemoveFromQueue.push(id);
+        }
+        // Otherwise, keep in queue at current position for next phase
+      }
+      
+      // Queue the write operation
+      const articleKey = `article:${id}`;
+      updatePromises.push(
+        kv.put(articleKey, JSON.stringify(updatedArticle), {
+          expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
+        })
+      );
+      
+      processedCount++;
+    } catch (error) {
+      console.error(`Error processing article ${id}:`, error);
+      // On error, move to end of queue for retry
+      idsToMoveToEnd.push(id);
+    }
+  }
+  
+  // Step 4: Batch write article updates
+  if (updatePromises.length > 0) {
+    await Promise.all(updatePromises);
+  }
+  
+  // Step 5: Update the queue (only modify items we processed)
+  // Remove processed articles and articles to be moved from pendingQueue
+  let newQueue = pendingQueue.filter(id => 
+    !idsToRemoveFromQueue.includes(id) && !idsToMoveToEnd.includes(id)
+  );
+  
+  // Append articles to be retried to the end
+  if (idsToMoveToEnd.length > 0) {
+    newQueue.push(...idsToMoveToEnd);
+  }
+  
+  // Save updated queue
+  await kv.put(
+    config.KV_KEY_PENDING_QUEUE,
+    JSON.stringify(newQueue),
+    {
+      expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
+    }
+  );
+  
+  return {
+    processedCount,
+    loadedCount: idsToLoad.length,
+    queueLength: newQueue.length,
+    mergedCount,
+    removedFromQueue: idsToRemoveFromQueue.length,
+    movedToEnd: idsToMoveToEnd.length,
+    status: 'success'
+  };
+}
+
+/**
  * Main scheduled event handler for processing pending articles
+ * 
+ * Uses a priority queue approach to process articles:
+ * - Reads articles from pending queue (prioritizes unprocessed articles)
+ * - Processes articles from front of queue
+ * - Removes fully processed articles from queue
+ * - Moves timeout/error articles to end of queue for retry
+ * 
  * @param {Event} event - Scheduled event
  * @param {Object} env - Environment variables
  */
@@ -570,103 +774,20 @@ async function handleScheduled(event, env) {
   const config = getNewsProcessorConfig(env);
   
   try {
-    // Step 1: Read article IDs from index
-    console.log('Step 1: Reading article IDs from index...');
-    const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
+    const result = await processArticlesBatch(env.CRYPTO_NEWS_CACHE, env, config);
     
-    if (!idIndexData || !Array.isArray(idIndexData) || idIndexData.length === 0) {
-      console.log('No articles found in ID index');
+    if (result.status === 'no_articles') {
+      console.log('No articles in pending queue');
       console.log('=== Bitcoin News Processor Cron Job Completed (No Articles) ===');
       return;
     }
     
-    console.log(`Found ${idIndexData.length} article IDs in index`);
-    
-    // Step 2: Read articles individually and find ones that need processing
-    console.log('Step 2: Finding articles that need processing...');
-    const pendingArticles = [];
-    
-    // Read articles in batches to find pending ones
-    // We'll check more articles than MAX_ARTICLES_PER_RUN to ensure we find enough pending ones
-    const checkLimit = Math.min(idIndexData.length, config.MAX_ARTICLES_PER_RUN * 5);
-    const articlePromises = idIndexData.slice(0, checkLimit).map(id => 
-      env.CRYPTO_NEWS_CACHE.get(`article:${id}`, { type: 'json' })
-        .then(article => ({ id, article }))
-    );
-    
-    const articleResults = await Promise.all(articlePromises);
-    
-    for (const { id, article } of articleResults) {
-      if (!article) {
-        console.warn(`Article not found for ID: ${id}`);
-        continue;
-      }
-      
-      const needsProcessing = 
-        (article.needsSentiment ?? true) || 
-        (article.needsSummary ?? true) || 
-        (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
-      
-      if (needsProcessing) {
-        pendingArticles.push({ id, article });
-      }
-      
-      // Stop once we have enough pending articles
-      if (pendingArticles.length >= config.MAX_ARTICLES_PER_RUN) {
-        break;
-      }
-    }
-    
-    if (pendingArticles.length === 0) {
-      console.log('No articles need processing');
-      console.log('=== Bitcoin News Processor Cron Job Completed (All Done) ===');
-      return;
-    }
-    
-    console.log(`Found ${pendingArticles.length} articles needing processing`);
-    
-    // Step 3: Process articles
-    const articlesToProcess = pendingArticles.slice(0, config.MAX_ARTICLES_PER_RUN);
-    console.log(`Processing ${articlesToProcess.length} articles this run...`);
-    
-    let processedCount = 0;
-    
-    // Process articles and collect updates
-    const updatePromises = [];
-    
-    for (const item of articlesToProcess) {
-      const { id, article } = item;
-      console.log(`\nProcessing article ${processedCount + 1}/${articlesToProcess.length}: "${article.title?.substring(0, 50)}..."`);
-      
-      try {
-        // Process the article (one phase per run)
-        const updatedArticle = await processArticle(env, article, config);
-        
-        // Queue the write operation
-        const articleKey = `article:${id}`;
-        updatePromises.push(
-          env.CRYPTO_NEWS_CACHE.put(articleKey, JSON.stringify(updatedArticle), {
-            expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
-          })
-        );
-        
-        processedCount++;
-      } catch (error) {
-        console.error(`  ✗ Error processing article:`, error);
-        // Continue with next article
-      }
-    }
-    
-    // Batch write: Execute all updates in parallel
-    if (updatePromises.length > 0) {
-      await Promise.all(updatePromises);
-      console.log(`\n✓ Batch update: ${processedCount} articles written to KV`);
-    }
-    
-    const remainingPending = pendingArticles.length - processedCount;
     console.log(`\n=== Bitcoin News Processor Cron Job Completed Successfully ===`);
-    console.log(`Processed: ${processedCount} articles`);
-    console.log(`Remaining: ${remainingPending} articles (will process in next run)`);
+    console.log(`Loaded: ${result.loadedCount} articles`);
+    console.log(`Processed: ${result.processedCount} articles`);
+    console.log(`Removed from queue: ${result.removedFromQueue} articles`);
+    console.log(`Moved to end for retry: ${result.movedToEnd} articles`);
+    console.log(`Queue length: ${result.queueLength} articles remaining`);
     
   } catch (error) {
     console.error('=== Bitcoin News Processor Cron Job Failed ===');
@@ -821,7 +942,7 @@ async function handleFetch(request, env) {
 }
 
 // Export for testing
-export { TextExtractor, fetchArticleContent };
+export { TextExtractor, fetchArticleContent, processArticlesBatch };
 
 export default {
   async scheduled(event, env, ctx) {
