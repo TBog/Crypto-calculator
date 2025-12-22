@@ -918,6 +918,67 @@ describe('Resume-based Article Processing', () => {
     const nextBatch = articleIds.slice(nextStartIndex, nextStartIndex + MAX_ARTICLES_PER_RUN);
     expect(nextBatch).toEqual(['id4', 'id5']);
   });
+  
+  it('should eventually process all articles when more than 15 are added to a filled list', () => {
+    const MAX_ARTICLES_PER_RUN = 5;
+    
+    // Start with 10 already processed articles
+    const existingArticles = Array.from({ length: 10 }, (_, i) => `existing_${i + 1}`);
+    
+    // Add 20 new articles (more than 15, and 4x MAX_ARTICLES_PER_RUN) at the beginning
+    const newArticles = Array.from({ length: 20 }, (_, i) => `new_${i + 1}`);
+    const articleIds = [...newArticles, ...existingArticles];
+    
+    // Simulate that existing articles are already processed (don't need processing)
+    // and new articles need processing
+    const articlesNeedingProcessing = new Set(newArticles);
+    
+    expect(articleIds.length).toBe(30);
+    expect(articlesNeedingProcessing.size).toBe(20);
+    
+    // Simulate multiple processor runs
+    let lastProcessedId = null;
+    const processedArticles = [];
+    let runCount = 0;
+    const maxRuns = 10; // Safety limit to prevent infinite loop
+    
+    while (processedArticles.length < newArticles.length && runCount < maxRuns) {
+      runCount++;
+      
+      // Find start index based on last processed ID
+      let startIndex = 0;
+      if (lastProcessedId) {
+        const lastIndex = articleIds.indexOf(lastProcessedId);
+        if (lastIndex !== -1) {
+          startIndex = lastIndex + 1;
+        }
+      }
+      
+      // Reached end of list, reset to beginning
+      if (startIndex >= articleIds.length) {
+        startIndex = 0;
+      }
+      
+      // Load batch
+      const batchSize = Math.min(MAX_ARTICLES_PER_RUN, articleIds.length - startIndex);
+      const loadedBatch = articleIds.slice(startIndex, startIndex + batchSize);
+      
+      // Process all articles in batch that need processing
+      const batchToProcess = loadedBatch.filter(id => articlesNeedingProcessing.has(id));
+      processedArticles.push(...batchToProcess);
+      
+      // Update last processed to last loaded article
+      lastProcessedId = loadedBatch[loadedBatch.length - 1];
+    }
+    
+    // Verify all new articles were eventually processed
+    expect(processedArticles.length).toBe(20);
+    expect(new Set(processedArticles).size).toBe(20); // No duplicates
+    expect(runCount).toBeLessThanOrEqual(5); // Should take at most 5 runs (20 articles / 4 per batch on average)
+    
+    // Verify we processed them in order
+    expect(processedArticles).toEqual(newArticles);
+  });
 });
 
 
