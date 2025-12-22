@@ -571,11 +571,12 @@ async function processArticle(env, article, config) {
  * - On fetch timeout, moves article to end of queue for retry
  * - Removes articles from queue when fully processed
  * 
- * Conflict handling:
- * - Uses separate KV keys for processor operations vs updater appends
- * - BTC_PENDING_QUEUE: Main queue (processor reads/modifies front)
- * - BTC_PENDING_ADDITIONS: Staging area (updater appends new IDs)
- * - Processor merges additions into main queue during each run
+ * Conflict handling (staging area pattern):
+ * - BTC_PENDING_QUEUE: Main queue (processor manages)
+ * - BTC_PENDING_ADDITIONS: Append-only log (updater writes, processor reads)
+ * - BTC_ADDITIONS_CHECKPOINT: Last processed addition index (processor manages)
+ * - Updater only appends to additions, never reads/deletes
+ * - Processor reads new additions since checkpoint, merges to queue
  * 
  * @param {Object} kv - KV interface with get/put/delete methods
  * @param {Object} env - Environment for AI processing
@@ -583,7 +584,7 @@ async function processArticle(env, article, config) {
  * @returns {Promise<Object>} Result with processedCount and queue info
  */
 async function processArticlesBatch(kv, env, config) {
-  // Step 1: Read pending queue and merge any new additions
+  // Step 1: Read pending queue
   let pendingQueue = [];
   try {
     const queueData = await kv.get(config.KV_KEY_PENDING_QUEUE, { type: 'json' });
@@ -594,15 +595,38 @@ async function processArticlesBatch(kv, env, config) {
     console.error('Error reading pending queue:', error);
   }
   
-  // Step 1b: Check for and merge pending additions from updater
+  // Step 1b: Check for and merge new additions from updater
+  let mergedCount = 0;
   try {
     const additionsData = await kv.get(config.KV_KEY_PENDING_ADDITIONS, { type: 'json' });
     if (additionsData && Array.isArray(additionsData) && additionsData.length > 0) {
-      // Merge additions to end of queue
-      pendingQueue.push(...additionsData);
-      // Clear the additions queue
-      await kv.delete(config.KV_KEY_PENDING_ADDITIONS);
-      console.log(`Merged ${additionsData.length} new articles from additions queue`);
+      // Read checkpoint to know which additions we've already processed
+      let checkpoint = 0;
+      try {
+        const checkpointData = await kv.get(config.KV_KEY_ADDITIONS_CHECKPOINT);
+        if (checkpointData) {
+          checkpoint = parseInt(checkpointData, 10) || 0;
+        }
+      } catch (error) {
+        console.error('Error reading checkpoint:', error);
+      }
+      
+      // Only process additions after checkpoint
+      if (checkpoint < additionsData.length) {
+        const newAdditions = additionsData.slice(checkpoint);
+        pendingQueue.push(...newAdditions);
+        mergedCount = newAdditions.length;
+        
+        // Update checkpoint to current length
+        await kv.put(
+          config.KV_KEY_ADDITIONS_CHECKPOINT,
+          additionsData.length.toString(),
+          {
+            expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
+          }
+        );
+        console.log(`Merged ${newAdditions.length} new articles from additions (checkpoint: ${checkpoint} -> ${additionsData.length})`);
+      }
     }
   } catch (error) {
     console.error('Error reading/merging pending additions:', error);
@@ -613,6 +637,7 @@ async function processArticlesBatch(kv, env, config) {
       processedCount: 0, 
       loadedCount: 0, 
       queueLength: 0,
+      mergedCount: 0,
       status: 'no_articles' 
     };
   }
@@ -722,6 +747,7 @@ async function processArticlesBatch(kv, env, config) {
     processedCount,
     loadedCount: idsToLoad.length,
     queueLength: newQueue.length,
+    mergedCount,
     removedFromQueue: idsToRemoveFromQueue.length,
     movedToEnd: idsToMoveToEnd.length,
     status: 'success'
