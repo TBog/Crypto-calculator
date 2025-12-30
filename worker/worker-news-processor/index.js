@@ -558,6 +558,230 @@ async function processArticle(env, article, config) {
 }
 
 /**
+ * Process a single article through the checkpoint-based pipeline
+ * This function encapsulates the core processing logic for testing
+ * 
+ * @param {Object} kv - KV storage interface (allows mocking for tests)
+ * @param {Object} env - Environment variables (for AI processing)
+ * @param {Object} config - Configuration object
+ * @param {Function} processArticleFn - Article processing function (allows mocking)
+ * @returns {Promise<Object>} Result object with { processed: boolean, articleId: string|null, article: Object }
+ */
+async function processNextArticle(kv, env, config, processArticleFn = processArticle) {
+  // Step 1: Read checkpoint to determine state
+  let checkpoint = {
+    currentArticleId: null,
+    currentArticle: null,
+    processedIds: [],
+    tryLater: [],
+    lastUpdate: null
+  };
+  
+  try {
+    const checkpointData = await kv.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
+    if (checkpointData) {
+      checkpoint = { ...checkpoint, ...checkpointData };
+    }
+  } catch (error) {
+    // Checkpoint doesn't exist, use defaults
+  }
+  
+  // Step 2: Check if previous article completed successfully
+  if (checkpoint.currentArticleId && checkpoint.currentArticle) {
+    const article = checkpoint.currentArticle;
+    const needsProcessing = 
+      (article.needsSentiment ?? true) || 
+      (article.needsSummary ?? true) || 
+      (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
+    
+    if (!needsProcessing) {
+      // Article completed successfully
+      if (!checkpoint.processedIds.includes(checkpoint.currentArticleId)) {
+        checkpoint.processedIds.push(checkpoint.currentArticleId);
+      }
+      checkpoint.currentArticleId = null;
+      checkpoint.currentArticle = null;
+    }
+  }
+  
+  // Step 3: Get next article to process
+  let nextArticle = null;
+  let nextArticleId = null;
+  
+  if (checkpoint.currentArticleId && checkpoint.currentArticle) {
+    // Continue processing current article
+    nextArticleId = checkpoint.currentArticleId;
+    nextArticle = checkpoint.currentArticle;
+  } else {
+    // Read pending list
+    let pendingList = [];
+    try {
+      const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
+      if (pendingData && Array.isArray(pendingData)) {
+        pendingList = pendingData;
+      }
+    } catch (error) {
+      // No pending list
+    }
+    
+    // Filter out already processed articles
+    const unprocessedPending = pendingList.filter(item => 
+      !checkpoint.processedIds.includes(item.id)
+    );
+    
+    if (unprocessedPending.length > 0) {
+      // Get first article from pending list
+      const pendingItem = unprocessedPending[0];
+      nextArticleId = pendingItem.id;
+      nextArticle = pendingItem.article;
+    } else if (checkpoint.tryLater && checkpoint.tryLater.length > 0) {
+      // Get first article from try-later list
+      const tryLaterItem = checkpoint.tryLater[0];
+      nextArticleId = tryLaterItem.id;
+      nextArticle = tryLaterItem.article;
+    } else {
+      // No articles to process
+      return { processed: false, articleId: null, article: null };
+    }
+  }
+  
+  // Step 4: Update checkpoint with current article
+  checkpoint.currentArticleId = nextArticleId;
+  checkpoint.currentArticle = nextArticle;
+  checkpoint.lastUpdate = Date.now();
+  
+  await kv.put(
+    config.KV_KEY_CHECKPOINT,
+    JSON.stringify(checkpoint),
+    {
+      expirationTtl: config.ID_INDEX_TTL
+    }
+  );
+  
+  // Step 5: Process the article
+  let updatedArticle;
+  let processingFailed = false;
+  let failureReason = null;
+  
+  try {
+    updatedArticle = await processArticleFn(env, nextArticle, config);
+    
+    // Check if processing completed or if it needs more runs
+    const stillNeedsProcessing = 
+      (updatedArticle.needsSentiment ?? true) || 
+      (updatedArticle.needsSummary ?? true) || 
+      (updatedArticle.contentTimeout && updatedArticle.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
+    
+    if (stillNeedsProcessing) {
+      // Article needs more processing runs, save progress
+      checkpoint.currentArticle = updatedArticle;
+      await kv.put(
+        config.KV_KEY_CHECKPOINT,
+        JSON.stringify(checkpoint),
+        {
+          expirationTtl: config.ID_INDEX_TTL
+        }
+      );
+    }
+    
+    // Check if article hit max retries
+    if (updatedArticle.contentTimeout >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
+      processingFailed = true;
+      failureReason = 'max_retries_reached';
+    }
+    
+  } catch (error) {
+    processingFailed = true;
+    failureReason = error.message;
+    updatedArticle = { ...nextArticle, summaryError: `processing_error: ${error.message}` };
+  }
+  
+  // Step 6: Write article to KV and update ID index
+  const articleKey = `article:${nextArticleId}`;
+  await kv.put(articleKey, JSON.stringify(updatedArticle), {
+    expirationTtl: config.ID_INDEX_TTL
+  });
+  
+  // Update ID index
+  let idIndex = [];
+  try {
+    const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
+    if (idIndexData && Array.isArray(idIndexData)) {
+      idIndex = idIndexData;
+    }
+  } catch (error) {
+    // No index yet
+  }
+  
+  if (!idIndex.includes(nextArticleId)) {
+    idIndex.unshift(nextArticleId);
+    
+    // Limit index size
+    const maxArticles = config.MAX_STORED_ARTICLES || 500;
+    if (idIndex.length > maxArticles) {
+      idIndex = idIndex.slice(0, maxArticles);
+    }
+    
+    await kv.put(
+      config.KV_KEY_IDS,
+      JSON.stringify(idIndex),
+      {
+        expirationTtl: config.ID_INDEX_TTL
+      }
+    );
+  }
+  
+  // Step 7: Update checkpoint based on success/failure
+  if (processingFailed) {
+    // Move article to try-later list
+    checkpoint.tryLater = (checkpoint.tryLater || []).filter(item => item.id !== nextArticleId);
+    checkpoint.tryLater.push({
+      id: nextArticleId,
+      article: updatedArticle,
+      failedAt: Date.now(),
+      reason: failureReason
+    });
+    
+    if (!checkpoint.processedIds.includes(nextArticleId)) {
+      checkpoint.processedIds.push(nextArticleId);
+    }
+    
+    checkpoint.currentArticleId = null;
+    checkpoint.currentArticle = null;
+  } else {
+    // Check if article is fully complete
+    const isComplete = 
+      !(updatedArticle.needsSentiment ?? true) && 
+      !(updatedArticle.needsSummary ?? true) && 
+      !(updatedArticle.contentTimeout && updatedArticle.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
+    
+    if (isComplete) {
+      if (!checkpoint.processedIds.includes(nextArticleId)) {
+        checkpoint.processedIds.push(nextArticleId);
+      }
+      checkpoint.currentArticleId = null;
+      checkpoint.currentArticle = null;
+      checkpoint.tryLater = (checkpoint.tryLater || []).filter(item => item.id !== nextArticleId);
+    } else {
+      // Keep in checkpoint for next run
+      checkpoint.currentArticle = updatedArticle;
+    }
+  }
+  
+  checkpoint.lastUpdate = Date.now();
+  
+  await kv.put(
+    config.KV_KEY_CHECKPOINT,
+    JSON.stringify(checkpoint),
+    {
+      expirationTtl: config.ID_INDEX_TTL
+    }
+  );
+  
+  return { processed: true, articleId: nextArticleId, article: updatedArticle };
+}
+
+/**
  * Main scheduled event handler with checkpoint-based processing
  * 
  * Architecture:
@@ -580,267 +804,23 @@ async function handleScheduled(event, env) {
   const config = getNewsProcessorConfig(env);
   
   try {
-    // Step 1: Read checkpoint to determine state
-    console.log('Step 1: Reading checkpoint...');
-    let checkpoint = {
-      currentArticleId: null,
-      currentArticle: null,
-      processedIds: [],
-      tryLater: [],
-      lastUpdate: null
-    };
+    // Use the refactored processNextArticle function
+    const result = await processNextArticle(env.CRYPTO_NEWS_CACHE, env, config);
     
-    try {
-      const checkpointData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-      if (checkpointData) {
-        checkpoint = { ...checkpoint, ...checkpointData };
-        console.log(`Checkpoint loaded: ${checkpoint.currentArticleId ? 'Processing article ' + checkpoint.currentArticleId : 'No article in progress'}`);
-      }
-    } catch (error) {
-      console.log('No checkpoint found, starting fresh');
-    }
-    
-    // Step 2: Check if previous article completed successfully
-    if (checkpoint.currentArticleId && checkpoint.currentArticle) {
-      console.log(`Step 2: Checking previous article: ${checkpoint.currentArticleId}`);
+    if (result.processed) {
+      console.log(`✓ Processed article: ${result.articleId}`);
       
-      // Verify if article is fully processed
-      const article = checkpoint.currentArticle;
-      const needsProcessing = 
-        (article.needsSentiment ?? true) || 
-        (article.needsSummary ?? true) || 
-        (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
-      
-      if (!needsProcessing) {
-        // Article completed successfully
-        console.log(`✓ Article ${checkpoint.currentArticleId} completed successfully`);
-        
-        // Add to processed IDs list
-        if (!checkpoint.processedIds.includes(checkpoint.currentArticleId)) {
-          checkpoint.processedIds.push(checkpoint.currentArticleId);
-        }
-        
-        // Clear current article from checkpoint
-        checkpoint.currentArticleId = null;
-        checkpoint.currentArticle = null;
-      } else {
-        // Article still needs processing, continue with it
-        console.log(`→ Article ${checkpoint.currentArticleId} still needs processing`);
+      // Get checkpoint stats for logging
+      const checkpoint = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
+      if (checkpoint) {
+        console.log(`Processed IDs: ${checkpoint.processedIds.length}`);
+        console.log(`Try-later queue: ${(checkpoint.tryLater || []).length}`);
       }
-    }
-    
-    // Step 3: Get next article to process
-    let nextArticle = null;
-    let nextArticleId = null;
-    
-    if (checkpoint.currentArticleId && checkpoint.currentArticle) {
-      // Continue processing current article
-      nextArticleId = checkpoint.currentArticleId;
-      nextArticle = checkpoint.currentArticle;
-      console.log(`Step 3: Continuing with article: ${nextArticleId}`);
     } else {
-      // Get next article from pending list or try-later list
-      console.log('Step 3: Getting next article from pending or try-later list...');
-      
-      // Read pending list
-      let pendingList = [];
-      try {
-        const pendingData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_PENDING, { type: 'json' });
-        if (pendingData && Array.isArray(pendingData)) {
-          pendingList = pendingData;
-        }
-      } catch (error) {
-        console.log('No pending list found');
-      }
-      
-      // Filter out already processed articles
-      const unprocessedPending = pendingList.filter(item => 
-        !checkpoint.processedIds.includes(item.id)
-      );
-      
-      if (unprocessedPending.length > 0) {
-        // Get first article from pending list
-        const pendingItem = unprocessedPending[0];
-        nextArticleId = pendingItem.id;
-        nextArticle = pendingItem.article;
-        console.log(`Found article from pending list: ${nextArticleId}`);
-      } else if (checkpoint.tryLater && checkpoint.tryLater.length > 0) {
-        // Get first article from try-later list
-        const tryLaterItem = checkpoint.tryLater[0];
-        nextArticleId = tryLaterItem.id;
-        nextArticle = tryLaterItem.article;
-        console.log(`Found article from try-later list: ${nextArticleId}`);
-      } else {
-        console.log('No articles to process');
-        console.log('=== Bitcoin News Processor Cron Job Completed (All Done) ===');
-        return;
-      }
+      console.log('No articles to process');
     }
-    
-    // Step 4: Update checkpoint with current article
-    console.log(`Step 4: Updating checkpoint for article: ${nextArticleId}`);
-    checkpoint.currentArticleId = nextArticleId;
-    checkpoint.currentArticle = nextArticle;
-    checkpoint.lastUpdate = Date.now();
-    
-    await env.CRYPTO_NEWS_CACHE.put(
-      config.KV_KEY_CHECKPOINT,
-      JSON.stringify(checkpoint),
-      {
-        expirationTtl: config.ID_INDEX_TTL
-      }
-    );
-    
-    // Step 5: Process the article
-    console.log(`Step 5: Processing article: "${nextArticle.title?.substring(0, 50)}..."`);
-    
-    let updatedArticle;
-    let processingFailed = false;
-    let failureReason = null;
-    
-    try {
-      updatedArticle = await processArticle(env, nextArticle, config);
-      
-      // Check if processing completed or if it needs more runs
-      const stillNeedsProcessing = 
-        (updatedArticle.needsSentiment ?? true) || 
-        (updatedArticle.needsSummary ?? true) || 
-        (updatedArticle.contentTimeout && updatedArticle.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
-      
-      if (stillNeedsProcessing) {
-        // Article needs more processing runs, save progress and continue next time
-        console.log('→ Article needs more processing, will continue in next run');
-        
-        // Update checkpoint with progress
-        checkpoint.currentArticle = updatedArticle;
-        await env.CRYPTO_NEWS_CACHE.put(
-          config.KV_KEY_CHECKPOINT,
-          JSON.stringify(checkpoint),
-          {
-            expirationTtl: config.ID_INDEX_TTL
-          }
-        );
-      }
-      
-      // Check if article hit max retries and should be moved to try-later
-      if (updatedArticle.contentTimeout >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
-        processingFailed = true;
-        failureReason = 'max_retries_reached';
-        console.log(`✗ Article hit max retries (${updatedArticle.contentTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`);
-      }
-      
-    } catch (error) {
-      console.error(`✗ Error processing article:`, error);
-      processingFailed = true;
-      failureReason = error.message;
-      updatedArticle = { ...nextArticle, summaryError: `processing_error: ${error.message}` };
-    }
-    
-    // Step 6: Write article to KV and update ID index
-    console.log(`Step 6: Writing article to KV...`);
-    const articleKey = `article:${nextArticleId}`;
-    await env.CRYPTO_NEWS_CACHE.put(articleKey, JSON.stringify(updatedArticle), {
-      expirationTtl: config.ID_INDEX_TTL
-    });
-    
-    // Update ID index to include this article
-    let idIndex = [];
-    try {
-      const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
-      if (idIndexData && Array.isArray(idIndexData)) {
-        idIndex = idIndexData;
-      }
-    } catch (error) {
-      console.log('No ID index found, creating new one');
-    }
-    
-    // Add article to index if not already there
-    if (!idIndex.includes(nextArticleId)) {
-      idIndex.unshift(nextArticleId); // Add to beginning (latest first)
-      
-      // Limit index size
-      if (idIndex.length > config.MAX_STORED_ARTICLES || 500) {
-        idIndex = idIndex.slice(0, config.MAX_STORED_ARTICLES || 500);
-      }
-      
-      await env.CRYPTO_NEWS_CACHE.put(
-        config.KV_KEY_IDS,
-        JSON.stringify(idIndex),
-        {
-          expirationTtl: config.ID_INDEX_TTL
-        }
-      );
-      console.log(`✓ Added article to ID index (total: ${idIndex.length})`);
-    }
-    
-    // Step 7: Update checkpoint based on success/failure
-    console.log('Step 7: Updating checkpoint...');
-    
-    if (processingFailed) {
-      // Move article to try-later list
-      console.log(`Moving article to try-later list: ${failureReason}`);
-      
-      // Remove from try-later list if already there
-      checkpoint.tryLater = (checkpoint.tryLater || []).filter(item => item.id !== nextArticleId);
-      
-      // Add to end of try-later list
-      checkpoint.tryLater.push({
-        id: nextArticleId,
-        article: updatedArticle,
-        failedAt: Date.now(),
-        reason: failureReason
-      });
-      
-      // Mark as processed so we don't try again from pending list
-      if (!checkpoint.processedIds.includes(nextArticleId)) {
-        checkpoint.processedIds.push(nextArticleId);
-      }
-      
-      // Clear current article
-      checkpoint.currentArticleId = null;
-      checkpoint.currentArticle = null;
-    } else {
-      // Check if article is fully complete
-      const isComplete = 
-        !(updatedArticle.needsSentiment ?? true) && 
-        !(updatedArticle.needsSummary ?? true) && 
-        !(updatedArticle.contentTimeout && updatedArticle.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
-      
-      if (isComplete) {
-        console.log(`✓ Article fully processed`);
-        
-        // Mark as processed
-        if (!checkpoint.processedIds.includes(nextArticleId)) {
-          checkpoint.processedIds.push(nextArticleId);
-        }
-        
-        // Clear current article
-        checkpoint.currentArticleId = null;
-        checkpoint.currentArticle = null;
-        
-        // Remove from try-later list if it was there
-        checkpoint.tryLater = (checkpoint.tryLater || []).filter(item => item.id !== nextArticleId);
-      } else {
-        console.log(`→ Article needs more processing phases`);
-        // Keep in checkpoint for next run
-        checkpoint.currentArticle = updatedArticle;
-      }
-    }
-    
-    checkpoint.lastUpdate = Date.now();
-    
-    await env.CRYPTO_NEWS_CACHE.put(
-      config.KV_KEY_CHECKPOINT,
-      JSON.stringify(checkpoint),
-      {
-        expirationTtl: config.ID_INDEX_TTL
-      }
-    );
     
     console.log('=== Bitcoin News Processor Cron Job Completed Successfully ===');
-    console.log(`Processed IDs: ${checkpoint.processedIds.length}`);
-    console.log(`Try-later queue: ${(checkpoint.tryLater || []).length}`);
-    
   } catch (error) {
     console.error('=== Bitcoin News Processor Cron Job Failed ===');
     console.error('Error:', error);
@@ -994,7 +974,7 @@ async function handleFetch(request, env) {
 }
 
 // Export for testing
-export { TextExtractor, fetchArticleContent };
+export { TextExtractor, fetchArticleContent, processNextArticle, processArticle };
 
 export default {
   async scheduled(event, env, ctx) {

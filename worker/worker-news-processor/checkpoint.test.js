@@ -1,9 +1,12 @@
 /**
  * Test suite for Checkpoint-based Article Processing
  * Tests for the new architecture that prevents race conditions
+ * Uses actual worker functions with mocked KV interface
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { addToPendingList } from '../worker-news-updater/index.js';
+import { processNextArticle, processArticle } from './index.js';
 
 /**
  * Mock KV interface for testing
@@ -51,212 +54,75 @@ class MockKV {
 }
 
 /**
- * Simulate updater worker behavior
+ * Mock environment for AI processing
  */
-async function simulateUpdater(kv, articles, config) {
-  // Read existing pending list
-  let pendingList = [];
-  const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
-  if (pendingData && Array.isArray(pendingData)) {
-    pendingList = pendingData;
-  }
-  
-  // Read checkpoint to see what's been processed
-  let processedIds = new Set();
-  const checkpoint = await kv.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-  if (checkpoint && checkpoint.processedIds) {
-    processedIds = new Set(checkpoint.processedIds);
-  }
-  
-  // Create pending items
-  const articlesToAdd = [];
-  const pendingIdSet = new Set(pendingList.map(item => item.id));
-  
-  for (const article of articles) {
-    if (!pendingIdSet.has(article.id) && !processedIds.has(article.id)) {
-      articlesToAdd.push({
-        id: article.id,
-        article: article,
-        addedAt: Date.now()
-      });
+function createMockEnv() {
+  return {
+    AI: {
+      run: vi.fn().mockResolvedValue({ response: 'positive' })
     }
-  }
-  
-  // Add to pending list
-  const updatedPendingList = [...articlesToAdd, ...pendingList];
-  
-  // Trim processed articles
-  const trimmedPendingList = updatedPendingList.filter(item => !processedIds.has(item.id));
-  
-  // Write to KV
-  await kv.put(config.KV_KEY_PENDING, JSON.stringify(trimmedPendingList));
-  
-  return trimmedPendingList.length;
+  };
 }
 
 /**
- * Simulate processor worker behavior (single article)
+ * Mock processArticle function that simulates phase-based processing
  */
-async function simulateProcessor(kv, config, simulateFailure = false) {
-  // Read checkpoint
-  let checkpoint = {
-    currentArticleId: null,
-    currentArticle: null,
-    processedIds: [],
-    tryLater: [],
-    lastUpdate: null
-  };
-  
-  const checkpointData = await kv.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-  if (checkpointData) {
-    checkpoint = { ...checkpoint, ...checkpointData };
-  }
-  
-  // Check if previous article completed
-  if (checkpoint.currentArticleId && checkpoint.currentArticle) {
-    const article = checkpoint.currentArticle;
-    const needsProcessing = 
-      (article.needsSentiment ?? true) || 
-      (article.needsSummary ?? true);
+function createMockProcessArticle(simulateFailure = false) {
+  return vi.fn(async (env, article, config) => {
+    const updates = { ...article };
     
-    if (!needsProcessing) {
-      // Completed successfully
-      if (!checkpoint.processedIds.includes(checkpoint.currentArticleId)) {
-        checkpoint.processedIds.push(checkpoint.currentArticleId);
-      }
-      checkpoint.currentArticleId = null;
-      checkpoint.currentArticle = null;
-    }
-  }
-  
-  // Get next article
-  let nextArticle = null;
-  let nextArticleId = null;
-  
-  if (checkpoint.currentArticleId && checkpoint.currentArticle) {
-    nextArticleId = checkpoint.currentArticleId;
-    nextArticle = checkpoint.currentArticle;
-  } else {
-    // Read pending list
-    const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
-    let pendingList = [];
-    if (pendingData && Array.isArray(pendingData)) {
-      pendingList = pendingData;
+    if (simulateFailure) {
+      // Simulate failure
+      updates.contentTimeout = (updates.contentTimeout || 0) + 1;
+      updates.summaryError = 'simulated_failure';
+      return updates;
     }
     
-    // Filter processed
-    const unprocessedPending = pendingList.filter(item => 
-      !checkpoint.processedIds.includes(item.id)
-    );
-    
-    if (unprocessedPending.length > 0) {
-      const pendingItem = unprocessedPending[0];
-      nextArticleId = pendingItem.id;
-      nextArticle = pendingItem.article;
-    } else if (checkpoint.tryLater && checkpoint.tryLater.length > 0) {
-      const tryLaterItem = checkpoint.tryLater[0];
-      nextArticleId = tryLaterItem.id;
-      nextArticle = tryLaterItem.article;
-    } else {
-      // No articles to process
-      return { processed: false, articleId: null };
+    // Simulate phase-based processing - only ONE phase per call
+    if (updates.needsSentiment) {
+      // Phase 0: Sentiment
+      updates.needsSentiment = false;
+      updates.sentiment = 'positive';
+      return updates;
     }
-  }
-  
-  // Update checkpoint
-  checkpoint.currentArticleId = nextArticleId;
-  checkpoint.currentArticle = nextArticle;
-  checkpoint.lastUpdate = Date.now();
-  await kv.put(config.KV_KEY_CHECKPOINT, JSON.stringify(checkpoint));
-  
-  // Simulate processing
-  let updatedArticle = { ...nextArticle };
-  
-  if (simulateFailure) {
-    // Simulate failure
-    updatedArticle.contentTimeout = (updatedArticle.contentTimeout || 0) + 1;
-    updatedArticle.summaryError = 'simulated_failure';
     
-    // Move to try-later if max retries reached
-    if (updatedArticle.contentTimeout >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
-      checkpoint.tryLater = (checkpoint.tryLater || []).filter(item => item.id !== nextArticleId);
-      checkpoint.tryLater.push({
-        id: nextArticleId,
-        article: updatedArticle,
-        failedAt: Date.now(),
-        reason: 'max_retries'
-      });
-      
-      if (!checkpoint.processedIds.includes(nextArticleId)) {
-        checkpoint.processedIds.push(nextArticleId);
-      }
-      
-      checkpoint.currentArticleId = null;
-      checkpoint.currentArticle = null;
-    } else {
-      checkpoint.currentArticle = updatedArticle;
+    if (updates.needsSummary) {
+      // Phase 1/2: Summary
+      updates.needsSummary = false;
+      updates.aiSummary = 'Test summary';
+      return updates;
     }
-  } else {
-    // Simulate successful processing
-    updatedArticle.needsSentiment = false;
-    updatedArticle.needsSummary = false;
-    updatedArticle.sentiment = 'positive';
-    updatedArticle.aiSummary = 'Test summary';
     
-    // Mark as complete
-    if (!checkpoint.processedIds.includes(nextArticleId)) {
-      checkpoint.processedIds.push(nextArticleId);
-    }
-    checkpoint.currentArticleId = null;
-    checkpoint.currentArticle = null;
-    checkpoint.tryLater = (checkpoint.tryLater || []).filter(item => item.id !== nextArticleId);
-  }
-  
-  // Write article to KV
-  await kv.put(`article:${nextArticleId}`, JSON.stringify(updatedArticle));
-  
-  // Update ID index
-  let idIndex = [];
-  const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
-  if (idIndexData && Array.isArray(idIndexData)) {
-    idIndex = idIndexData;
-  }
-  
-  if (!idIndex.includes(nextArticleId)) {
-    idIndex.unshift(nextArticleId);
-    await kv.put(config.KV_KEY_IDS, JSON.stringify(idIndex));
-  }
-  
-  // Update checkpoint
-  checkpoint.lastUpdate = Date.now();
-  await kv.put(config.KV_KEY_CHECKPOINT, JSON.stringify(checkpoint));
-  
-  return { processed: true, articleId: nextArticleId, article: updatedArticle };
+    return updates;
+  });
 }
 
 describe('Checkpoint-based Article Processing', () => {
   let mockKV;
+  let mockEnv;
   let config;
   
   beforeEach(() => {
     mockKV = new MockKV();
+    mockEnv = createMockEnv();
     config = {
       KV_KEY_PENDING: 'BTC_PENDING_LIST',
       KV_KEY_CHECKPOINT: 'BTC_CHECKPOINT',
       KV_KEY_IDS: 'BTC_ID_INDEX',
       MAX_CONTENT_FETCH_ATTEMPTS: 5,
-      MAX_STORED_ARTICLES: 500
+      MAX_STORED_ARTICLES: 500,
+      ID_INDEX_TTL: 2592000
     };
   });
 
-  describe('Updater Worker', () => {
+  describe('Updater Worker - addToPendingList', () => {
     it('should add new articles to pending list', async () => {
       const articles = [
         { id: 'article-1', title: 'Test 1', needsSentiment: true, needsSummary: true },
         { id: 'article-2', title: 'Test 2', needsSentiment: true, needsSummary: true }
       ];
       
-      const count = await simulateUpdater(mockKV, articles, config);
+      const count = await addToPendingList(mockKV, articles, config);
       
       expect(count).toBe(2);
       
@@ -271,8 +137,8 @@ describe('Checkpoint-based Article Processing', () => {
         { id: 'article-1', title: 'Test 1', needsSentiment: true, needsSummary: true }
       ];
       
-      await simulateUpdater(mockKV, articles, config);
-      const count2 = await simulateUpdater(mockKV, articles, config);
+      await addToPendingList(mockKV, articles, config);
+      const count2 = await addToPendingList(mockKV, articles, config);
       
       expect(count2).toBe(1); // Still only 1 article
       
@@ -286,7 +152,7 @@ describe('Checkpoint-based Article Processing', () => {
         { id: 'article-2', title: 'Test 2', needsSentiment: true, needsSummary: true }
       ];
       
-      await simulateUpdater(mockKV, articles, config);
+      await addToPendingList(mockKV, articles, config);
       
       // Simulate checkpoint with article-1 processed
       await mockKV.put(config.KV_KEY_CHECKPOINT, JSON.stringify({
@@ -299,7 +165,7 @@ describe('Checkpoint-based Article Processing', () => {
         { id: 'article-3', title: 'Test 3', needsSentiment: true, needsSummary: true }
       ];
       
-      await simulateUpdater(mockKV, moreArticles, config);
+      await addToPendingList(mockKV, moreArticles, config);
       
       const pendingList = await mockKV.get(config.KV_KEY_PENDING, { type: 'json' });
       expect(pendingList).toHaveLength(2); // article-2 and article-3 (article-1 trimmed)
@@ -307,26 +173,32 @@ describe('Checkpoint-based Article Processing', () => {
     });
   });
 
-  describe('Processor Worker', () => {
+  describe('Processor Worker - processNextArticle', () => {
     it('should process articles from pending list', async () => {
       // Setup pending list
       const articles = [
         { id: 'article-1', title: 'Test 1', needsSentiment: true, needsSummary: true }
       ];
-      await simulateUpdater(mockKV, articles, config);
+      await addToPendingList(mockKV, articles, config);
       
-      // Process article
-      const result = await simulateProcessor(mockKV, config);
+      // Process article with mock function (needs 2 phases: sentiment + summary)
+      const mockProcess = createMockProcessArticle(false);
+      const result1 = await processNextArticle(mockKV, mockEnv, config, mockProcess);
+      const result2 = await processNextArticle(mockKV, mockEnv, config, mockProcess);
       
-      expect(result.processed).toBe(true);
-      expect(result.articleId).toBe('article-1');
+      expect(result1.processed).toBe(true);
+      expect(result1.articleId).toBe('article-1');
+      expect(result2.processed).toBe(true);
+      expect(result2.articleId).toBe('article-1'); // Same article, second phase
       
-      // Check article was written
+      // Check article was written and fully processed
       const article = await mockKV.get('article:article-1', { type: 'json' });
       expect(article.needsSentiment).toBe(false);
       expect(article.needsSummary).toBe(false);
+      expect(article.sentiment).toBe('positive');
+      expect(article.aiSummary).toBe('Test summary');
       
-      // Check checkpoint
+      // Check checkpoint - should be marked as processed after both phases
       const checkpoint = await mockKV.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
       expect(checkpoint.processedIds).toContain('article-1');
       expect(checkpoint.currentArticleId).toBeNull();
@@ -339,16 +211,23 @@ describe('Checkpoint-based Article Processing', () => {
         { id: 'article-2', title: 'Test 2', needsSentiment: true, needsSummary: true },
         { id: 'article-3', title: 'Test 3', needsSentiment: true, needsSummary: true }
       ];
-      await simulateUpdater(mockKV, articles, config);
+      await addToPendingList(mockKV, articles, config);
       
-      // Process all articles
-      const result1 = await simulateProcessor(mockKV, config);
-      const result2 = await simulateProcessor(mockKV, config);
-      const result3 = await simulateProcessor(mockKV, config);
+      // Process all articles (each needs 2 phases)
+      const mockProcess = createMockProcessArticle(false);
+      const result1 = await processNextArticle(mockKV, mockEnv, config, mockProcess);
+      const result2 = await processNextArticle(mockKV, mockEnv, config, mockProcess);
+      const result3 = await processNextArticle(mockKV, mockEnv, config, mockProcess);
+      const result4 = await processNextArticle(mockKV, mockEnv, config, mockProcess);
+      const result5 = await processNextArticle(mockKV, mockEnv, config, mockProcess);
+      const result6 = await processNextArticle(mockKV, mockEnv, config, mockProcess);
       
       expect(result1.articleId).toBe('article-1');
-      expect(result2.articleId).toBe('article-2');
-      expect(result3.articleId).toBe('article-3');
+      expect(result2.articleId).toBe('article-1'); // Second phase
+      expect(result3.articleId).toBe('article-2');
+      expect(result4.articleId).toBe('article-2'); // Second phase
+      expect(result5.articleId).toBe('article-3');
+      expect(result6.articleId).toBe('article-3'); // Second phase
       
       // Check all articles processed
       const checkpoint = await mockKV.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
@@ -360,11 +239,12 @@ describe('Checkpoint-based Article Processing', () => {
       const articles = [
         { id: 'article-1', title: 'Test 1', needsSentiment: true, needsSummary: true }
       ];
-      await simulateUpdater(mockKV, articles, config);
+      await addToPendingList(mockKV, articles, config);
       
       // Process with failure 5 times (to reach max retries)
+      const mockProcess = createMockProcessArticle(true);
       for (let i = 0; i < 5; i++) {
-        await simulateProcessor(mockKV, config, true);
+        await processNextArticle(mockKV, mockEnv, config, mockProcess);
       }
       
       // Check checkpoint
@@ -391,14 +271,16 @@ describe('Checkpoint-based Article Processing', () => {
       }));
       
       // Process should pick from try-later
-      const result = await simulateProcessor(mockKV, config);
+      const mockProcess = createMockProcessArticle(false);
+      const result = await processNextArticle(mockKV, mockEnv, config, mockProcess);
       
       expect(result.processed).toBe(true);
       expect(result.articleId).toBe('article-1');
     });
 
     it('should return false when no articles to process', async () => {
-      const result = await simulateProcessor(mockKV, config);
+      const mockProcess = createMockProcessArticle(false);
+      const result = await processNextArticle(mockKV, mockEnv, config, mockProcess);
       
       expect(result.processed).toBe(false);
       expect(result.articleId).toBeNull();
@@ -416,11 +298,12 @@ describe('Checkpoint-based Article Processing', () => {
       }));
       
       // Updater adds articles
-      await simulateUpdater(mockKV, articles, config);
+      await addToPendingList(mockKV, articles, config);
       
-      // Process 5 articles while updater might run again
-      for (let i = 0; i < 5; i++) {
-        await simulateProcessor(mockKV, config);
+      // Process 5 articles (each needs 2 phases = 10 calls)
+      const mockProcess = createMockProcessArticle(false);
+      for (let i = 0; i < 10; i++) {
+        await processNextArticle(mockKV, mockEnv, config, mockProcess);
       }
       
       // Updater adds 5 more articles
@@ -430,11 +313,11 @@ describe('Checkpoint-based Article Processing', () => {
         needsSentiment: true,
         needsSummary: true
       }));
-      await simulateUpdater(mockKV, moreArticles, config);
+      await addToPendingList(mockKV, moreArticles, config);
       
-      // Process remaining articles
-      for (let i = 0; i < 10; i++) {
-        await simulateProcessor(mockKV, config);
+      // Process remaining articles (10 articles * 2 phases = 20 calls)
+      for (let i = 0; i < 20; i++) {
+        await processNextArticle(mockKV, mockEnv, config, mockProcess);
       }
       
       // Check all articles processed
@@ -454,9 +337,10 @@ describe('Checkpoint-based Article Processing', () => {
       const articles = [
         { id: 'article-1', title: 'Test 1', needsSentiment: true, needsSummary: true }
       ];
-      await simulateUpdater(mockKV, articles, config);
+      await addToPendingList(mockKV, articles, config);
       
-      const result = await simulateProcessor(mockKV, config);
+      const mockProcess = createMockProcessArticle(false);
+      const result = await processNextArticle(mockKV, mockEnv, config, mockProcess);
       
       expect(result.processed).toBe(true);
       expect(result.articleId).toBe('article-1');
@@ -471,11 +355,12 @@ describe('Checkpoint-based Article Processing', () => {
         needsSentiment: true,
         needsSummary: true
       }));
-      await simulateUpdater(mockKV, articles, config);
+      await addToPendingList(mockKV, articles, config);
       
-      // Process 5 articles (one at a time due to checkpoint architecture)
-      for (let i = 0; i < 5; i++) {
-        const result = await simulateProcessor(mockKV, config);
+      // Process 5 articles (each needs 2 phases = 10 calls total)
+      const mockProcess = createMockProcessArticle(false);
+      for (let i = 0; i < 10; i++) {
+        const result = await processNextArticle(mockKV, mockEnv, config, mockProcess);
         expect(result.processed).toBe(true);
       }
       
@@ -490,7 +375,7 @@ describe('Checkpoint-based Article Processing', () => {
       const articles = [
         { id: 'article-1', title: 'Test 1', needsSentiment: true, needsSummary: true }
       ];
-      await simulateUpdater(mockKV, articles, config);
+      await addToPendingList(mockKV, articles, config);
       
       // Start processing (simulate checkpoint update only)
       await mockKV.put(config.KV_KEY_CHECKPOINT, JSON.stringify({
@@ -502,7 +387,8 @@ describe('Checkpoint-based Article Processing', () => {
       }));
       
       // Simulate crash and resume
-      const result = await simulateProcessor(mockKV, config);
+      const mockProcess = createMockProcessArticle(false);
+      const result = await processNextArticle(mockKV, mockEnv, config, mockProcess);
       
       expect(result.processed).toBe(true);
       expect(result.articleId).toBe('article-1');
@@ -527,7 +413,8 @@ describe('Checkpoint-based Article Processing', () => {
       }));
       
       // Resume processing
-      const result = await simulateProcessor(mockKV, config);
+      const mockProcess = createMockProcessArticle(false);
+      const result = await processNextArticle(mockKV, mockEnv, config, mockProcess);
       
       expect(result.processed).toBe(true);
       expect(result.article.needsSentiment).toBe(false);

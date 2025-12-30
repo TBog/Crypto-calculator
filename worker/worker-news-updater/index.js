@@ -198,12 +198,12 @@ async function migrateLegacyData(env, config) {
  * Add new articles to the pending list for processing
  * The updater only writes to the pending list, not directly to article storage
  * The processor will handle writing articles to KV after processing
- * @param {Object} env - Environment variables
+ * @param {Object} kv - KV storage interface (allows mocking for tests)
  * @param {Array} newArticles - New articles to be processed
  * @param {Object} config - Configuration values
- * @returns {Promise<void>}
+ * @returns {Promise<number>} Number of articles in pending list after update
  */
-async function addToPendingList(env, newArticles, config) {
+async function addToPendingList(kv, newArticles, config) {
   // Extract IDs from new articles
   const newArticleIds = newArticles
     .map(article => getArticleId(article))
@@ -211,13 +211,13 @@ async function addToPendingList(env, newArticles, config) {
   
   if (newArticleIds.length === 0) {
     console.log('No new articles to add to pending list');
-    return;
+    return 0;
   }
   
   // Read existing pending list
   let pendingList = [];
   try {
-    const pendingData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_PENDING, { type: 'json' });
+    const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
     if (pendingData && Array.isArray(pendingData)) {
       pendingList = pendingData;
       console.log(`Found ${pendingList.length} articles in pending list`);
@@ -229,7 +229,7 @@ async function addToPendingList(env, newArticles, config) {
   // Read checkpoint to see what's been processed
   let processedIds = new Set();
   try {
-    const checkpoint = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
+    const checkpoint = await kv.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
     if (checkpoint && checkpoint.processedIds && Array.isArray(checkpoint.processedIds)) {
       processedIds = new Set(checkpoint.processedIds);
       console.log(`Checkpoint shows ${processedIds.size} articles processed`);
@@ -271,7 +271,7 @@ async function addToPendingList(env, newArticles, config) {
   console.log(`Trimmed ${updatedPendingList.length - trimmedPendingList.length} processed articles`);
   
   // Write updated pending list to KV
-  await env.CRYPTO_NEWS_CACHE.put(
+  await kv.put(
     config.KV_KEY_PENDING,
     JSON.stringify(trimmedPendingList),
     {
@@ -280,6 +280,7 @@ async function addToPendingList(env, newArticles, config) {
   );
   
   console.log(`✓ Updated pending list with ${trimmedPendingList.length} total articles (${articlesToAdd.length} new)`);
+  return trimmedPendingList.length;
 }
 
 /**
@@ -332,7 +333,7 @@ async function handleScheduled(event, env, ctx) {
     
     // Phase 3: Add to Pending List (1 write)
     console.log('Phase 3: Adding articles to pending list...');
-    await addToPendingList(env, markedArticles, config);
+    await addToPendingList(env.CRYPTO_NEWS_CACHE, markedArticles, config);
     
     console.log('=== Bitcoin News Updater Cron Job Completed Successfully ===');
     console.log(`Added ${newArticles.length} articles to pending list for processing by consumer worker`);
@@ -422,6 +423,9 @@ async function handleFetch(request, env) {
     });
   }
 }
+
+// Export for testing
+export { addToPendingList };
 
 export default {
   async scheduled(event, env, ctx) {
