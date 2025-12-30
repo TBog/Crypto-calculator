@@ -29,8 +29,19 @@ worker/
 ## Workers Overview
 
 1. **worker-api** (crypto-cache) - Main API proxy with caching and AI summaries
-2. **worker-news-updater** - Fetches news articles hourly from configured provider
-3. **worker-news-processor** - Processes articles every 10 minutes with AI analysis
+2. **worker-news-updater** - Fetches news articles hourly and adds to pending list
+3. **worker-news-processor** - Processes articles with checkpoint-based architecture
+
+## Architecture
+
+The news processing system uses a **checkpoint-based architecture** that prevents race conditions and ensures no articles are lost:
+
+- **Updater**: Writes only to pending list (BTC_PENDING_LIST)
+- **Processor**: Processes articles one at a time with checkpoint tracking
+- **Checkpoint**: Tracks processing state and enables crash recovery
+- **Try-Later**: Failed articles automatically retry
+
+See [CHECKPOINT_ARCHITECTURE.md](./CHECKPOINT_ARCHITECTURE.md) for detailed architecture documentation.
 
 ## Features
 
@@ -53,22 +64,22 @@ worker/
   - Identifies key movements and patterns
   - Provides concise market analysis
   - Cached for 5 minutes for optimal performance
-- **Bitcoin News Feed with Scheduled Updates**: Bitcoin news with AI-powered sentiment analysis
+- **Bitcoin News Feed with Checkpoint-Based Processing**: Bitcoin news with AI-powered sentiment analysis
+  - **Checkpoint Architecture** - Prevents race conditions and ensures no articles lost
+  - Updater writes only to pending list (conflict-free)
+  - Processor uses checkpoint for crash recovery and state tracking
+  - Try-later queue for failed articles with automatic retry
   - **Multiple Provider Support** - NewsData.io and APITube integration via unified interface
   - Provider selection via Cloudflare secret (defaults to NewsData.io)
   - APITube includes built-in sentiment analysis (faster processing)
   - NewsData.io uses Cloudflare Workers AI for sentiment
-  - Three-worker system: Producer (scheduled) → KV → Consumer (AI processing)
-  - Each article processed in separate worker invocation with fresh subrequest budget
-  - Early-exit optimization: Stops fetching when hitting known articles
   - Individual article storage: Each article stored separately in KV with its own key
   - ID index maintains article order (latest first) for listing and deduplication
   - Maintains up to 500 articles with sentiment tags and AI summaries
   - API endpoint reads from KV (millisecond latency) via parallel article fetches
-  - Scales to process unlimited articles without hitting subrequest limits
+  - See [CHECKPOINT_ARCHITECTURE.md](./CHECKPOINT_ARCHITECTURE.md) for architecture details
   - See [NEWS_PROVIDER_GUIDE.md](./NEWS_PROVIDER_GUIDE.md) for provider configuration
   - See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for setup instructions
-  - See [KV_MIGRATION_GUIDE.md](./KV_MIGRATION_GUIDE.md) for storage migration details
 
 ## Testing
 

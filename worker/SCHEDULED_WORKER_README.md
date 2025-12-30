@@ -1,6 +1,8 @@
-# Bitcoin News Processing - KV-Based Architecture
+# Bitcoin News Processing - Checkpoint-Based Architecture
 
-This document describes the KV-based "todo list" architecture for Bitcoin news aggregation and AI analysis, which solves the "Too many subrequests" error while maintaining FREE tier compatibility.
+> **Note**: This document describes the legacy architecture. See [CHECKPOINT_ARCHITECTURE.md](./CHECKPOINT_ARCHITECTURE.md) for the current checkpoint-based architecture that prevents race conditions and article loss.
+
+This document describes the original KV-based "todo list" architecture for Bitcoin news aggregation and AI analysis.
 
 ## Architecture Overview
 
