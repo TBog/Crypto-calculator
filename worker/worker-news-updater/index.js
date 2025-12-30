@@ -195,78 +195,91 @@ async function migrateLegacyData(env, config) {
 }
 
 /**
- * Store analyzed articles in Cloudflare KV with individual article storage
- * Each article is stored with key: article:<article_id>
- * BTC_ID_INDEX stores ordered list of article IDs (latest first)
+ * Add new articles to the pending list for processing
+ * The updater only writes to the pending list, not directly to article storage
+ * The processor will handle writing articles to KV after processing
  * @param {Object} env - Environment variables
- * @param {Array} newArticles - New analyzed articles
+ * @param {Array} newArticles - New articles to be processed
  * @param {Object} config - Configuration values
  * @returns {Promise<void>}
  */
-async function storeInKV(env, newArticles, config) {
-  const timestamp = Date.now();
-  
-  // Get existing ID index to maintain history
-  let existingIds = [];
-  try {
-    const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
-    if (idIndexData && Array.isArray(idIndexData)) {
-      existingIds = idIndexData;
-      console.log(`Found ${existingIds.length} existing article IDs in index`);
-    } else {
-      // DEPRECATION: Attempt to migrate legacy data if no ID index exists
-      const migratedIds = await migrateLegacyData(env, config);
-      if (migratedIds.length > 0) {
-        existingIds = migratedIds;
-        console.log(`Migrated ${migratedIds.length} articles from legacy format`);
-      }
-    }
-  } catch (error) {
-    console.log('No existing ID index found:', error.message);
-  }
-  
+async function addToPendingList(env, newArticles, config) {
   // Extract IDs from new articles
   const newArticleIds = newArticles
     .map(article => getArticleId(article))
-    .filter(id => id); // Remove any null/undefined IDs
+    .filter(id => id);
   
-  // Merge: new IDs first (latest), then existing IDs (keeping order)
-  // Remove duplicates and limit to MAX_STORED_ARTICLES
-  const allIds = [...newArticleIds];
-  const allIdSet = new Set(allIds);
-  for (const existingId of existingIds) {
-    if (!allIdSet.has(existingId) && allIds.length < config.MAX_STORED_ARTICLES) {
-      allIds.push(existingId);
-      allIdSet.add(existingId);
+  if (newArticleIds.length === 0) {
+    console.log('No new articles to add to pending list');
+    return;
+  }
+  
+  // Read existing pending list
+  let pendingList = [];
+  try {
+    const pendingData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_PENDING, { type: 'json' });
+    if (pendingData && Array.isArray(pendingData)) {
+      pendingList = pendingData;
+      console.log(`Found ${pendingList.length} articles in pending list`);
+    }
+  } catch (error) {
+    console.log('No existing pending list found, starting fresh');
+  }
+  
+  // Read checkpoint to see what's been processed
+  let processedIds = new Set();
+  try {
+    const checkpoint = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
+    if (checkpoint && checkpoint.processedIds && Array.isArray(checkpoint.processedIds)) {
+      processedIds = new Set(checkpoint.processedIds);
+      console.log(`Checkpoint shows ${processedIds.size} articles processed`);
+    }
+  } catch (error) {
+    console.log('No checkpoint found');
+  }
+  
+  // Create a map of article ID to article data for new articles
+  const articleMap = new Map();
+  newArticles.forEach(article => {
+    const id = getArticleId(article);
+    if (id) {
+      articleMap.set(id, article);
+    }
+  });
+  
+  // Merge: Add new articles that aren't already in pending list or processed
+  const pendingIdSet = new Set(pendingList.map(item => item.id));
+  const articlesToAdd = [];
+  
+  for (const id of newArticleIds) {
+    if (!pendingIdSet.has(id) && !processedIds.has(id)) {
+      articlesToAdd.push({
+        id,
+        article: articleMap.get(id),
+        addedAt: Date.now()
+      });
     }
   }
   
-  console.log(`Storing ${newArticles.length} new articles individually in KV...`);
+  // Add new articles to the beginning of the pending list (latest first)
+  const updatedPendingList = [...articlesToAdd, ...pendingList];
   
-  // Store each new article individually with key: article:<id>
-  const writePromises = newArticles.map(article => {
-    const articleId = getArticleId(article);
-    if (!articleId) return Promise.resolve();
-    
-    const articleKey = `article:${articleId}`;
-    return env.CRYPTO_NEWS_CACHE.put(articleKey, JSON.stringify(article), {
-      expirationTtl: config.ID_INDEX_TTL
-    });
-  });
+  // Trim pending list based on checkpoint (remove processed articles)
+  const trimmedPendingList = updatedPendingList.filter(item => !processedIds.has(item.id));
   
-  // Wait for all article writes to complete
-  await Promise.all(writePromises.filter(p => p));
-  console.log(`✓ Stored ${newArticles.length} articles individually in KV`);
+  console.log(`Adding ${articlesToAdd.length} new articles to pending list`);
+  console.log(`Trimmed ${updatedPendingList.length - trimmedPendingList.length} processed articles`);
   
-  // Update ID index with merged list (latest first)
+  // Write updated pending list to KV
   await env.CRYPTO_NEWS_CACHE.put(
-    config.KV_KEY_IDS, 
-    JSON.stringify(allIds),
+    config.KV_KEY_PENDING,
+    JSON.stringify(trimmedPendingList),
     {
       expirationTtl: config.ID_INDEX_TTL
     }
   );
-  console.log(`✓ Updated ID index with ${allIds.length} article IDs (${newArticleIds.length} new, ${allIds.length - newArticleIds.length} existing)`);
+  
+  console.log(`✓ Updated pending list with ${trimmedPendingList.length} total articles (${articlesToAdd.length} new)`);
 }
 
 /**
@@ -317,12 +330,12 @@ async function handleScheduled(event, env, ctx) {
     console.log('Phase 2: Marking articles for AI processing...');
     const markedArticles = await markArticlesForProcessing(newArticles);
     
-    // Phase 3: KV Update (exactly 2 writes)
-    console.log('Phase 3: Updating KV (2 writes)...');
-    await storeInKV(env, markedArticles, config);
+    // Phase 3: Add to Pending List (1 write)
+    console.log('Phase 3: Adding articles to pending list...');
+    await addToPendingList(env, markedArticles, config);
     
     console.log('=== Bitcoin News Updater Cron Job Completed Successfully ===');
-    console.log(`Queued ${newArticles.length} articles for AI processing by consumer worker`);
+    console.log(`Added ${newArticles.length} articles to pending list for processing by consumer worker`);
   } catch (error) {
     console.error('=== Bitcoin News Updater Cron Job Failed ===');
     console.error('Error:', error);

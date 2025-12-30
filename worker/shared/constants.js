@@ -15,8 +15,10 @@
 // KV Storage Keys (shared across all workers)
 // =============================================================================
 
-export const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';  // Full articles payload
+export const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';  // Full articles payload (legacy)
 export const KV_KEY_IDS = 'BTC_ID_INDEX';         // ID index for deduplication
+export const KV_KEY_PENDING = 'BTC_PENDING_LIST'; // Pending articles to process (updater writes)
+export const KV_KEY_CHECKPOINT = 'BTC_CHECKPOINT'; // Processor checkpoint state
 
 // =============================================================================
 // News Updater Worker Configuration
@@ -158,6 +160,8 @@ export function getNewsUpdaterConfig(env) {
   return {
     KV_KEY_NEWS,
     KV_KEY_IDS,
+    KV_KEY_PENDING,
+    KV_KEY_CHECKPOINT,
     MAX_STORED_ARTICLES: getConfig(env, 'MAX_STORED_ARTICLES', MAX_STORED_ARTICLES),
     MAX_PAGES: getConfig(env, 'MAX_PAGES', MAX_PAGES),
     ID_INDEX_TTL: getConfig(env, 'ID_INDEX_TTL', ID_INDEX_TTL),
@@ -173,6 +177,8 @@ export function getNewsProcessorConfig(env) {
   return {
     KV_KEY_NEWS,
     KV_KEY_IDS,
+    KV_KEY_PENDING,
+    KV_KEY_CHECKPOINT,
     ID_INDEX_TTL: getConfig(env, 'ID_INDEX_TTL', ID_INDEX_TTL),
     MAX_ARTICLES_PER_RUN: getConfig(env, 'MAX_ARTICLES_PER_RUN', MAX_ARTICLES_PER_RUN),
     MAX_CONTENT_CHARS: getConfig(env, 'MAX_CONTENT_CHARS', MAX_CONTENT_CHARS),
