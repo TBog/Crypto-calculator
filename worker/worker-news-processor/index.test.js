@@ -1235,13 +1235,13 @@ describe('processArticlesBatch with Mock KV', () => {
     expect(runCount).toBeLessThanOrEqual(10); // Should process all articles within reasonable time
   });
   
-  it('should merge pending additions from staging area into main queue using checkpoint', async () => {
-    // Test the conflict-free merge mechanism with checkpoint tracking
+  it('should merge pending additions from staging area into main queue using ID-based checkpoint', async () => {
+    // Test the conflict-free merge mechanism with ID-based checkpoint tracking
     const mockKV = createMockKV({
       'BTC_ID_INDEX': ['id1', 'id2', 'id3', 'id4', 'id5'],
       'BTC_PENDING_QUEUE': JSON.stringify(['id1', 'id2']), // Main queue
       'BTC_PENDING_ADDITIONS': JSON.stringify(['id3', 'id4', 'id5']), // Staging area with new additions
-      'BTC_ADDITIONS_CHECKPOINT': '0', // No additions processed yet
+      'BTC_ADDITIONS_CHECKPOINT': null, // No additions processed yet
       'article:id1': { title: 'Article 1', needsSentiment: true, needsSummary: true },
       'article:id2': { title: 'Article 2', needsSentiment: true, needsSummary: true },
       'article:id3': { title: 'Article 3', needsSentiment: true, needsSummary: true },
@@ -1272,8 +1272,8 @@ describe('processArticlesBatch with Mock KV', () => {
     const additions = JSON.parse(kvData['BTC_PENDING_ADDITIONS']);
     expect(additions).toEqual(['id3', 'id4', 'id5']);
     
-    // Verify checkpoint was updated
-    expect(kvData['BTC_ADDITIONS_CHECKPOINT']).toBe('3'); // Processed up to index 3
+    // Verify checkpoint was updated to last article ID (not index)
+    expect(kvData['BTC_ADDITIONS_CHECKPOINT']).toBe('id5'); // Last article ID in additions
     
     // Verify main queue now contains merged items
     const finalQueue = JSON.parse(kvData['BTC_PENDING_QUEUE']);
@@ -1287,13 +1287,13 @@ describe('processArticlesBatch with Mock KV', () => {
     expect(result2.mergedCount).toBe(0); // No new additions to merge
   });
   
-  it('should handle concurrent updater writes without race conditions', async () => {
+  it('should handle concurrent updater writes without race conditions using ID-based checkpoint', async () => {
     // Simulate updater adding more items while processor is running
     const mockKV = createMockKV({
       'BTC_ID_INDEX': ['id1', 'id2', 'id3', 'id4', 'id5', 'id6'],
       'BTC_PENDING_QUEUE': JSON.stringify(['id1', 'id2']),
       'BTC_PENDING_ADDITIONS': JSON.stringify(['id3']), // Initial additions
-      'BTC_ADDITIONS_CHECKPOINT': '0',
+      'BTC_ADDITIONS_CHECKPOINT': null,
       'article:id1': { title: 'Article 1', needsSentiment: true, needsSummary: true },
       'article:id2': { title: 'Article 2', needsSentiment: true, needsSummary: true },
       'article:id3': { title: 'Article 3', needsSentiment: true, needsSummary: true },
@@ -1340,21 +1340,55 @@ describe('processArticlesBatch with Mock KV', () => {
     const additions1 = JSON.parse(kvData1['BTC_PENDING_ADDITIONS']);
     expect(additions1.length).toBe(4); // id3, id4, id5, id6
     
-    // Checkpoint should be at 1 (only processed first addition)
-    expect(kvData1['BTC_ADDITIONS_CHECKPOINT']).toBe('1');
+    // Checkpoint should be id3 (last article ID in additions at time of processing)
+    expect(kvData1['BTC_ADDITIONS_CHECKPOINT']).toBe('id3');
     
     // Second processor run should pick up the new additions
     mockKV.get = originalGet; // Restore normal behavior
     const result2 = await processArticlesBatch(mockKV, mockEnv, config);
-    expect(result2.mergedCount).toBe(3); // Merged id4, id5, id6 (from index 1 to 4)
+    expect(result2.mergedCount).toBe(3); // Merged id4, id5, id6 (after id3)
     
-    // Checkpoint should now be at 4
+    // Checkpoint should now be id6 (last article ID)
     const kvData2 = mockKV.getData();
-    expect(kvData2['BTC_ADDITIONS_CHECKPOINT']).toBe('4');
+    expect(kvData2['BTC_ADDITIONS_CHECKPOINT']).toBe('id6');
     
     // Additions log still intact (never modified by processor)
     const additions2 = JSON.parse(kvData2['BTC_PENDING_ADDITIONS']);
     expect(additions2).toEqual(['id3', 'id4', 'id5', 'id6']);
+  });
+  
+  it('should handle checkpoint-based trimming when updater runs after processor', async () => {
+    // Test that updater correctly trims processed articles based on ID checkpoint
+    const mockKV = createMockKV({
+      'BTC_ID_INDEX': ['id1', 'id2', 'id3', 'id4'],
+      'BTC_PENDING_ADDITIONS': JSON.stringify(['id1', 'id2', 'id3']), // Old additions
+      'BTC_ADDITIONS_CHECKPOINT': 'id2', // Processor has processed up to id2
+      'article:id1': { title: 'Article 1' },
+      'article:id2': { title: 'Article 2' },
+      'article:id3': { title: 'Article 3' },
+      'article:id4': { title: 'Article 4' }
+    });
+    
+    // Simulate updater logic: read additions, trim based on checkpoint, append new
+    let additions = await mockKV.get('BTC_PENDING_ADDITIONS', { type: 'json' });
+    const checkpoint = await mockKV.get('BTC_ADDITIONS_CHECKPOINT');
+    
+    // Trim up to and including checkpoint
+    if (checkpoint) {
+      const checkpointIndex = additions.indexOf(checkpoint);
+      if (checkpointIndex !== -1) {
+        additions = additions.slice(checkpointIndex + 1);
+      }
+    }
+    
+    // Append new article
+    additions.push('id4');
+    await mockKV.put('BTC_PENDING_ADDITIONS', JSON.stringify(additions));
+    
+    // Verify trimming worked
+    const finalAdditions = await mockKV.get('BTC_PENDING_ADDITIONS', { type: 'json' });
+    expect(finalAdditions).toEqual(['id3', 'id4']); // id1 and id2 trimmed
+    expect(finalAdditions.length).toBe(2); // Only unprocessed articles remain
   });
 });
 

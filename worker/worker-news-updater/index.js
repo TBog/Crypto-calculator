@@ -272,10 +272,30 @@ async function storeInKV(env, newArticles, config) {
   // Processor will merge these into main queue during its next run
   if (newArticleIds.length > 0) {
     let pendingAdditions = [];
+    let trimmedCount = 0;
+    
     try {
       const existingAdditions = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_PENDING_ADDITIONS, { type: 'json' });
       if (existingAdditions && Array.isArray(existingAdditions)) {
         pendingAdditions = existingAdditions;
+        
+        // Trim processed articles from additions log based on checkpoint
+        // This prevents the additions log from growing indefinitely
+        try {
+          const checkpointArticleId = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_ADDITIONS_CHECKPOINT);
+          if (checkpointArticleId) {
+            const checkpointIndex = pendingAdditions.indexOf(checkpointArticleId);
+            if (checkpointIndex !== -1) {
+              // Remove all articles up to and including the checkpoint
+              const beforeTrimLength = pendingAdditions.length;
+              pendingAdditions = pendingAdditions.slice(checkpointIndex + 1);
+              trimmedCount = beforeTrimLength - pendingAdditions.length;
+              console.log(`✓ Trimmed ${trimmedCount} processed articles from additions log (checkpoint: ${checkpointArticleId})`);
+            }
+          }
+        } catch (error) {
+          console.log('No checkpoint found, skipping trim');
+        }
       }
     } catch (error) {
       console.log('No existing pending additions found, creating new staging area');
@@ -291,7 +311,7 @@ async function storeInKV(env, newArticles, config) {
         expirationTtl: config.ID_INDEX_TTL
       }
     );
-    console.log(`✓ Added ${newArticleIds.length} articles to pending additions staging area (total: ${pendingAdditions.length})`);
+    console.log(`✓ Added ${newArticleIds.length} articles to pending additions staging area (total: ${pendingAdditions.length}${trimmedCount > 0 ? `, trimmed ${trimmedCount}` : ''})`);
   }
 }
 

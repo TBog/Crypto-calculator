@@ -571,12 +571,14 @@ async function processArticle(env, article, config) {
  * - On fetch timeout, moves article to end of queue for retry
  * - Removes articles from queue when fully processed
  * 
- * Conflict handling (staging area pattern):
+ * Conflict handling (ID-based checkpoint with safe trimming):
  * - BTC_PENDING_QUEUE: Main queue (processor manages)
  * - BTC_PENDING_ADDITIONS: Append-only log (updater writes, processor reads)
- * - BTC_ADDITIONS_CHECKPOINT: Last processed addition index (processor manages)
- * - Updater only appends to additions, never reads/deletes
- * - Processor reads new additions since checkpoint, merges to queue
+ * - BTC_ADDITIONS_CHECKPOINT: Last processed article ID (processor manages)
+ * - Processor reads new additions after checkpoint ID, merges to queue
+ * - Processor updates checkpoint to last article ID in additions
+ * - Updater can safely trim all processed articles (up to checkpoint ID)
+ * - No race conditions: checkpoint is an ID, not index (stable across trims)
  * 
  * @param {Object} kv - KV interface with get/put/delete methods
  * @param {Object} env - Environment for AI processing
@@ -601,31 +603,47 @@ async function processArticlesBatch(kv, env, config) {
     const additionsData = await kv.get(config.KV_KEY_PENDING_ADDITIONS, { type: 'json' });
     if (additionsData && Array.isArray(additionsData) && additionsData.length > 0) {
       // Read checkpoint to know which additions we've already processed
-      let checkpoint = 0;
+      // Checkpoint is an article ID, not an index
+      let checkpointArticleId = null;
       try {
-        const checkpointData = await kv.get(config.KV_KEY_ADDITIONS_CHECKPOINT);
-        if (checkpointData) {
-          checkpoint = parseInt(checkpointData, 10) || 0;
-        }
+        checkpointArticleId = await kv.get(config.KV_KEY_ADDITIONS_CHECKPOINT);
       } catch (error) {
         console.error('Error reading checkpoint:', error);
       }
       
+      // Find the index of the checkpoint article ID in additions array
+      let startIndex = 0;
+      if (checkpointArticleId) {
+        const checkpointIndex = additionsData.indexOf(checkpointArticleId);
+        if (checkpointIndex !== -1) {
+          // Start from the article AFTER the checkpoint
+          startIndex = checkpointIndex + 1;
+        } else {
+          // Checkpoint not found - it may have been trimmed by updater
+          // This is safe: just process all additions
+          console.log(`Checkpoint article ID not found in additions (likely trimmed), processing all ${additionsData.length} articles`);
+        }
+      }
+      
       // Only process additions after checkpoint
-      if (checkpoint < additionsData.length) {
-        const newAdditions = additionsData.slice(checkpoint);
+      if (startIndex < additionsData.length) {
+        const newAdditions = additionsData.slice(startIndex);
         pendingQueue.push(...newAdditions);
         mergedCount = newAdditions.length;
         
-        // Update checkpoint to current length
+        // Update checkpoint to last article ID in the additions array
+        // This allows updater to safely trim all articles up to and including this ID
+        const lastArticleId = additionsData[additionsData.length - 1];
         await kv.put(
           config.KV_KEY_ADDITIONS_CHECKPOINT,
-          additionsData.length.toString(),
+          lastArticleId,
           {
             expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
           }
         );
-        console.log(`Merged ${newAdditions.length} new articles from additions (checkpoint: ${checkpoint} -> ${additionsData.length})`);
+        console.log(`Merged ${newAdditions.length} new articles from additions (checkpoint updated to article ID: ${lastArticleId})`);
+      } else {
+        console.log(`No new additions to merge (checkpoint at end of additions list)`);
       }
     }
   } catch (error) {
