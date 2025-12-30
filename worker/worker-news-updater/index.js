@@ -292,9 +292,11 @@ async function storeInKV(env, newArticles, config) {
               trimmedCount = beforeTrimLength - pendingAdditions.length;
               console.log(`✓ Trimmed ${trimmedCount} processed articles from additions log (checkpoint: ${checkpointArticleId})`);
             }
+          } else {
+            console.log('No checkpoint found yet (first run), skipping trim');
           }
         } catch (error) {
-          console.log('No checkpoint found, skipping trim');
+          console.error('Error reading checkpoint for trimming:', error.message);
         }
       }
     } catch (error) {

@@ -621,7 +621,7 @@ async function processArticlesBatch(kv, env, config) {
         } else {
           // Checkpoint not found - it may have been trimmed by updater
           // This is safe: just process all additions
-          console.log(`Checkpoint article ID not found in additions (likely trimmed), processing all ${additionsData.length} articles`);
+          console.warn(`Checkpoint article ID not found in additions (likely trimmed), processing all ${additionsData.length} articles`);
         }
       }
       
@@ -642,8 +642,23 @@ async function processArticlesBatch(kv, env, config) {
           }
         );
         console.log(`Merged ${newAdditions.length} new articles from additions (checkpoint updated to article ID: ${lastArticleId})`);
-      } else {
+      } else if (startIndex === additionsData.length) {
         console.log(`No new additions to merge (checkpoint at end of additions list)`);
+      } else {
+        // startIndex > additionsData.length - checkpoint was beyond end, likely due to trimming
+        console.log(`Checkpoint beyond end of additions list (trimmed), processing all ${additionsData.length} articles`);
+        pendingQueue.push(...additionsData);
+        mergedCount = additionsData.length;
+        
+        // Update checkpoint to last article ID
+        const lastArticleId = additionsData[additionsData.length - 1];
+        await kv.put(
+          config.KV_KEY_ADDITIONS_CHECKPOINT,
+          lastArticleId,
+          {
+            expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
+          }
+        );
       }
     }
   } catch (error) {
