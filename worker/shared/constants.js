@@ -47,6 +47,12 @@ export const MAX_CONTENT_CHARS = 10 * 1024;  // 10KB
 // Maximum retry attempts for content fetching before giving up
 export const MAX_CONTENT_FETCH_ATTEMPTS = 5;
 
+// Delete old articles from KV when they are removed from the ID index
+// When true, articles beyond MAX_STORED_ARTICLES limit are deleted from KV
+// When false, articles are kept until TTL expires (uses more KV space but saves delete operations)
+// Note: On Free Tier, deletes count against the 1000 daily write limit separately from writes
+export const DELETE_OLD_ARTICLES = false;
+
 // HTML entity decoding map and regex (shared utility for text processing)
 export const HTML_ENTITY_MAP = {
   'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'", 'nbsp': ' '
@@ -183,6 +189,8 @@ export function getNewsProcessorConfig(env) {
     MAX_ARTICLES_PER_RUN: getConfig(env, 'MAX_ARTICLES_PER_RUN', MAX_ARTICLES_PER_RUN),
     MAX_CONTENT_CHARS: getConfig(env, 'MAX_CONTENT_CHARS', MAX_CONTENT_CHARS),
     MAX_CONTENT_FETCH_ATTEMPTS: getConfig(env, 'MAX_CONTENT_FETCH_ATTEMPTS', MAX_CONTENT_FETCH_ATTEMPTS),
+    MAX_STORED_ARTICLES: getConfig(env, 'MAX_STORED_ARTICLES', MAX_STORED_ARTICLES),
+    DELETE_OLD_ARTICLES: getConfig(env, 'DELETE_OLD_ARTICLES', DELETE_OLD_ARTICLES),
   };
 }
 
