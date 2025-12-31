@@ -68,8 +68,7 @@ async function aggregateArticles(env, knownIds, config) {
         // Early exit: If we hit a known article, stop immediately
         // This works because articles are sorted by published date (newest first)
         if (knownIds.has(articleId)) {
-          if (!earlyExitTriggered)
-          {
+          if (!earlyExitTriggered) {
             console.log(`Early exit triggered: Found known article "${article.title?.substring(0, 50)}..."`);
             earlyExitTriggered = true;
           }
@@ -338,12 +337,14 @@ async function handleScheduled(event, env, ctx) {
     try {
       const pendingData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_PENDING, { type: 'json' });
       if (pendingData && Array.isArray(pendingData)) {
+        const beforeSize = knownIds.size;
         pendingData.forEach(item => {
           if (item && item.id) {
             knownIds.add(item.id);
           }
         });
-        console.log(`Loaded ${pendingData.length} article IDs from pending queue`);
+        const addedCount = knownIds.size - beforeSize;
+        console.log(`Loaded ${addedCount} IDs from pending queue`);
       } else {
         console.log('No pending queue found');
       }

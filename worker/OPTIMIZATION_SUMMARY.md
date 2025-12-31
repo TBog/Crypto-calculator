@@ -21,6 +21,9 @@ knownIds = new Set(idIndexData);
 
 **After:**
 ```javascript
+// Note: Code examples simplified for clarity - actual implementation includes
+// error handling, null checks, and array validation
+
 let knownIds = new Set();
 
 // Load from ID index (processed articles)

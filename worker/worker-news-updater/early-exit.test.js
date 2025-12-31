@@ -6,39 +6,8 @@
  * - Checkpoint (new behavior)
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { getArticleId } from '../shared/news-providers.js';
-
-/**
- * Mock KV interface for testing
- */
-class MockKV {
-  constructor() {
-    this.storage = new Map();
-  }
-
-  async get(key, options) {
-    const value = this.storage.get(key);
-    if (!value) return null;
-    
-    if (options?.type === 'json') {
-      return JSON.parse(value);
-    }
-    return value;
-  }
-
-  async put(key, value) {
-    this.storage.set(key, value);
-  }
-
-  setData(key, data) {
-    this.storage.set(key, JSON.stringify(data));
-  }
-
-  reset() {
-    this.storage.clear();
-  }
-}
 
 /**
  * Mock news provider that returns predefined articles
@@ -84,11 +53,9 @@ class MockNewsProvider {
 }
 
 describe('Early Exit Optimization', () => {
-  let mockKV;
   let config;
 
   beforeEach(() => {
-    mockKV = new MockKV();
     config = {
       KV_KEY_IDS: 'BTC_ID_INDEX',
       KV_KEY_PENDING: 'BTC_PENDING_LIST',
@@ -134,7 +101,7 @@ describe('Early Exit Optimization', () => {
       if (pageCount >= config.MAX_PAGES) break;
       if (!nextPage) break;
 
-    } while (nextPage && pageCount < config.MAX_PAGES);
+    } while (pageCount < config.MAX_PAGES);
 
     return { newArticles, pagesFetched: provider.getFetchCount() };
   }
