@@ -262,13 +262,20 @@ async function addToPendingList(kv, newArticles, config) {
   }
   
   // Add new articles to the beginning of the pending list (latest first)
-  const updatedPendingList = [...articlesToAdd, ...pendingList];
+  const mergedPendingList = [...articlesToAdd, ...pendingList];
   
   // Trim pending list based on checkpoint (remove processed articles)
-  const trimmedPendingList = updatedPendingList.filter(item => !processedIds.has(item.id));
+  let trimmedPendingList = mergedPendingList.filter(item => !processedIds.has(item.id));
+  
+  // Limit pending list size to prevent unbounded growth
+  const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
+  if (trimmedPendingList.length > maxPendingSize) {
+    console.log(`Pending list exceeds max size (${maxPendingSize}), trimming older articles`);
+    trimmedPendingList = trimmedPendingList.slice(0, maxPendingSize);
+  }
   
   console.log(`Adding ${articlesToAdd.length} new articles to pending list`);
-  console.log(`Trimmed ${updatedPendingList.length - trimmedPendingList.length} processed articles`);
+  console.log(`Trimmed ${mergedPendingList.length - trimmedPendingList.length} processed articles`);
   
   // Write updated pending list to KV
   await kv.put(

@@ -650,9 +650,13 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       !processedIdsSet.has(item.id)
     );
     
-    if (unprocessedPending.length > 0) {
+    // Limit pending list size to prevent unbounded growth
+    const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
+    const limitedPending = unprocessedPending.slice(0, maxPendingSize);
+    
+    if (limitedPending.length > 0) {
       // Get first article from pending list
-      const pendingItem = unprocessedPending[0];
+      const pendingItem = limitedPending[0];
       nextArticleId = pendingItem.id;
       nextArticle = pendingItem.article;
     } else if (checkpoint.tryLater && checkpoint.tryLater.length > 0) {
@@ -701,7 +705,7 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     }
     
     // Check if article hit max retries
-    if (updatedArticle.contentTimeout >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
+    if ((updatedArticle.contentTimeout || 0) >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
       processingFailed = true;
       failureReason = 'max_retries_reached';
     }
@@ -753,32 +757,54 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       const deletePromises = removedArticleIds.map(id => kv.delete(`article:${id}`));
       await Promise.all(deletePromises);
     }
-    
-    // Trim processedIds to only include articles still in the index
-    // This prevents the processedIds list from growing unbounded
-    const idIndexSet = new Set(idIndex);
-    for (const id of Array.from(processedIdsSet)) {
-      if (!idIndexSet.has(id)) {
-        processedIdsSet.delete(id);
-      }
+  }
+  
+  // Trim processedIds to only include articles still in the index
+  // This prevents the processedIds list from growing unbounded
+  // Do this outside the conditional so it happens on every checkpoint update
+  const idIndexSet = new Set(idIndex);
+  for (const id of Array.from(processedIdsSet)) {
+    if (!idIndexSet.has(id)) {
+      processedIdsSet.delete(id);
     }
   }
   
   // Step 7: Update checkpoint based on success/failure
   if (processingFailed) {
-    // Move article to try-later list
-    checkpoint.tryLater = (checkpoint.tryLater || []).filter(item => item.id !== nextArticleId);
-    checkpoint.tryLater.push({
-      id: nextArticleId,
-      article: updatedArticle,
-      failedAt: Date.now(),
-      reason: failureReason
-    });
-    
-    processedIdsSet.add(nextArticleId);
-    
-    checkpoint.currentArticleId = null;
-    checkpoint.currentArticle = null;
+    // When max retries reached, mark as processed with empty sentiment/summary
+    // instead of adding to try-later list
+    if (failureReason === 'max_retries_reached') {
+      // Mark article as processed with empty values
+      updatedArticle.needsSentiment = false;
+      updatedArticle.needsSummary = false;
+      updatedArticle.sentiment = updatedArticle.sentiment || '';
+      updatedArticle.aiSummary = updatedArticle.aiSummary || '';
+      
+      // Re-write the article with updated values
+      await kv.put(`article:${nextArticleId}`, JSON.stringify(updatedArticle), {
+        expirationTtl: config.ID_INDEX_TTL
+      });
+      
+      processedIdsSet.add(nextArticleId);
+      checkpoint.currentArticleId = null;
+      checkpoint.currentArticle = null;
+      // Remove from try-later list if it was there
+      checkpoint.tryLater = (checkpoint.tryLater || []).filter(item => item.id !== nextArticleId);
+    } else {
+      // Move article to try-later list for other failures
+      checkpoint.tryLater = (checkpoint.tryLater || []).filter(item => item.id !== nextArticleId);
+      checkpoint.tryLater.push({
+        id: nextArticleId,
+        article: updatedArticle,
+        failedAt: Date.now(),
+        reason: failureReason
+      });
+      
+      processedIdsSet.add(nextArticleId);
+      
+      checkpoint.currentArticleId = null;
+      checkpoint.currentArticle = null;
+    }
   } else {
     // Check if article is fully complete
     if (articleIsComplete(updatedArticle, config)) {
@@ -792,7 +818,7 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     }
   }
   
-  // Convert Set back to array for storage
+  // Convert Set back to array for storage (only once at the end)
   checkpoint.processedIds = Array.from(processedIdsSet);
   checkpoint.lastUpdate = Date.now();
   

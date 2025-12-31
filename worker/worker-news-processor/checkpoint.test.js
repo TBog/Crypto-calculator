@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { addToPendingList } from '../worker-news-updater/index.js';
-import { processNextArticle, processArticle } from './index.js';
+import { processNextArticle } from './index.js';
 
 /**
  * Mock KV interface for testing
@@ -111,6 +111,7 @@ describe('Checkpoint-based Article Processing', () => {
       KV_KEY_IDS: 'BTC_ID_INDEX',
       MAX_CONTENT_FETCH_ATTEMPTS: 5,
       MAX_STORED_ARTICLES: 500,
+      MAX_PENDING_LIST_SIZE: 500,
       ID_INDEX_TTL: 2592000
     };
   });
@@ -234,7 +235,7 @@ describe('Checkpoint-based Article Processing', () => {
       expect(checkpoint.processedIds).toHaveLength(3);
     });
 
-    it('should move failed articles to try-later list', async () => {
+    it('should move failed articles to try-later list or mark as processed on max retries', async () => {
       // Setup pending list
       const articles = [
         { id: 'article-1', title: 'Test 1', needsSentiment: true, needsSummary: true }
@@ -247,11 +248,16 @@ describe('Checkpoint-based Article Processing', () => {
         await processNextArticle(mockKV, mockEnv, config, mockProcess);
       }
       
-      // Check checkpoint
+      // Check checkpoint - when max retries reached, article should be marked as processed
+      // with empty sentiment/summary instead of being in try-later list
       const checkpoint = await mockKV.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-      expect(checkpoint.tryLater).toHaveLength(1);
-      expect(checkpoint.tryLater[0].id).toBe('article-1');
-      expect(checkpoint.processedIds).toContain('article-1');
+      expect(checkpoint.tryLater).toHaveLength(0); // Should NOT be in try-later
+      expect(checkpoint.processedIds).toContain('article-1'); // Should be marked as processed
+      
+      // Check the article was written with empty values
+      const article = await mockKV.get('article:article-1', { type: 'json' });
+      expect(article.needsSentiment).toBe(false);
+      expect(article.needsSummary).toBe(false);
     });
 
     it('should process try-later articles when pending list is empty', async () => {
