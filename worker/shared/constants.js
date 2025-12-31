@@ -15,8 +15,10 @@
 // KV Storage Keys (shared across all workers)
 // =============================================================================
 
-export const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';  // Full articles payload
+export const KV_KEY_NEWS = 'BTC_ANALYZED_NEWS';  // Full articles payload (legacy)
 export const KV_KEY_IDS = 'BTC_ID_INDEX';         // ID index for deduplication
+export const KV_KEY_PENDING = 'BTC_PENDING_LIST'; // Pending articles to process (updater writes)
+export const KV_KEY_CHECKPOINT = 'BTC_CHECKPOINT'; // Processor checkpoint state
 
 // =============================================================================
 // News Updater Worker Configuration
@@ -44,6 +46,36 @@ export const MAX_CONTENT_CHARS = 10 * 1024;  // 10KB
 
 // Maximum retry attempts for content fetching before giving up
 export const MAX_CONTENT_FETCH_ATTEMPTS = 5;
+
+// Delete old articles from KV when they are removed from the ID index
+// When true, articles beyond MAX_STORED_ARTICLES limit are deleted from KV.
+// When false, articles are kept until TTL expires (uses more KV space but saves delete operations).
+//
+// Cloudflare Free Tier note:
+// - KV storage is limited to ~1 GB per account. With DELETE_OLD_ARTICLES = false, old
+//   article payloads can accumulate until their TTL expires.
+// - As a rough guideline, if each stored article averages ~10 KB (including metadata and
+//   KV overhead), 1 GB could hold on the order of ~100,000 articles. Real capacity will
+//   vary based on actual payload size and KV internals.
+// - MAX_STORED_ARTICLES (currently 500) is intentionally conservative, but if you raise
+//   this limit or store larger payloads, monitor KV namespace usage.
+//
+// Monitoring recommendations:
+// - Use the Cloudflare Dashboard (KV analytics/metrics) or API to track total KV storage
+//   usage for the relevant namespace.
+// - Consider setting alerts or manual checks if you are close to the 1 GB limit, and
+//   adjust MAX_STORED_ARTICLES or enable DELETE_OLD_ARTICLES if needed.
+//
+// Note: On Free Tier, deletes count against the 1000 daily write limit separately from writes.
+export const DELETE_OLD_ARTICLES = false;
+
+// Maximum size of the pending list
+// When the pending list exceeds this size, older pending articles will be dropped
+// Default is same as MAX_STORED_ARTICLES to prevent unbounded growth
+// Note: When first deploying with an empty KV, many articles will be added to pending list.
+// The MAX_STORED_ARTICLES should be manually increased over time to prevent spikes in
+// requests, neuron usage, and processing time during initial deployment.
+export const MAX_PENDING_LIST_SIZE = 500;
 
 // HTML entity decoding map and regex (shared utility for text processing)
 export const HTML_ENTITY_MAP = {
@@ -158,9 +190,12 @@ export function getNewsUpdaterConfig(env) {
   return {
     KV_KEY_NEWS,
     KV_KEY_IDS,
+    KV_KEY_PENDING,
+    KV_KEY_CHECKPOINT,
     MAX_STORED_ARTICLES: getConfig(env, 'MAX_STORED_ARTICLES', MAX_STORED_ARTICLES),
     MAX_PAGES: getConfig(env, 'MAX_PAGES', MAX_PAGES),
     ID_INDEX_TTL: getConfig(env, 'ID_INDEX_TTL', ID_INDEX_TTL),
+    MAX_PENDING_LIST_SIZE: getConfig(env, 'MAX_PENDING_LIST_SIZE', MAX_PENDING_LIST_SIZE),
   };
 }
 
@@ -173,10 +208,15 @@ export function getNewsProcessorConfig(env) {
   return {
     KV_KEY_NEWS,
     KV_KEY_IDS,
+    KV_KEY_PENDING,
+    KV_KEY_CHECKPOINT,
     ID_INDEX_TTL: getConfig(env, 'ID_INDEX_TTL', ID_INDEX_TTL),
     MAX_ARTICLES_PER_RUN: getConfig(env, 'MAX_ARTICLES_PER_RUN', MAX_ARTICLES_PER_RUN),
     MAX_CONTENT_CHARS: getConfig(env, 'MAX_CONTENT_CHARS', MAX_CONTENT_CHARS),
     MAX_CONTENT_FETCH_ATTEMPTS: getConfig(env, 'MAX_CONTENT_FETCH_ATTEMPTS', MAX_CONTENT_FETCH_ATTEMPTS),
+    MAX_STORED_ARTICLES: getConfig(env, 'MAX_STORED_ARTICLES', MAX_STORED_ARTICLES),
+    DELETE_OLD_ARTICLES: getConfig(env, 'DELETE_OLD_ARTICLES', DELETE_OLD_ARTICLES),
+    MAX_PENDING_LIST_SIZE: getConfig(env, 'MAX_PENDING_LIST_SIZE', MAX_PENDING_LIST_SIZE),
   };
 }
 
