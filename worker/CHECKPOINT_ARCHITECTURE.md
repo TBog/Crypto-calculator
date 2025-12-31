@@ -142,21 +142,29 @@ Ordered list of article IDs (processor writes only):
 ### Updater Workflow
 
 1. **Fetch Articles**: Get new articles from news API
-2. **Read Checkpoint**: Get list of processed article IDs
-3. **Filter New**: Only keep articles not in pending or processed
-4. **Add to Pending**: Prepend new articles to pending list
-5. **Trim List**: Remove articles that checkpoint shows as processed
-6. **Write**: Single KV write to BTC_PENDING_LIST
+2. **Read Pending List**: Get current pending articles (1 read)
+3. **Read Checkpoint**: Get list of processed article IDs (1 read)
+4. **Filter New**: Only keep articles not in pending or processed
+5. **Add to Pending**: Prepend new articles to pending list
+6. **Trim List**: Remove articles that checkpoint shows as processed
+7. **Limit Size**: Trim to MAX_PENDING_LIST_SIZE (default: 500)
+8. **Write**: Single KV write to BTC_PENDING_LIST (1 write)
+
+**KV Operations per Run:**
+- **Reads**: 2 (BTC_PENDING_LIST + BTC_CHECKPOINT)
+- **Writes**: 1 (BTC_PENDING_LIST)
+- **Total**: 3 operations
 
 **Key Points:**
 - Only writes to BTC_PENDING_LIST
 - Never modifies articles or checkpoint
 - Automatically trims based on checkpoint
+- Pending list size limited to prevent unbounded growth
 - No race conditions possible
 
 ### Processor Workflow
 
-1. **Read Checkpoint**: Determine current state
+1. **Read Checkpoint**: Determine current state (1 read)
    - `currentArticleId` = article in progress (if any)
    - `processedIds` = completed articles
    - `tryLater` = failed articles to retry
@@ -165,12 +173,12 @@ Ordered list of article IDs (processor writes only):
    - If fully processed → mark complete, clear checkpoint
    - If still needs work → continue processing
 
-3. **Get Next Article**: Priority order
-   - Continue `currentArticle` if still processing
-   - Get first unprocessed from BTC_PENDING_LIST
-   - Get first from `tryLater` list if pending empty
+3. **Get Next Article**: Priority order (0-1 reads)
+   - Continue `currentArticle` if still processing (0 reads)
+   - Get first unprocessed from BTC_PENDING_LIST (1 read if needed)
+   - Get first from `tryLater` list if pending empty (0 reads)
 
-4. **Update Checkpoint**: Before processing
+4. **Update Checkpoint**: Before processing (1 write)
    - Set `currentArticleId` and `currentArticle`
    - Enables crash recovery
 
@@ -179,25 +187,86 @@ Ordered list of article IDs (processor writes only):
    - Phase 1: Content scraping  
    - Phase 2: AI summary generation
 
-6. **Write Article**: Save progress to article:<id>
+6. **Write Article**: Save progress to article:<id> (1 write)
 
-7. **Update ID Index**: Add article to BTC_ID_INDEX
+7. **Update ID Index**: Add article to BTC_ID_INDEX if new (0-1 reads, 0-1 writes)
+   - Read current index (1 read if article is new)
+   - Write updated index (1 write if article is new)
+   - Delete old articles if DELETE_OLD_ARTICLES enabled (0-N deletes)
 
-8. **Update Checkpoint**: After processing
+8. **Update Checkpoint**: After processing (1 write)
    - Success → add to `processedIds`, clear current
-   - Failure (max retries) → add to `tryLater`
+   - Failure (max retries) → mark as processed with empty values (1 additional write)
    - Partial → keep in `currentArticle`
+
+**KV Operations per Article (typical case - new article):**
+- **Reads**: 3 (BTC_CHECKPOINT + BTC_PENDING_LIST + BTC_ID_INDEX)
+- **Writes**: 4 (BTC_CHECKPOINT before + article:<id> + BTC_ID_INDEX + BTC_CHECKPOINT after)
+- **Total**: 7 operations per article
+
+**KV Operations per Article (continuing multi-phase article):**
+- **Reads**: 2 (BTC_CHECKPOINT + article already in checkpoint = no pending read)
+- **Writes**: 3 (BTC_CHECKPOINT before + article:<id> + BTC_CHECKPOINT after)
+- **Total**: 5 operations per article
+
+**KV Operations per Article (max retries reached):**
+- **Reads**: 3 (same as typical case)
+- **Writes**: 5 (BTC_CHECKPOINT before + article:<id> twice + BTC_ID_INDEX + BTC_CHECKPOINT after)
+- **Total**: 8 operations per article
+
+**Optional DELETE_OLD_ARTICLES:**
+- If enabled and articles exceed MAX_STORED_ARTICLES:
+  - Additional deletes: N (where N = number of articles over limit)
 
 **Key Points:**
 - Processes ONE article per run
 - Checkpoint enables crash recovery
-- Failed articles moved to try-later
+- Failed articles at max retries marked as processed (not infinite retry)
+- processedIds trimmed on every run to prevent unbounded growth
 - No race conditions with updater
 
 ## Benefits
 
 ### Conflict-Free Operations
 ✅ **Separate Write Domains**
+- Updater: Only writes to BTC_PENDING_LIST
+- Processor: Only writes to article:<id>, BTC_ID_INDEX, BTC_CHECKPOINT
+- **Result**: No two workers write to same key = zero race conditions
+
+### Crash Recovery
+✅ **Checkpoint System**
+- Current article saved in checkpoint before processing
+- If worker crashes, next run resumes from checkpoint
+- No duplicate processing
+- No lost work
+
+### Unlimited Capacity
+✅ **Pending List**
+- Can handle any number of new articles
+- Automatically trimmed of processed articles
+- Size limited to MAX_PENDING_LIST_SIZE (default: 500) to prevent unbounded growth
+- No articles lost when >5 added at once
+
+### Automatic Retry
+✅ **Try-Later Queue**
+- Failed articles moved to try-later list
+- Automatically retry when pending list empty
+- Articles at max retries (MAX_CONTENT_FETCH_ATTEMPTS) marked as processed with empty values
+- Prevents infinite retry loops
+
+### Memory Efficiency
+✅ **Bounded Data Structures**
+- processedIds automatically trimmed each run to only include articles in current index
+- Pending list limited to MAX_PENDING_LIST_SIZE
+- Try-later list self-cleaning (articles at max retries removed)
+- No unbounded growth
+
+### Configurable Cleanup
+✅ **DELETE_OLD_ARTICLES Option**
+- When enabled: Old articles deleted when removed from index
+- When disabled (default): Articles remain until TTL expires
+- Balances KV space usage vs delete operation costs
+- Documented with Free Tier considerations
 - Updater writes: BTC_PENDING_LIST
 - Processor writes: article:<id>, BTC_ID_INDEX, BTC_CHECKPOINT
 - No overlapping writes = no race conditions
@@ -219,30 +288,72 @@ Ordered list of article IDs (processor writes only):
 - Diagnostic information preserved
 
 ### Scalability
-✅ **Unlimited Articles**
-- Pending list can grow without limits
-- Processor works through queue steadily
-- No batch size constraints
-
-✅ **Efficient Processing**
+✅ **Efficient Resource Usage**
 - One article at a time = predictable resource usage
 - Phase-based processing spreads work across runs
-- Subrequest limits never exceeded
+- processedIds uses Set for O(1) lookup performance
+- Helper functions (articleNeedsProcessing, articleIsComplete) reduce code duplication
 
-## Configuration
+## Configuration Options
 
-### Environment Variables
+### Core Settings
+
+**MAX_STORED_ARTICLES** (default: 500)
+- Maximum articles kept in BTC_ID_INDEX
+- Older articles removed when limit exceeded
+- Should be increased gradually during initial deployment
+- Conservative default prevents spike in requests/neuron usage
+
+**MAX_PENDING_LIST_SIZE** (default: 500)
+- Maximum articles in pending list
+- Prevents unbounded growth if processor falls behind
+- Same as MAX_STORED_ARTICLES by default
+- Important during initial deployment with empty KV
+
+**MAX_CONTENT_FETCH_ATTEMPTS** (default: 5)
+- Maximum retries for content fetching
+- Articles reaching this limit marked as processed with empty values
+- Prevents infinite retry loops
+- Configurable per deployment needs
+
+**DELETE_OLD_ARTICLES** (default: false)
+- When true: Delete articles when removed from index
+- When false: Keep until TTL expires (30 days)
+- Trade-off: KV space vs delete operations
+- Free Tier: Deletes count separately from writes (1000/day limit)
+- Paid Tier: All operations billed equally
+
+**ID_INDEX_TTL** (default: 2592000 = 30 days)
+- TTL for all KV entries
+- Automatic cleanup after expiration
+- Balances storage costs with data retention
+
+### Initial Deployment Recommendations
+
+When deploying with empty KV store:
+1. Start with conservative MAX_STORED_ARTICLES (e.g., 50-100)
+2. Gradually increase over days/weeks
+3. Monitor KV operations and neuron usage
+4. Prevents spike in:
+   - API requests to news providers
+   - Neuron consumption for AI processing
+   - Worker execution time
+   - KV write operations
+
+## Environment Variables
 
 ```toml
 # News Updater
 MAX_STORED_ARTICLES = 500     # Max articles in ID index
+MAX_PENDING_LIST_SIZE = 500   # Max articles in pending list
 MAX_PAGES = 15                # Max news API pages to fetch
 ID_INDEX_TTL = 2592000        # 30 days in seconds
 
 # News Processor  
 MAX_ARTICLES_PER_RUN = 1      # Always 1 in checkpoint architecture
 MAX_CONTENT_CHARS = 10240     # 10KB content extraction limit
-MAX_CONTENT_FETCH_ATTEMPTS = 5 # Max retries before moving to try-later
+MAX_CONTENT_FETCH_ATTEMPTS = 5 # Max retries before marking as processed
+DELETE_OLD_ARTICLES = false   # Delete old articles vs wait for TTL
 ```
 
 ### Cron Schedules
@@ -403,9 +514,47 @@ Old articles in BTC_ID_INDEX and article:<id> format remain compatible.
 - **Failed article retry**: After pending list empty
 
 ### KV Operations
-- **Updater**: 2-3 reads, 1 write per run
-- **Processor**: 3-4 reads, 3-4 writes per run
-- **Total per hour**: ~250-350 operations (well under free tier limit)
+
+**Updater (per run):**
+- **Reads**: 2 operations
+  - BTC_PENDING_LIST (get current pending articles)
+  - BTC_CHECKPOINT (get processed IDs for filtering)
+- **Writes**: 1 operation
+  - BTC_PENDING_LIST (write trimmed and updated list)
+- **Total**: 3 operations per run
+
+**Processor (per article - typical new article):**
+- **Reads**: 3 operations
+  - BTC_CHECKPOINT (get current state)
+  - BTC_PENDING_LIST (get next article to process)
+  - BTC_ID_INDEX (check if article exists in index)
+- **Writes**: 4 operations
+  - BTC_CHECKPOINT (update before processing)
+  - article:<id> (save processed article)
+  - BTC_ID_INDEX (add article to index)
+  - BTC_CHECKPOINT (update after processing)
+- **Total**: 7 operations per article
+
+**Processor (continuing multi-phase article):**
+- **Reads**: 2 operations (no pending list read needed)
+- **Writes**: 3 operations (no ID index update needed)
+- **Total**: 5 operations per article
+
+**Processor (article at max retries):**
+- **Reads**: 3 operations
+- **Writes**: 5 operations (includes extra article write with empty values)
+- **Total**: 8 operations per article
+
+**Total per Hour Estimate:**
+- Updater: ~3 operations/hour (runs hourly)
+- Processor: ~420 operations/hour (60 runs × 7 ops average)
+- **Combined**: ~423 operations/hour
+- **Daily**: ~10,152 operations (well under 100K free tier limit)
+
+**Notes:**
+- If DELETE_OLD_ARTICLES enabled: Additional deletes when articles exceed MAX_STORED_ARTICLES
+- Pending list limited to MAX_PENDING_LIST_SIZE (default: 500) to prevent unbounded growth
+- processedIds automatically trimmed each run to prevent memory bloat
 
 ## Further Documentation
 

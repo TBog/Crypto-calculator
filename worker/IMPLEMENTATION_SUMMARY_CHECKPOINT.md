@@ -78,6 +78,70 @@ The original issue identified several critical problems:
 **Benefits**:
 - Unlimited capacity: Can handle any number of new articles
 - Automatic trimming: Updater removes processed articles based on checkpoint
+- Size limited: MAX_PENDING_LIST_SIZE (default: 500) prevents unbounded growth
+- No article loss: All new articles queued regardless of processor speed
+
+#### 4. Try-Later List with Max Retry Handling
+
+**Problem**: Failed articles stuck in infinite retry loop
+
+**Solution**: Smart retry management with automatic cleanup:
+
+```javascript
+// Try-later items
+{
+  id: "article-id",
+  article: { /* data */ },
+  failedAt: timestamp,
+  reason: "error_description"
+}
+
+// When MAX_CONTENT_FETCH_ATTEMPTS reached:
+// - Article marked as processed (not added to try-later)
+// - Empty sentiment and summary values set
+// - Prevents infinite retry loops
+```
+
+**Benefits**:
+- Automatic retry when pending list empty
+- Max retries prevent infinite loops
+- Failed articles don't block processing
+- Diagnostic information preserved
+
+#### 5. Memory Efficiency Optimizations
+
+**Problem**: Unbounded growth of processedIds and pending list
+
+**Solution**: Automatic trimming on every run:
+
+- **processedIds**: Trimmed to only include articles in current ID index
+- **Pending list**: Limited to MAX_PENDING_LIST_SIZE
+- **Try-later list**: Self-cleaning (max retry articles removed)
+- **Set-based lookups**: O(1) performance for processedIds checks
+
+**Benefits**:
+- Bounded memory usage
+- Efficient lookups with Set data structure
+- No performance degradation over time
+- Automatic cleanup
+
+#### 6. Configurable Article Deletion
+
+**Problem**: Old articles accumulate in KV storage
+
+**Solution**: DELETE_OLD_ARTICLES configuration option:
+
+- **When false (default)**: Articles remain until TTL expires (30 days)
+  - Uses more KV space
+  - Saves delete operations (important on Free Tier)
+- **When true**: Articles deleted when removed from index
+  - Uses less KV space
+  - Incurs delete operations (count against Free Tier limit)
+
+**Benefits**:
+- Flexible trade-off between space and operations
+- Documented with Free Tier considerations
+- Automatic cleanup via TTL as fallback
 - FIFO processing: Latest articles processed first
 
 #### 4. One-Article-At-A-Time Processing
@@ -157,10 +221,12 @@ await env.CRYPTO_NEWS_CACHE.put(
 **Added**:
 - `KV_KEY_PENDING` = 'BTC_PENDING_LIST'
 - `KV_KEY_CHECKPOINT` = 'BTC_CHECKPOINT'
+- `DELETE_OLD_ARTICLES` = false (default)
+- `MAX_PENDING_LIST_SIZE` = 500 (default)
 
 **Updated**:
-- `getNewsUpdaterConfig()` - includes new keys
-- `getNewsProcessorConfig()` - includes new keys
+- `getNewsUpdaterConfig()` - includes new keys and limits
+- `getNewsProcessorConfig()` - includes new keys and options
 
 ### Testing
 
@@ -174,13 +240,15 @@ Created 13 comprehensive test cases:
    - ✅ Add new articles to pending list
    - ✅ Prevent duplicate articles
    - ✅ Trim processed articles
+   - ✅ Enforce pending list size limit
 
 2. **Processor Tests**:
    - ✅ Process articles from pending list
    - ✅ Handle multiple articles sequentially
-   - ✅ Move failed articles to try-later
+   - ✅ Handle max retry articles (mark as processed, not try-later)
    - ✅ Process try-later when pending empty
    - ✅ Return false when nothing to process
+   - ✅ Trim processedIds on every run
 
 3. **Concurrent Execution Tests**:
    - ✅ No article loss during concurrent updater/processor execution
@@ -280,14 +348,32 @@ Created `MockKV` class that simulates Cloudflare KV:
 - Simple state management
 
 **Throughput**:
-- ~60-180 articles per hour (processor runs every minute)
-- Updater adds unlimited articles instantly
+- ~60 articles per hour (processor runs every minute, processes 1 article per run)
+- Updater adds unlimited articles instantly to pending list
 - No bottlenecks
 
 **KV Operations**:
-- Updater: ~2-3 reads, 1 write per run
-- Processor: ~3-4 reads, 3-4 writes per run
-- Total: ~250-350 operations/hour (well under free tier)
+
+*Updater (per run):*
+- Reads: 2 (BTC_PENDING_LIST + BTC_CHECKPOINT)
+- Writes: 1 (BTC_PENDING_LIST)
+- Total: 3 operations/run
+
+*Processor (per article - typical new article):*
+- Reads: 3 (BTC_CHECKPOINT + BTC_PENDING_LIST + BTC_ID_INDEX)
+- Writes: 4 (BTC_CHECKPOINT×2 + article:<id> + BTC_ID_INDEX)
+- Total: 7 operations/article
+
+*Processor (continuing multi-phase):*
+- Reads: 2 (BTC_CHECKPOINT only, article in memory)
+- Writes: 3 (BTC_CHECKPOINT×2 + article:<id>)
+- Total: 5 operations/article
+
+*Hourly Totals:*
+- Updater: ~3 operations/hour (runs hourly)
+- Processor: ~420 operations/hour (60 runs × 7 ops avg)
+- Combined: ~423 operations/hour
+- Daily: ~10,152 operations (well under 100K free tier limit)
 
 ### Migration Path
 
