@@ -339,7 +339,7 @@ async function handleScheduled(event, env, ctx) {
       const pendingData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_PENDING, { type: 'json' });
       if (pendingData && Array.isArray(pendingData)) {
         pendingData.forEach(item => {
-          if (item.id) {
+          if (item && item.id) {
             knownIds.add(item.id);
           }
         });
