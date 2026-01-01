@@ -582,7 +582,7 @@ Old articles in BTC_ID_INDEX and article:<id> format remain compatible.
   - article:<id> (save processed article)
   - BTC_ID_INDEX (add article to index)
   - BTC_CHECKPOINT (update after processing)
-- **Total**: 8 operations per article (4 reads + 4 writes)
+- **Total**: 7 operations per article (3 reads + 4 writes)
 
 **Processor (continuing multi-phase article):**
 - **Reads**: 1 operation (article already in checkpoint)
