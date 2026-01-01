@@ -245,7 +245,7 @@ Ordered list of article IDs (processor writes only):
 **Optional DELETE_OLD_ARTICLES:**
 - If enabled and articles exceed MAX_STORED_ARTICLES:
   - Additional deletes: N (where N = number of articles over limit)
-  - Deletes count against daily write limit (1,000/day on free tier)
+  - Deletes have their own separate limit (1,000/day on free tier)
 
 **Key Points:**
 - Processes ONE article per run
@@ -547,6 +547,18 @@ Old articles in BTC_ID_INDEX and article:<id> format remain compatible.
 - **Failed article retry**: After pending list empty
 
 ### KV Operations
+
+**Cloudflare Free Tier Limits (Reset Daily at 00:00 UTC):**
+
+| Operation Type | Daily Limit |
+|----------------|-------------|
+| Reads (get) | 100,000 operations |
+| Writes (put) | 1,000 operations |
+| Deletes | 1,000 operations |
+| Lists | 1,000 operations |
+| Stored Data | 1 GB total |
+
+**Note**: Each operation type has its own separate limit. Deletes do not count against the write limit.
 
 **Updater (per run):**
 - **Reads**: 3 operations
