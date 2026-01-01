@@ -41,10 +41,10 @@ const checkpoint = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_CHECKPOINT, { t
 if (checkpoint.currentArticleId) {
   knownIds.add(checkpoint.currentArticleId);
 }
-if (checkpoint.processedIds) {
-  checkpoint.processedIds.forEach(id => knownIds.add(id));
-}
 ```
+
+Note: The `processedIds` field has been removed from the checkpoint. The system now uses 
+the ID index (BTC_ID_INDEX) as the source of truth for which articles have been processed.
 
 ### 2. Article Ordering Documentation
 Added documentation to clarify that the optimization relies on articles being sorted by published date (newest first):
@@ -104,7 +104,7 @@ All tests pass successfully.
 2. `BTC_PENDING_LIST` - Contains articles waiting to be processed (array of objects with `id` field)
 3. `BTC_CHECKPOINT` - Contains processing state including:
    - `currentArticleId` - ID of article currently being processed
-   - `processedIds` - Array of IDs that have been processed
+   - `tryLater` - Array of articles that failed and should be retried
 
 ### Article Ordering Assumption
 Both NewsData.io and APITube APIs return articles sorted by published date in descending order (newest first). This is a standard practice for news APIs and is critical for the early-exit optimization to work correctly.

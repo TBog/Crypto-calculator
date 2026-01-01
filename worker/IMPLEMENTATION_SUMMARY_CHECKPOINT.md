@@ -41,7 +41,6 @@ The original issue identified several critical problems:
 {
   currentArticleId: "article-123",      // Article being processed
   currentArticle: { /* data */ },        // Full article data
-  processedIds: ["id1", "id2", ...],    // Successfully processed
   tryLater: [{                          // Failed articles to retry
     id: "id",
     article: { /* data */ },
@@ -110,16 +109,19 @@ The original issue identified several critical problems:
 
 #### 5. Memory Efficiency Optimizations
 
-**Problem**: Unbounded growth of processedIds and pending list
+**Problem**: Unbounded growth of checkpoint and pending list
 
-**Solution**: Automatic trimming on every run:
+**Solution**: Simplified architecture and automatic trimming:
 
-- **processedIds**: Trimmed to only include articles in current ID index
+- **No processedIds**: Removed entirely - ID index is source of truth
 - **Pending list**: Limited to MAX_PENDING_LIST_SIZE
 - **Try-later list**: Self-cleaning (max retry articles removed)
-- **Set-based lookups**: O(1) performance for processedIds checks
+- **Set-based lookups**: O(1) performance for ID index checks
 
 **Benefits**:
+- Bounded checkpoint size (only current article + try-later)
+- No memory bloat from growing processedIds list
+- Simpler architecture with single source of truth
 - Bounded memory usage
 - Efficient lookups with Set data structure
 - No performance degradation over time
@@ -248,7 +250,7 @@ Created 13 comprehensive test cases:
    - ✅ Handle max retry articles (mark as processed, not try-later)
    - ✅ Process try-later when pending empty
    - ✅ Return false when nothing to process
-   - ✅ Trim processedIds on every run
+   - ✅ Filter pending by ID index (no processedIds)
 
 3. **Concurrent Execution Tests**:
    - ✅ No article loss during concurrent updater/processor execution
