@@ -603,7 +603,9 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
   try {
     const checkpointData = await kv.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
     if (checkpointData) {
-      checkpoint = { ...checkpoint, ...checkpointData };
+      // Explicitly exclude processedIds during transition from old checkpoint format
+      const { processedIds, ...cleanCheckpointData } = checkpointData;
+      checkpoint = { ...checkpoint, ...cleanCheckpointData };
     }
   } catch (error) {
     // Checkpoint doesn't exist, use defaults

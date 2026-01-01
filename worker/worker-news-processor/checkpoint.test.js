@@ -285,13 +285,6 @@ describe('Checkpoint-based Article Processing', () => {
       expect(result.processed).toBe(false);
       expect(result.articleId).toBeNull();
     });
-
-    it('should trim processedIds even when no articles to process', async () => {
-      // This test is no longer relevant since processedIds has been removed
-      // The checkpoint no longer maintains a processedIds list
-      // Keeping test stub for documentation purposes
-      expect(true).toBe(true);
-    });
   });
 
   describe('Concurrent Worker Execution', () => {
