@@ -202,30 +202,59 @@ Ordered list of article IDs (processor writes only):
    - Partial → keep in `currentArticle`
 
 **KV Operations per Article (typical case - new article):**
-- **Reads**: 4 (BTC_CHECKPOINT + BTC_PENDING_LIST + BTC_ID_INDEX twice)
-- **Writes**: 4 (BTC_CHECKPOINT before + article:<id> + BTC_ID_INDEX + BTC_CHECKPOINT after)
-- **Total**: 8 operations per article
+- **Reads**: 4 operations
+  - BTC_CHECKPOINT (get current state)
+  - BTC_PENDING_LIST (get next article to process)
+  - BTC_ID_INDEX (filter pending list)
+  - BTC_ID_INDEX (check if article exists in index)
+- **Writes**: 4 operations
+  - BTC_CHECKPOINT (update before processing)
+  - article:<id> (save processed article)
+  - BTC_ID_INDEX (add article to index)
+  - BTC_CHECKPOINT (update after processing)
+- **Total**: 8 operations per article (4 reads + 4 writes)
 
 **KV Operations per Article (continuing multi-phase article):**
-- **Reads**: 2 (BTC_CHECKPOINT + article already in checkpoint = no pending/index read)
-- **Writes**: 3 (BTC_CHECKPOINT before + article:<id> + BTC_CHECKPOINT after)
-- **Total**: 5 operations per article
+- **Reads**: 2 operations
+  - BTC_CHECKPOINT (get current state)
+  - (article already in checkpoint = no pending/index read needed)
+- **Writes**: 3 operations
+  - BTC_CHECKPOINT (update before processing)
+  - article:<id> (save partial progress)
+  - BTC_CHECKPOINT (update after processing)
+- **Total**: 5 operations per article (2 reads + 3 writes)
 
 **KV Operations per Article (max retries reached):**
-- **Reads**: 4 (same as typical case)
-- **Writes**: 5 (BTC_CHECKPOINT before + article:<id> twice + BTC_ID_INDEX + BTC_CHECKPOINT after)
-- **Total**: 9 operations per article
+- **Reads**: 4 operations (same as typical case)
+- **Writes**: 5 operations
+  - BTC_CHECKPOINT (update before processing)
+  - article:<id> (save failed attempt)
+  - article:<id> again (mark as processed with empty values)
+  - BTC_ID_INDEX (add article to index)
+  - BTC_CHECKPOINT (update after processing)
+- **Total**: 9 operations per article (4 reads + 5 writes)
+
+**KV Operations per Idle Run (no articles to process):**
+- **Reads**: 3 operations
+  - BTC_CHECKPOINT (check current state)
+  - BTC_PENDING_LIST (check for new articles)
+  - BTC_ID_INDEX (filter pending list)
+- **Writes**: 0 operations (early exit, no checkpoint update)
+- **Total**: 3 operations per idle run (3 reads + 0 writes)
 
 **Optional DELETE_OLD_ARTICLES:**
 - If enabled and articles exceed MAX_STORED_ARTICLES:
   - Additional deletes: N (where N = number of articles over limit)
+  - Deletes count against daily write limit (1,000/day on free tier)
 
 **Key Points:**
 - Processes ONE article per run
+- **Idle runs (no work) perform 0 writes** - critical for staying within free tier limit
 - Checkpoint enables crash recovery
 - Failed articles at max retries marked as processed (not infinite retry)
 - Uses ID index as source of truth (no redundant processedIds tracking)
 - No race conditions with updater
+- All KV put operations have error handling with detailed logging
 
 ## Benefits
 
@@ -520,12 +549,13 @@ Old articles in BTC_ID_INDEX and article:<id> format remain compatible.
 ### KV Operations
 
 **Updater (per run):**
-- **Reads**: 2 operations
+- **Reads**: 3 operations
+  - BTC_ID_INDEX (get processed article IDs)
   - BTC_PENDING_LIST (get current pending articles)
-  - BTC_CHECKPOINT (get processed IDs for filtering)
+  - BTC_CHECKPOINT (get current article ID for filtering)
 - **Writes**: 1 operation
   - BTC_PENDING_LIST (write trimmed and updated list)
-- **Total**: 3 operations per run
+- **Total**: 4 operations per run (3 reads + 1 write)
 
 **Processor (per article - typical new article):**
 - **Reads**: 4 operations
@@ -538,28 +568,54 @@ Old articles in BTC_ID_INDEX and article:<id> format remain compatible.
   - article:<id> (save processed article)
   - BTC_ID_INDEX (add article to index)
   - BTC_CHECKPOINT (update after processing)
-- **Total**: 8 operations per article
+- **Total**: 8 operations per article (4 reads + 4 writes)
 
 **Processor (continuing multi-phase article):**
 - **Reads**: 2 operations (no pending list read needed)
 - **Writes**: 3 operations (no ID index update needed)
-- **Total**: 5 operations per article
+- **Total**: 5 operations per article (2 reads + 3 writes)
 
 **Processor (article at max retries):**
 - **Reads**: 4 operations
 - **Writes**: 5 operations (includes extra article write with empty values)
-- **Total**: 9 operations per article
+- **Total**: 9 operations per article (4 reads + 5 writes)
 
-**Total per Hour Estimate:**
-- Updater: ~3 operations/hour (runs hourly)
-- Processor: ~480 operations/hour (60 runs × 8 ops average)
-- **Combined**: ~483 operations/hour
-- **Daily**: ~11,592 operations (well under 100K free tier limit)
+**Processor (idle run - no work available):**
+- **Reads**: 3 operations
+  - BTC_CHECKPOINT (check current state)
+  - BTC_PENDING_LIST (check for new articles)
+  - BTC_ID_INDEX (filter pending list)
+- **Writes**: 0 operations (early exit, no checkpoint update)
+- **Total**: 3 operations per idle run (3 reads + 0 writes)
+
+**Daily Operation Estimates (Free Tier Limits: 100K reads/day, 1K writes/day):**
+
+*Scenario 1: Processing 50 new articles/day*
+- Updater: 24 runs × 4 ops = 96 operations (72 reads + 24 writes)
+- Processor active runs: 50 articles × 8 ops = 400 operations (200 reads + 200 writes)
+- Processor idle runs: 1,390 runs × 3 ops = 4,170 operations (4,170 reads + 0 writes)
+- **Total Daily**: 4,666 operations (4,442 reads + 224 writes)
+- **Free Tier Usage**: 4.4% reads, 22.4% writes ✅
+
+*Scenario 2: Processing 200 new articles/day*
+- Updater: 24 runs × 4 ops = 96 operations (72 reads + 24 writes)
+- Processor active runs: 200 articles × 8 ops = 1,600 operations (800 reads + 800 writes)
+- Processor idle runs: 1,240 runs × 3 ops = 3,720 operations (3,720 reads + 0 writes)
+- **Total Daily**: 5,416 operations (4,592 reads + 824 writes)
+- **Free Tier Usage**: 4.6% reads, 82.4% writes ✅
+
+*Scenario 3: Maximum sustainable (stay under 1K writes/day)*
+- Max writes budget: 1,000 - 24 (updater) = 976 writes/day for processor
+- Max articles: 976 / 4 = 244 new articles/day (assuming typical case)
+- **Free Tier Limit**: ~244 new articles/day maximum
 
 **Notes:**
+- **Idle runs perform 0 writes** - critical optimization for staying within free tier
 - If DELETE_OLD_ARTICLES enabled: Additional deletes when articles exceed MAX_STORED_ARTICLES
+- Deletes count separately on free tier (1,000/day limit)
 - Pending list limited to MAX_PENDING_LIST_SIZE (default: 500) to prevent unbounded growth
 - ID index is the source of truth for which articles have been processed
+- All KV put operations include error handling and detailed logging for failed writes
 
 ## Further Documentation
 

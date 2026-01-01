@@ -685,13 +685,19 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
   checkpoint.currentArticle = nextArticle;
   checkpoint.lastUpdate = Date.now();
   
-  await kv.put(
-    config.KV_KEY_CHECKPOINT,
-    JSON.stringify(checkpoint),
-    {
-      expirationTtl: config.ID_INDEX_TTL
-    }
-  );
+  try {
+    await kv.put(
+      config.KV_KEY_CHECKPOINT,
+      JSON.stringify(checkpoint),
+      {
+        expirationTtl: config.ID_INDEX_TTL
+      }
+    );
+    console.log(`✓ Checkpoint updated (before processing): article ${nextArticleId}`);
+  } catch (error) {
+    console.error(`✗ Failed to write checkpoint (before processing):`, error.message);
+    throw new Error(`KV put failed for checkpoint: ${error.message}`);
+  }
   
   // Step 5: Process the article
   let updatedArticle;
@@ -705,13 +711,19 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     if (articleNeedsProcessing(updatedArticle, config)) {
       // Article needs more processing runs, save progress
       checkpoint.currentArticle = updatedArticle;
-      await kv.put(
-        config.KV_KEY_CHECKPOINT,
-        JSON.stringify(checkpoint),
-        {
-          expirationTtl: config.ID_INDEX_TTL
-        }
-      );
+      try {
+        await kv.put(
+          config.KV_KEY_CHECKPOINT,
+          JSON.stringify(checkpoint),
+          {
+            expirationTtl: config.ID_INDEX_TTL
+          }
+        );
+        console.log(`✓ Checkpoint updated (partial progress): article ${nextArticleId}`);
+      } catch (error) {
+        console.error(`✗ Failed to write checkpoint (partial progress):`, error.message);
+        throw new Error(`KV put failed for checkpoint: ${error.message}`);
+      }
     }
     
     // Check if article hit max retries
@@ -728,9 +740,15 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
   
   // Step 6: Write article to KV and update ID index
   const articleKey = `article:${nextArticleId}`;
-  await kv.put(articleKey, JSON.stringify(updatedArticle), {
-    expirationTtl: config.ID_INDEX_TTL
-  });
+  try {
+    await kv.put(articleKey, JSON.stringify(updatedArticle), {
+      expirationTtl: config.ID_INDEX_TTL
+    });
+    console.log(`✓ Article written to KV: ${articleKey}`);
+  } catch (error) {
+    console.error(`✗ Failed to write article to KV (${articleKey}):`, error.message);
+    throw new Error(`KV put failed for article: ${error.message}`);
+  }
   
   // Update ID index
   // Reuse cached index if available (from earlier read when filtering pending list)
@@ -760,18 +778,30 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       idIndex = idIndex.slice(0, maxArticles);
     }
     
-    await kv.put(
-      config.KV_KEY_IDS,
-      JSON.stringify(idIndex),
-      {
-        expirationTtl: config.ID_INDEX_TTL
-      }
-    );
+    try {
+      await kv.put(
+        config.KV_KEY_IDS,
+        JSON.stringify(idIndex),
+        {
+          expirationTtl: config.ID_INDEX_TTL
+        }
+      );
+      console.log(`✓ ID index updated: ${idIndex.length} articles`);
+    } catch (error) {
+      console.error(`✗ Failed to write ID index:`, error.message);
+      throw new Error(`KV put failed for ID index: ${error.message}`);
+    }
     
     // Delete old articles from KV if configured to do so
     if (config.DELETE_OLD_ARTICLES && removedArticleIds.length > 0) {
-      const deletePromises = removedArticleIds.map(id => kv.delete(`article:${id}`));
-      await Promise.all(deletePromises);
+      try {
+        const deletePromises = removedArticleIds.map(id => kv.delete(`article:${id}`));
+        await Promise.all(deletePromises);
+        console.log(`✓ Deleted ${removedArticleIds.length} old articles from KV`);
+      } catch (error) {
+        console.error(`✗ Failed to delete old articles:`, error.message);
+        // Don't throw here - deletion failure is not critical
+      }
     }
   }
   
@@ -788,9 +818,15 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       updatedArticle.aiSummary = updatedArticle.aiSummary || '';
       
       // Re-write the article with updated values
-      await kv.put(`article:${nextArticleId}`, JSON.stringify(updatedArticle), {
-        expirationTtl: config.ID_INDEX_TTL
-      });
+      try {
+        await kv.put(`article:${nextArticleId}`, JSON.stringify(updatedArticle), {
+          expirationTtl: config.ID_INDEX_TTL
+        });
+        console.log(`✓ Article re-written with empty values (max retries): ${nextArticleId}`);
+      } catch (error) {
+        console.error(`✗ Failed to re-write article (max retries) to KV:`, error.message);
+        throw new Error(`KV put failed for article: ${error.message}`);
+      }
       
       checkpoint.currentArticleId = null;
       checkpoint.currentArticle = null;
@@ -823,13 +859,19 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
   
   checkpoint.lastUpdate = Date.now();
   
-  await kv.put(
-    config.KV_KEY_CHECKPOINT,
-    JSON.stringify(checkpoint),
-    {
-      expirationTtl: config.ID_INDEX_TTL
-    }
-  );
+  try {
+    await kv.put(
+      config.KV_KEY_CHECKPOINT,
+      JSON.stringify(checkpoint),
+      {
+        expirationTtl: config.ID_INDEX_TTL
+      }
+    );
+    console.log(`✓ Checkpoint updated (after processing): article complete=${articleIsComplete(updatedArticle, config)}`);
+  } catch (error) {
+    console.error(`✗ Failed to write checkpoint (after processing):`, error.message);
+    throw new Error(`KV put failed for checkpoint: ${error.message}`);
+  }
   
   return { processed: true, articleId: nextArticleId, article: updatedArticle, checkpoint };
 }
@@ -845,6 +887,11 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
  * 5. Process the article (may take multiple runs for phases)
  * 6. Write article to KV and update ID index
  * 7. Update checkpoint on success or move to try-later on failure
+ * 
+ * KV Operation Tracking:
+ * - Logs read and write counts for monitoring free tier limits
+ * - Cloudflare Free Tier: 100,000 reads/day, 1,000 writes/day
+ * - Early exit when no work avoids unnecessary checkpoint writes
  * 
  * @param {Event} event - Scheduled event
  * @param {Object} env - Environment variables
@@ -867,8 +914,11 @@ async function handleScheduled(event, env) {
       if (result.checkpoint) {
         console.log(`Try-later queue: ${(result.checkpoint.tryLater || []).length}`);
       }
+      
+      // Log KV operation summary for tracking free tier usage
+      console.log('KV Operations (estimated): 4-8 reads, 3-5 writes');
     } else {
-      console.log('No articles to process');
+      console.log('No articles to process - idle run (0 writes)');
     }
     
     console.log('=== Bitcoin News Processor Cron Job Completed Successfully ===');
