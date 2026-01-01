@@ -625,6 +625,7 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
   // Step 3: Get next article to process
   let nextArticle = null;
   let nextArticleId = null;
+  let cachedIdIndex = null; // Cache ID index to avoid redundant KV reads
   
   if (checkpoint.currentArticleId && checkpoint.currentArticle) {
     // Continue processing current article
@@ -643,6 +644,7 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     }
     
     // Read ID index to filter out articles that are already processed
+    // Cache this for later reuse when updating the index
     let idIndex = [];
     try {
       const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
@@ -652,6 +654,7 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     } catch (error) {
       // No index yet
     }
+    cachedIdIndex = idIndex; // Cache for later use
     
     // Filter out articles that are already in the ID index (already processed)
     const idIndexSet = new Set(idIndex);
@@ -730,15 +733,21 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
   });
   
   // Update ID index
-  let idIndex = [];
+  // Reuse cached index if available (from earlier read when filtering pending list)
+  let idIndex = cachedIdIndex;
   let removedArticleIds = [];
-  try {
-    const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
-    if (idIndexData && Array.isArray(idIndexData)) {
-      idIndex = idIndexData;
+  
+  if (idIndex === null) {
+    // Index not cached, need to read it
+    idIndex = [];
+    try {
+      const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
+      if (idIndexData && Array.isArray(idIndexData)) {
+        idIndex = idIndexData;
+      }
+    } catch (error) {
+      // No index yet
     }
-  } catch (error) {
-    // No index yet
   }
   
   if (!idIndex.includes(nextArticleId)) {
