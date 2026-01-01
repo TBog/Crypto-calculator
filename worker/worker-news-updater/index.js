@@ -398,7 +398,6 @@ async function handleScheduled(event, env, ctx) {
     
     console.log('=== Bitcoin News Updater Cron Job Completed Successfully ===');
     console.log(`Added ${newArticles.length} articles to pending list for processing by consumer worker`);
-    console.log('KV Operations: 3 reads, 1 write');
   } catch (error) {
     console.error('=== Bitcoin News Updater Cron Job Failed ===');
     console.error('Error:', error);

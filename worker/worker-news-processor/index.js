@@ -796,8 +796,14 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     if (config.DELETE_OLD_ARTICLES && removedArticleIds.length > 0) {
       try {
         const deletePromises = removedArticleIds.map(id => kv.delete(`article:${id}`));
-        await Promise.all(deletePromises);
-        console.log(`✓ Deleted ${removedArticleIds.length} old articles from KV`);
+        const deleteResults = await Promise.allSettled(deletePromises);
+        const failedDeletes = deleteResults.filter(r => r.status === 'rejected').length;
+        
+        if (failedDeletes > 0) {
+          console.error(`✗ Failed to delete ${failedDeletes} of ${removedArticleIds.length} old articles`);
+        } else {
+          console.log(`✓ Deleted ${removedArticleIds.length} old articles from KV`);
+        }
       } catch (error) {
         console.error(`✗ Failed to delete old articles:`, error.message);
         // Don't throw here - deletion failure is not critical
@@ -914,11 +920,8 @@ async function handleScheduled(event, env) {
       if (result.checkpoint) {
         console.log(`Try-later queue: ${(result.checkpoint.tryLater || []).length}`);
       }
-      
-      // Log KV operation summary for tracking free tier usage
-      console.log('KV Operations (estimated): 4-8 reads, 3-5 writes');
     } else {
-      console.log('No articles to process - idle run (0 writes)');
+      console.log('No articles to process - idle run (no writes performed)');
     }
     
     console.log('=== Bitcoin News Processor Cron Job Completed Successfully ===');
