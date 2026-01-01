@@ -235,16 +235,16 @@ async function addToPendingList(kv, newArticles, config) {
     console.log('No existing pending list found, starting fresh');
   }
   
-  // Read checkpoint to see what's been processed
-  let processedIds = new Set();
+  // Read ID index to check which articles already exist
+  let existingArticleIds = new Set();
   try {
-    const checkpoint = await kv.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-    if (checkpoint && checkpoint.processedIds && Array.isArray(checkpoint.processedIds)) {
-      processedIds = new Set(checkpoint.processedIds);
-      console.log(`Checkpoint shows ${processedIds.size} articles processed`);
+    const idIndex = await kv.get(config.KV_KEY_IDS, { type: 'json' });
+    if (idIndex && Array.isArray(idIndex)) {
+      existingArticleIds = new Set(idIndex);
+      console.log(`Found ${existingArticleIds.size} articles in ID index`);
     }
   } catch (error) {
-    console.log('No checkpoint found');
+    console.log('No ID index found');
   }
   
   // Create a map of article ID to article data for new articles
@@ -256,12 +256,12 @@ async function addToPendingList(kv, newArticles, config) {
     }
   });
   
-  // Merge: Add new articles that aren't already in pending list or processed
+  // Merge: Add new articles that aren't already in pending list or ID index
   const pendingIdSet = new Set(pendingList.map(item => item.id));
   const articlesToAdd = [];
   
   for (const id of newArticleIds) {
-    if (!pendingIdSet.has(id) && !processedIds.has(id)) {
+    if (!pendingIdSet.has(id) && !existingArticleIds.has(id)) {
       articlesToAdd.push({
         id,
         article: articleMap.get(id),
@@ -273,8 +273,8 @@ async function addToPendingList(kv, newArticles, config) {
   // Add new articles to the beginning of the pending list (latest first)
   const mergedPendingList = [...articlesToAdd, ...pendingList];
   
-  // Trim pending list based on checkpoint (remove processed articles)
-  let trimmedPendingList = mergedPendingList.filter(item => !processedIds.has(item.id));
+  // Trim pending list based on ID index (remove articles that are already in the index)
+  let trimmedPendingList = mergedPendingList.filter(item => !existingArticleIds.has(item.id));
   
   // Limit pending list size to prevent unbounded growth
   const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
@@ -284,7 +284,7 @@ async function addToPendingList(kv, newArticles, config) {
   }
   
   console.log(`Adding ${articlesToAdd.length} new articles to pending list`);
-  console.log(`Trimmed ${mergedPendingList.length - trimmedPendingList.length} processed articles`);
+  console.log(`Trimmed ${mergedPendingList.length - trimmedPendingList.length} articles already in index`);
   
   // Write updated pending list to KV
   await kv.put(
@@ -352,20 +352,16 @@ async function handleScheduled(event, env, ctx) {
       console.log('Error reading pending queue:', error.message);
     }
     
-    // Load checkpoint IDs (articles in processing or recently processed)
+    // Load checkpoint IDs (articles in processing)
     try {
       const checkpoint = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
       if (checkpoint) {
         // Add currently processing article
         if (checkpoint.currentArticleId) {
           knownIds.add(checkpoint.currentArticleId);
-        }
-        // Add all processed IDs
-        if (checkpoint.processedIds && Array.isArray(checkpoint.processedIds)) {
-          checkpoint.processedIds.forEach(id => knownIds.add(id));
-          console.log(`Loaded ${checkpoint.processedIds.length} article IDs from checkpoint`);
+          console.log('Loaded 1 article ID from checkpoint (current)');
         } else {
-          console.log('No processed IDs in checkpoint');
+          console.log('No current article in checkpoint');
         }
       } else {
         console.log('No checkpoint found');

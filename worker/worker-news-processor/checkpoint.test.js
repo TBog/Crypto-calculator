@@ -155,11 +155,8 @@ describe('Checkpoint-based Article Processing', () => {
       
       await addToPendingList(mockKV, articles, config);
       
-      // Simulate checkpoint with article-1 processed
-      await mockKV.put(config.KV_KEY_CHECKPOINT, JSON.stringify({
-        processedIds: ['article-1'],
-        tryLater: []
-      }));
+      // Simulate checkpoint with article-1 in ID index (not in pending)
+      await mockKV.put(config.KV_KEY_IDS, JSON.stringify(['article-1']));
       
       // Add more articles
       const moreArticles = [
@@ -201,7 +198,6 @@ describe('Checkpoint-based Article Processing', () => {
       
       // Check checkpoint - should be marked as processed after both phases
       const checkpoint = await mockKV.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-      expect(checkpoint.processedIds).toContain('article-1');
       expect(checkpoint.currentArticleId).toBeNull();
     });
 
@@ -232,7 +228,7 @@ describe('Checkpoint-based Article Processing', () => {
       
       // Check all articles processed
       const checkpoint = await mockKV.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-      expect(checkpoint.processedIds).toHaveLength(3);
+      expect(checkpoint.currentArticleId).toBeNull();
     });
 
     it('should move failed articles to try-later list or mark as processed on max retries', async () => {
@@ -252,7 +248,6 @@ describe('Checkpoint-based Article Processing', () => {
       // with empty sentiment/summary instead of being in try-later list
       const checkpoint = await mockKV.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
       expect(checkpoint.tryLater).toHaveLength(0); // Should NOT be in try-later
-      expect(checkpoint.processedIds).toContain('article-1'); // Should be marked as processed
       
       // Check the article was written with empty values
       const article = await mockKV.get('article:article-1', { type: 'json' });
@@ -263,7 +258,6 @@ describe('Checkpoint-based Article Processing', () => {
     it('should process try-later articles when pending list is empty', async () => {
       // Setup checkpoint with try-later article
       await mockKV.put(config.KV_KEY_CHECKPOINT, JSON.stringify({
-        processedIds: [],
         tryLater: [
           {
             id: 'article-1',
@@ -293,37 +287,10 @@ describe('Checkpoint-based Article Processing', () => {
     });
 
     it('should trim processedIds even when no articles to process', async () => {
-      // Setup: Create ID index with only 2 articles
-      const idIndex = ['article-1', 'article-2'];
-      await mockKV.put(config.KV_KEY_IDS, JSON.stringify(idIndex));
-      
-      // Setup: Create checkpoint with 5 processedIds (3 of which are no longer in index)
-      const checkpoint = {
-        processedIds: ['article-1', 'article-2', 'article-3', 'article-4', 'article-5'],
-        tryLater: [],
-        currentArticleId: null,
-        currentArticle: null
-      };
-      await mockKV.put(config.KV_KEY_CHECKPOINT, JSON.stringify(checkpoint));
-      
-      // Process with no pending articles (should trigger trimming)
-      const mockProcess = createMockProcessArticle(false);
-      const result = await processNextArticle(mockKV, mockEnv, config, mockProcess);
-      
-      expect(result.processed).toBe(false);
-      expect(result.articleId).toBeNull();
-      
-      // Check that processedIds was trimmed to only include articles in index
-      expect(result.checkpoint.processedIds).toHaveLength(2);
-      expect(result.checkpoint.processedIds).toContain('article-1');
-      expect(result.checkpoint.processedIds).toContain('article-2');
-      expect(result.checkpoint.processedIds).not.toContain('article-3');
-      expect(result.checkpoint.processedIds).not.toContain('article-4');
-      expect(result.checkpoint.processedIds).not.toContain('article-5');
-      
-      // Verify checkpoint was updated in KV
-      const updatedCheckpoint = await mockKV.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-      expect(updatedCheckpoint.processedIds).toHaveLength(2);
+      // This test is no longer relevant since processedIds has been removed
+      // The checkpoint no longer maintains a processedIds list
+      // Keeping test stub for documentation purposes
+      expect(true).toBe(true);
     });
   });
 
@@ -360,11 +327,7 @@ describe('Checkpoint-based Article Processing', () => {
         await processNextArticle(mockKV, mockEnv, config, mockProcess);
       }
       
-      // Check all articles processed
-      const checkpoint = await mockKV.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-      expect(checkpoint.processedIds.length).toBeGreaterThanOrEqual(15);
-      
-      // Check ID index
+      // Check all articles processed (verify by checking ID index)
       const idIndex = await mockKV.get(config.KV_KEY_IDS, { type: 'json' });
       expect(idIndex.length).toBeGreaterThanOrEqual(15);
     });
@@ -405,7 +368,7 @@ describe('Checkpoint-based Article Processing', () => {
       }
       
       const checkpoint = await mockKV.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-      expect(checkpoint.processedIds).toHaveLength(5);
+      expect(checkpoint.currentArticleId).toBeNull();
     });
   });
 
@@ -421,7 +384,6 @@ describe('Checkpoint-based Article Processing', () => {
       await mockKV.put(config.KV_KEY_CHECKPOINT, JSON.stringify({
         currentArticleId: 'article-1',
         currentArticle: articles[0],
-        processedIds: [],
         tryLater: [],
         lastUpdate: Date.now()
       }));
@@ -447,7 +409,6 @@ describe('Checkpoint-based Article Processing', () => {
       await mockKV.put(config.KV_KEY_CHECKPOINT, JSON.stringify({
         currentArticleId: 'article-1',
         currentArticle: partialArticle,
-        processedIds: [],
         tryLater: [],
         lastUpdate: Date.now()
       }));

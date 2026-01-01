@@ -596,7 +596,6 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
   let checkpoint = {
     currentArticleId: null,
     currentArticle: null,
-    processedIds: [],
     tryLater: [],
     lastUpdate: null
   };
@@ -610,16 +609,12 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     // Checkpoint doesn't exist, use defaults
   }
   
-  // Convert processedIds array to Set for efficient lookups
-  const processedIdsSet = new Set(checkpoint.processedIds || []);
-  
   // Step 2: Check if previous article completed successfully
   if (checkpoint.currentArticleId && checkpoint.currentArticle) {
     const article = checkpoint.currentArticle;
     
     if (!articleNeedsProcessing(article, config)) {
       // Article completed successfully
-      processedIdsSet.add(checkpoint.currentArticleId);
       checkpoint.currentArticleId = null;
       checkpoint.currentArticle = null;
     }
@@ -645,10 +640,20 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       // No pending list
     }
     
-    // Filter out already processed articles using Set for O(1) lookup
-    const unprocessedPending = pendingList.filter(item => 
-      !processedIdsSet.has(item.id)
-    );
+    // Read ID index to filter out articles that are already processed
+    let idIndex = [];
+    try {
+      const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
+      if (idIndexData && Array.isArray(idIndexData)) {
+        idIndex = idIndexData;
+      }
+    } catch (error) {
+      // No index yet
+    }
+    
+    // Filter out articles that are already in the ID index (already processed)
+    const idIndexSet = new Set(idIndex);
+    const unprocessedPending = pendingList.filter(item => !idIndexSet.has(item.id));
     
     // Limit pending list size to prevent unbounded growth
     const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
@@ -665,38 +670,7 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       nextArticleId = tryLaterItem.id;
       nextArticle = tryLaterItem.article;
     } else {
-      // No articles to process - but still trim processedIds before returning
-      // This prevents unbounded growth of processedIds when system is idle
-      let idIndex = [];
-      try {
-        const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
-        if (idIndexData && Array.isArray(idIndexData)) {
-          idIndex = idIndexData;
-        }
-      } catch (error) {
-        // No index yet
-      }
-      
-      // Trim processedIds to only include articles still in the index
-      const idIndexSet = new Set(idIndex);
-      for (const id of Array.from(processedIdsSet)) {
-        if (!idIndexSet.has(id)) {
-          processedIdsSet.delete(id);
-        }
-      }
-      
-      // Update checkpoint with trimmed processedIds
-      checkpoint.processedIds = Array.from(processedIdsSet);
-      checkpoint.lastUpdate = Date.now();
-      
-      await kv.put(
-        config.KV_KEY_CHECKPOINT,
-        JSON.stringify(checkpoint),
-        {
-          expirationTtl: config.ID_INDEX_TTL
-        }
-      );
-      
+      // No articles to process
       return { processed: false, articleId: null, article: null, checkpoint };
     }
   }
@@ -790,15 +764,6 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     }
   }
   
-  // Trim processedIds to only include articles still in the index
-  // This prevents the processedIds list from growing unbounded
-  // Do this outside the conditional so it happens on every checkpoint update
-  const idIndexSet = new Set(idIndex);
-  for (const id of Array.from(processedIdsSet)) {
-    if (!idIndexSet.has(id)) {
-      processedIdsSet.delete(id);
-    }
-  }
   
   // Step 7: Update checkpoint based on success/failure
   if (processingFailed) {
@@ -816,7 +781,6 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
         expirationTtl: config.ID_INDEX_TTL
       });
       
-      processedIdsSet.add(nextArticleId);
       checkpoint.currentArticleId = null;
       checkpoint.currentArticle = null;
       // Remove from try-later list if it was there
@@ -831,15 +795,12 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
         reason: failureReason
       });
       
-      processedIdsSet.add(nextArticleId);
-      
       checkpoint.currentArticleId = null;
       checkpoint.currentArticle = null;
     }
   } else {
     // Check if article is fully complete
     if (articleIsComplete(updatedArticle, config)) {
-      processedIdsSet.add(nextArticleId);
       checkpoint.currentArticleId = null;
       checkpoint.currentArticle = null;
       checkpoint.tryLater = (checkpoint.tryLater || []).filter(item => item.id !== nextArticleId);
@@ -849,8 +810,6 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     }
   }
   
-  // Convert Set back to array for storage (only once at the end)
-  checkpoint.processedIds = Array.from(processedIdsSet);
   checkpoint.lastUpdate = Date.now();
   
   await kv.put(
@@ -895,7 +854,6 @@ async function handleScheduled(event, env) {
       
       // Use checkpoint from result (no need for extra KV read)
       if (result.checkpoint) {
-        console.log(`Processed IDs: ${result.checkpoint.processedIds.length}`);
         console.log(`Try-later queue: ${(result.checkpoint.tryLater || []).length}`);
       }
     } else {
