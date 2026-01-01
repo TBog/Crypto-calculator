@@ -48,6 +48,10 @@ function getArticleId(article) {
 /**
  * NewsData.io Provider
  * Fetches Bitcoin news from NewsData.io API
+ * 
+ * IMPORTANT: NewsData.io API returns articles sorted by published date
+ * in descending order (newest first). This ordering is critical for
+ * the early-exit optimization in the article aggregation logic.
  */
 class NewsDataProvider {
   constructor(apiKey) {
@@ -119,6 +123,10 @@ class NewsDataProvider {
  * APITube Provider
  * Fetches Bitcoin news from APITube API
  * APITube provides sentiment analysis out of the box
+ * 
+ * IMPORTANT: APITube API returns articles sorted by published date
+ * in descending order (newest first). This ordering is critical for
+ * the early-exit optimization in the article aggregation logic.
  */
 class APITubeProvider {
   constructor(apiKey) {

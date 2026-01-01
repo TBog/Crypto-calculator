@@ -22,8 +22,17 @@ import { getNewsUpdaterConfig } from '../shared/constants.js';
 /**
  * Fetch and aggregate articles with early-exit optimization
  * Stops pagination immediately when a known article is encountered
+ * 
+ * IMPORTANT: This function assumes that articles from the provider are sorted
+ * by published date (newest first). This assumption allows us to use early-exit
+ * optimization - once we encounter a known article, we can stop fetching because
+ * all subsequent articles are older and likely already known.
+ * 
+ * Both NewsData.io and APITube APIs return articles sorted by published date
+ * in descending order (newest first) by default.
+ * 
  * @param {Object} env - Environment variables
- * @param {Set} knownIds - Set of known article IDs for deduplication
+ * @param {Set} knownIds - Set of known article IDs for deduplication (includes pending, checkpoint, and ID index)
  * @param {Object} config - Configuration values
  * @returns {Promise<Array>} Array of new articles
  */
@@ -57,9 +66,9 @@ async function aggregateArticles(env, knownIds, config) {
         }
         
         // Early exit: If we hit a known article, stop immediately
+        // This works because articles are sorted by published date (newest first)
         if (knownIds.has(articleId)) {
-          if (!earlyExitTriggered)
-          {
+          if (!earlyExitTriggered) {
             console.log(`Early exit triggered: Found known article "${article.title?.substring(0, 50)}..."`);
             earlyExitTriggered = true;
           }
@@ -74,7 +83,7 @@ async function aggregateArticles(env, knownIds, config) {
       
       // Break out of pagination loop if early exit was triggered
       if (earlyExitTriggered) {
-        console.log(`Stopping pagination due to early exit after ${pageCount} page(s)`);
+        console.log(`Stopping pagination due to early exit after ${pageCount + 1} page(s)`);
         break;
       }
       
@@ -307,21 +316,65 @@ async function handleScheduled(event, env, ctx) {
   const config = getNewsUpdaterConfig(env);
   
   try {
-    // Phase 1: Preparation - Read ID index
-    console.log('Phase 1: Reading ID index from KV...');
+    // Phase 1: Preparation - Read ID index, pending queue, and checkpoint
+    console.log('Phase 1: Reading known article IDs from KV...');
     let knownIds = new Set();
     
+    // Load ID index (processed and stored articles)
     try {
       const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
       if (idIndexData && Array.isArray(idIndexData)) {
-        knownIds = new Set(idIndexData);
-        console.log(`Loaded ${knownIds.size} known article IDs from index`);
+        idIndexData.forEach(id => knownIds.add(id));
+        console.log(`Loaded ${idIndexData.length} article IDs from ID index`);
       } else {
-        console.log('No existing ID index found, starting fresh');
+        console.log('No existing ID index found');
       }
     } catch (error) {
-      console.log('Error reading ID index, starting fresh:', error.message);
+      console.log('Error reading ID index:', error.message);
     }
+    
+    // Load pending queue IDs (articles waiting to be processed)
+    try {
+      const pendingData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_PENDING, { type: 'json' });
+      if (pendingData && Array.isArray(pendingData)) {
+        const beforeSize = knownIds.size;
+        pendingData.forEach(item => {
+          if (item && item.id) {
+            knownIds.add(item.id);
+          }
+        });
+        const addedCount = knownIds.size - beforeSize;
+        console.log(`Loaded ${addedCount} IDs from pending queue`);
+      } else {
+        console.log('No pending queue found');
+      }
+    } catch (error) {
+      console.log('Error reading pending queue:', error.message);
+    }
+    
+    // Load checkpoint IDs (articles in processing or recently processed)
+    try {
+      const checkpoint = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
+      if (checkpoint) {
+        // Add currently processing article
+        if (checkpoint.currentArticleId) {
+          knownIds.add(checkpoint.currentArticleId);
+        }
+        // Add all processed IDs
+        if (checkpoint.processedIds && Array.isArray(checkpoint.processedIds)) {
+          checkpoint.processedIds.forEach(id => knownIds.add(id));
+          console.log(`Loaded ${checkpoint.processedIds.length} article IDs from checkpoint`);
+        } else {
+          console.log('No processed IDs in checkpoint');
+        }
+      } else {
+        console.log('No checkpoint found');
+      }
+    } catch (error) {
+      console.log('Error reading checkpoint:', error.message);
+    }
+    
+    console.log(`Total known article IDs: ${knownIds.size}`);
     
     // Phase 2: Optimized Fetch with Early Exit
     console.log('Phase 2: Fetching articles with early-exit optimization...');
