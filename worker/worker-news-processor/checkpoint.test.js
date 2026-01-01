@@ -291,6 +291,40 @@ describe('Checkpoint-based Article Processing', () => {
       expect(result.processed).toBe(false);
       expect(result.articleId).toBeNull();
     });
+
+    it('should trim processedIds even when no articles to process', async () => {
+      // Setup: Create ID index with only 2 articles
+      const idIndex = ['article-1', 'article-2'];
+      await mockKV.put(config.KV_KEY_IDS, JSON.stringify(idIndex));
+      
+      // Setup: Create checkpoint with 5 processedIds (3 of which are no longer in index)
+      const checkpoint = {
+        processedIds: ['article-1', 'article-2', 'article-3', 'article-4', 'article-5'],
+        tryLater: [],
+        currentArticleId: null,
+        currentArticle: null
+      };
+      await mockKV.put(config.KV_KEY_CHECKPOINT, JSON.stringify(checkpoint));
+      
+      // Process with no pending articles (should trigger trimming)
+      const mockProcess = createMockProcessArticle(false);
+      const result = await processNextArticle(mockKV, mockEnv, config, mockProcess);
+      
+      expect(result.processed).toBe(false);
+      expect(result.articleId).toBeNull();
+      
+      // Check that processedIds was trimmed to only include articles in index
+      expect(result.checkpoint.processedIds).toHaveLength(2);
+      expect(result.checkpoint.processedIds).toContain('article-1');
+      expect(result.checkpoint.processedIds).toContain('article-2');
+      expect(result.checkpoint.processedIds).not.toContain('article-3');
+      expect(result.checkpoint.processedIds).not.toContain('article-4');
+      expect(result.checkpoint.processedIds).not.toContain('article-5');
+      
+      // Verify checkpoint was updated in KV
+      const updatedCheckpoint = await mockKV.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
+      expect(updatedCheckpoint.processedIds).toHaveLength(2);
+    });
   });
 
   describe('Concurrent Worker Execution', () => {

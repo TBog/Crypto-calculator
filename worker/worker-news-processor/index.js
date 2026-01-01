@@ -665,7 +665,38 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       nextArticleId = tryLaterItem.id;
       nextArticle = tryLaterItem.article;
     } else {
-      // No articles to process
+      // No articles to process - but still trim processedIds before returning
+      // This prevents unbounded growth of processedIds when system is idle
+      let idIndex = [];
+      try {
+        const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
+        if (idIndexData && Array.isArray(idIndexData)) {
+          idIndex = idIndexData;
+        }
+      } catch (error) {
+        // No index yet
+      }
+      
+      // Trim processedIds to only include articles still in the index
+      const idIndexSet = new Set(idIndex);
+      for (const id of Array.from(processedIdsSet)) {
+        if (!idIndexSet.has(id)) {
+          processedIdsSet.delete(id);
+        }
+      }
+      
+      // Update checkpoint with trimmed processedIds
+      checkpoint.processedIds = Array.from(processedIdsSet);
+      checkpoint.lastUpdate = Date.now();
+      
+      await kv.put(
+        config.KV_KEY_CHECKPOINT,
+        JSON.stringify(checkpoint),
+        {
+          expirationTtl: config.ID_INDEX_TTL
+        }
+      );
+      
       return { processed: false, articleId: null, article: null, checkpoint };
     }
   }
