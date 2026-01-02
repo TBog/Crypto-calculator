@@ -3,12 +3,13 @@ main = "index.js"
 compatibility_date = "2024-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Cron trigger - runs every minute to split work across successive calls
+# Cron trigger - runs every 2 minutes to balance processing speed with write limits
 # Format: "minute hour day month day-of-week"
-# "* * * * *" = every minute
-# This allows scraping and AI processing to happen in separate runs
+# "*/2 * * * *" = every 2 minutes (720 runs/day)
+# This provides safety margin for free tier 1,000 writes/day limit
+# while still processing articles reasonably fast
 [triggers]
-crons = ["* * * * *"]
+crons = ["*/2 * * * *"]
 
 # AI binding for sentiment analysis and summarization
 [ai]

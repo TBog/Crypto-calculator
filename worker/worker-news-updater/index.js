@@ -287,15 +287,20 @@ async function addToPendingList(kv, newArticles, config) {
   console.log(`Trimmed ${mergedPendingList.length - trimmedPendingList.length} articles already in index`);
   
   // Write updated pending list to KV
-  await kv.put(
-    config.KV_KEY_PENDING,
-    JSON.stringify(trimmedPendingList),
-    {
-      expirationTtl: config.ID_INDEX_TTL
-    }
-  );
+  try {
+    await kv.put(
+      config.KV_KEY_PENDING,
+      JSON.stringify(trimmedPendingList),
+      {
+        expirationTtl: config.ID_INDEX_TTL
+      }
+    );
+    console.log(`✓ Updated pending list with ${trimmedPendingList.length} total articles (${articlesToAdd.length} new)`);
+  } catch (error) {
+    console.error(`✗ Failed to write pending list to KV:`, error.message);
+    throw new Error(`KV put failed for pending list: ${error.message}`);
+  }
   
-  console.log(`✓ Updated pending list with ${trimmedPendingList.length} total articles (${articlesToAdd.length} new)`);
   return trimmedPendingList.length;
 }
 

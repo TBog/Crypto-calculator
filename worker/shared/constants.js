@@ -66,7 +66,7 @@ export const MAX_CONTENT_FETCH_ATTEMPTS = 5;
 // - Consider setting alerts or manual checks if you are close to the 1 GB limit, and
 //   adjust MAX_STORED_ARTICLES or enable DELETE_OLD_ARTICLES if needed.
 //
-// Note: On Free Tier, deletes count against the 1000 daily write limit separately from writes.
+// Note: On Free Tier, deletes have their own separate 1,000/day limit (not combined with writes).
 export const DELETE_OLD_ARTICLES = false;
 
 // Maximum size of the pending list
