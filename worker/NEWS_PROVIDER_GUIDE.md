@@ -166,127 +166,117 @@ The test suite includes:
 - Article normalization tests
 - Sentiment normalization tests
 
-## APITube API Configuration Requirements
+## APITube API Configuration
 
-**CRITICAL**: The APITube provider implementation is a template based on common REST API patterns. 
+The APITube provider has been configured and verified against the official APITube documentation:
+- Documentation: https://docs.apitube.io/guides/user-guide/what-is-apitube
+- Endpoints: https://docs.apitube.io/platform/news-api/endpoints
+- Authentication: https://docs.apitube.io/platform/news-api/authentication
+- Response Structure: https://docs.apitube.io/platform/news-api/response-structure
 
-⚠️ **You MUST configure the following based on actual APITube documentation before using in production:**
+### Configuration Details
 
-### Required Configuration Steps
+1. **API Endpoint**: `https://api.apitube.io/v1/news/everything`
+   - General news endpoint supporting flexible filtering
+   - Filter by language, categories, keywords, topics, etc.
 
-1. **Obtain APITube Documentation**
-   - Get official API documentation from APITube
-   - Verify API endpoint URLs
-   - Check authentication requirements
-   - Review request/response formats
-
-2. **Update API Endpoint** (in `shared/news-providers.js`, line ~120)
+2. **Authentication**: X-API-Key header
    ```javascript
-   // Current placeholder:
-   const newsUrl = new URL('https://api.apitube.io/v1/news/crypto');
-   
-   // Update with actual endpoint from APITube docs
-   ```
-
-3. **Configure Authentication** (in `shared/news-providers.js`, line ~138)
-   ```javascript
-   // Current implementation uses Bearer token:
    headers: {
-     'Authorization': `Bearer ${this.apiKey}`,
+     'X-API-Key': apiKey,
      'Content-Type': 'application/json'
    }
-   
-   // Update if APITube uses different auth:
-   // - API key in header: 'X-API-Key': this.apiKey
-   // - API key in URL: newsUrl.searchParams.set('apikey', this.apiKey)
    ```
 
-4. **Verify Query Parameters** (in `shared/news-providers.js`, lines ~124-125)
+3. **Query Parameters**:
+   - `language`: Filter by language (e.g., 'en')
+   - Optional: Add `q` parameter for keyword filtering (e.g., 'bitcoin OR cryptocurrency')
+   - Optional: Add category/topic filters if supported
+
+4. **Pagination**: Page-based with `next_page` URL in response
    ```javascript
-   // Current parameters:
-   newsUrl.searchParams.set('coin', 'bitcoin');
-   newsUrl.searchParams.set('language', 'en');
-   
-   // Adjust parameter names to match APITube's API
+   // Response includes links.next_page or next_page field
+   // Can be used as full URL or page number
    ```
 
-5. **Configure Pagination** (in `shared/news-providers.js`, line ~130)
+5. **Response Structure**:
    ```javascript
-   // Current: page-based pagination
-   if (nextPage) {
-     newsUrl.searchParams.set('page', nextPage);
-   }
-   
-   // Update if APITube uses cursor-based:
-   // newsUrl.searchParams.set('cursor', nextPage);
-   ```
-
-6. **Update Response Parsing** (in `shared/news-providers.js`, lines ~148-151)
-   ```javascript
-   // Current expected response format:
    {
-     articles: [...],  // or 'results' or 'data'
-     next: '...',      // or 'nextPage' or 'cursor'
-     total: 100        // or 'totalResults'
+     data: [...],           // Array of articles
+     links: {
+       next_page: "..."     // URL for next page
+     },
+     meta: {
+       total: 100           // Total results
+     }
    }
-   
-   // Update field names based on actual response
    ```
 
-7. **Verify Sentiment Format** (in `shared/news-providers.js`, line ~171)
+6. **Sentiment Format**:
    ```javascript
-   // Current: expects 'sentiment' or 'sentiment_score'
-   // Update based on actual field name in APITube response
+   sentiment: {
+     overall: {
+       score: 0.75,         // Numeric score
+       polarity: "positive" // String: positive/negative/neutral
+     },
+     title: { ... },
+     body: { ... }
+   }
    ```
 
 ### Testing APITube Integration
 
-After configuring:
+After obtaining an APITube API key:
 
-1. **Test with sample data**:
+1. **Set up your API key**:
    ```bash
-   cd worker
-   node verify-providers.js
+   wrangler secret put APITUBE_API_KEY
+   # Enter your actual APITube API key
    ```
 
-2. **Test with actual API** (requires valid API key):
+2. **Select APITube as provider**:
    ```bash
-   # Set environment variable for testing
-   export APITUBE_API_KEY="your-actual-key"
-   
-   # Deploy to development
+   wrangler secret put NEWS_PROVIDER
+   # Enter: apitube
+   ```
+
+3. **Deploy to test**:
+   ```bash
+   cd worker
    wrangler deploy --config worker-news-updater/wrangler.toml
-   
-   # Monitor logs for errors
+   ```
+
+4. **Monitor the first run**:
+   ```bash
    wrangler tail --config worker-news-updater/wrangler.toml
    ```
 
-3. **Verify first batch of articles**:
-   - Check if articles are fetched correctly
-   - Verify sentiment values are normalized properly
-   - Ensure pagination works as expected
+5. **Verify articles are fetched**:
+   - Check if articles appear in your KV store
+   - Verify sentiment values are populated
+   - Ensure pagination works correctly
 
-### Common APITube Configuration Issues
+### Common APITube Issues and Solutions
 
 **Authentication Failed (401/403)**:
-- Verify API key is correct
-- Check if authentication method matches APITube's requirements
-- Ensure headers are formatted correctly
+- Verify your API key is correct
+- Ensure the X-API-Key header is being sent
+- Check if your API key has proper permissions
 
 **No Articles Returned**:
-- Verify endpoint URL is correct
-- Check query parameters match API documentation
-- Review response structure and update parsing logic
+- Verify the endpoint URL is correct
+- Check query parameters (language, etc.)
+- Review the response structure in logs
 
 **Pagination Not Working**:
-- Verify pagination style (page vs cursor)
-- Check parameter names
-- Ensure nextPage value is extracted correctly
+- Check if `next_page` is being extracted correctly
+- Verify the URL format in response
+- Test with smaller result sets first
 
 **Incorrect Sentiment Values**:
-- Check sentiment field name in response
-- Verify sentiment format (string vs numeric)
-- Update normalizeSentiment() logic if needed
+- Check if sentiment.overall.polarity is available
+- Verify the normalizeSentiment() logic handles your data
+- Review sample responses for sentiment format
 
 ## NewsData.io Configuration (Pre-configured)
 

@@ -14,9 +14,14 @@
  * ============================================================================
  * 
  * The APITube provider has been configured based on the official API docs at:
+ * https://docs.apitube.io/platform/news-api/endpoints
+ * https://docs.apitube.io/platform/news-api/authentication
  * https://docs.apitube.io/platform/news-api/response-structure
  * 
- * Key fields used:
+ * Authentication: X-API-Key header
+ * Endpoint: https://api.apitube.io/v1/news/everything
+ * 
+ * Key fields used from response:
  * - id (integer): Unique article identifier
  * - href (string): Article URL
  * - title (string): Article headline
@@ -27,11 +32,6 @@
  * - source (object): { id, name, uri, favicon }
  * - sentiment (object): { overall: { score, polarity }, title: {...}, body: {...} }
  * - categories (array): Array of category objects with name field
- * 
- * BEFORE PRODUCTION:
- * 1. Verify API endpoint URL (currently: https://api.apitube.io/v1/news/everything)
- * 2. Confirm authentication method (currently: Bearer token)
- * 3. Test with actual APITube API key and Bitcoin/crypto news queries
  * 
  * ============================================================================
  */
@@ -142,7 +142,7 @@ class APITubeProvider {
    * 
    * Configuration notes:
    * 1. Endpoint: /v1/news/everything (general news endpoint)
-   * 2. Authentication: Bearer token in Authorization header
+   * 2. Authentication: X-API-Key header
    * 3. Pagination: Uses 'page' parameter with 'next_page' URL in response
    * 4. Query Parameters: Customize based on needs (language, categories, etc.)
    * 
@@ -181,10 +181,10 @@ class APITubeProvider {
    * @returns {Promise<{articles: Array, nextPage: string|null, totalResults: number}>}
    */
   async fetchFromUrl(url) {
-    // Authentication via Bearer token
+    // Authentication via X-API-Key header (per APITube documentation)
     const response = await fetch(url, {
       headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
+        'X-API-Key': this.apiKey,
         'Content-Type': 'application/json'
       }
     });
