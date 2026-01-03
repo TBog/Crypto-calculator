@@ -95,6 +95,11 @@ describe('Early Exit Optimization', () => {
         break;
       }
 
+      // Stop pagination if the current page is empty
+      if (pageData.articles.length === 0) {
+        break;
+      }
+
       nextPage = pageData.nextPage;
       pageCount++;
 
@@ -297,5 +302,34 @@ describe('Early Exit Optimization', () => {
     // Should add article-2 from the same page
     expect(result.newArticles).toHaveLength(1);
     expect(result.newArticles[0].article_id).toBe('article-2');
+  });
+
+  it('should stop pagination when an empty page is returned', async () => {
+    // Setup: Create pages with one returning empty
+    const pages = [
+      [
+        { article_id: 'article-1', title: 'Article 1' },
+        { article_id: 'article-2', title: 'Article 2' }
+      ],
+      [], // Empty page - should stop here
+      [
+        { article_id: 'article-3', title: 'Article 3' }
+      ]
+    ];
+
+    const provider = new MockNewsProvider(pages);
+    
+    // No known articles
+    const knownIds = new Set();
+
+    // Run aggregation
+    const result = await simulateAggregation(provider, knownIds);
+
+    // Should fetch only 2 pages (first page + empty page)
+    expect(result.pagesFetched).toBe(2);
+    // Should add only articles from first page
+    expect(result.newArticles).toHaveLength(2);
+    expect(result.newArticles[0].article_id).toBe('article-1');
+    expect(result.newArticles[1].article_id).toBe('article-2');
   });
 });

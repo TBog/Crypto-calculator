@@ -280,11 +280,33 @@ describe('APITubeProvider', () => {
     it('should throw error on API failure', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: false,
-        status: 403
+        status: 403,
+        statusText: 'Forbidden'
       });
       global.fetch = mockFetch;
 
       await expect(provider.fetchPage()).rejects.toThrow('APITube API request failed: 403');
+    });
+
+    it('should log error details when API returns error with JSON body', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: async () => ({
+          error: 'Invalid query parameter',
+          message: 'Query must not be empty'
+        })
+      });
+      global.fetch = mockFetch;
+
+      await expect(provider.fetchPage()).rejects.toThrow('Invalid query parameter');
+      expect(consoleSpy).toHaveBeenCalledWith('APITube API error details:', expect.objectContaining({
+        error: 'Invalid query parameter'
+      }));
+      
+      consoleSpy.mockRestore();
     });
 
     it('should include query parameter for Bitcoin/cryptocurrency filtering', async () => {

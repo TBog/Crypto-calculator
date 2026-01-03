@@ -190,7 +190,19 @@ class APITubeProvider {
     });
     
     if (!response.ok) {
-      throw new Error(`APITube API request failed: ${response.status}`);
+      // Log detailed error information from the API
+      let errorMessage = `APITube API request failed: ${response.status} ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        if (errorData.error || errorData.message) {
+          errorMessage += ` - ${errorData.error || errorData.message}`;
+          console.error('APITube API error details:', errorData);
+        }
+      } catch (e) {
+        // If we can't parse the error response, just use the status
+        console.error('APITube API error (no details available)');
+      }
+      throw new Error(errorMessage);
     }
     
     const data = await response.json();
