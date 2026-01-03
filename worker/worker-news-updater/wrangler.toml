@@ -31,7 +31,7 @@ id = "4933e1596e304b71b4aac4cae364b75f"
 # Configuration variables (optional - defaults are set in shared/constants.js)
 # Uncomment and modify these to override defaults:
 [vars]
-NEWS_PROVIDER = "apitube"       # News provider: 'newsdata' or 'apitube' (default: apitube)
+NEWS_PROVIDER = "apitube"       # News provider: 'newsdata' or 'apitube'
 # MAX_STORED_ARTICLES = 500      # Maximum articles to keep in KV (default: 500)
 # MAX_PAGES = 15                 # Maximum pages to fetch from API (default: 15)
 # ID_INDEX_TTL = 2592000         # ID index TTL in seconds (default: 30 days)
