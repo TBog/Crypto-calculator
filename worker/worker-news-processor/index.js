@@ -42,6 +42,27 @@ import {
 } from '../shared/constants.js';
 
 /**
+ * Helper function to convert pending list items to IDs
+ * Supports both old format (objects with id field) and new format (just IDs)
+ * @param {Array} pendingData - Pending list data from KV
+ * @returns {Array<string>} Array of article IDs
+ */
+function convertPendingListToIds(pendingData) {
+  if (!pendingData || !Array.isArray(pendingData)) {
+    return [];
+  }
+  
+  return pendingData.map(item => {
+    if (typeof item === 'string') {
+      return item;
+    } else if (item && item.id) {
+      return item.id;
+    }
+    return null;
+  }).filter(id => id !== null);
+}
+
+/**
  * HTMLRewriter handler to extract text content from HTML
  * Optimized to skip headers, footers, menus, and other non-content elements
  * to reduce Cloudflare neuron usage.
@@ -638,15 +659,7 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     try {
       const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
       if (pendingData && Array.isArray(pendingData)) {
-        // Support both old format (objects with id field) and new format (just IDs)
-        pendingList = pendingData.map(item => {
-          if (typeof item === 'string') {
-            return item;
-          } else if (item && item.id) {
-            return item.id;
-          }
-          return null;
-        }).filter(id => id !== null);
+        pendingList = convertPendingListToIds(pendingData);
       }
     } catch (error) {
       // No pending list
@@ -681,6 +694,18 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
         if (!nextArticle) {
           console.log(`Article not found in KV: ${nextArticleId}, removing from pending list`);
           // Remove from pending list and try next
+          const updatedPending = pendingList.filter(id => id !== nextArticleId);
+          await kv.put(
+            config.KV_KEY_PENDING,
+            JSON.stringify(updatedPending),
+            { expirationTtl: config.ID_INDEX_TTL }
+          );
+          return { processed: false, articleId: null, article: null, checkpoint };
+        }
+        
+        // Validate article has required fields
+        if (!nextArticle.id && !getArticleId(nextArticle)) {
+          console.log(`Article ${nextArticleId} missing ID field, removing from pending list`);
           const updatedPending = pendingList.filter(id => id !== nextArticleId);
           await kv.put(
             config.KV_KEY_PENDING,
@@ -902,15 +927,7 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       try {
         const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
         if (pendingData && Array.isArray(pendingData)) {
-          // Support both old format (objects with id field) and new format (just IDs)
-          const pendingIds = pendingData.map(item => {
-            if (typeof item === 'string') {
-              return item;
-            } else if (item && item.id) {
-              return item.id;
-            }
-            return null;
-          }).filter(id => id !== null);
+          const pendingIds = convertPendingListToIds(pendingData);
           
           if (pendingIds.includes(nextArticleId)) {
             const updatedPending = pendingIds.filter(id => id !== nextArticleId);
@@ -945,15 +962,7 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       try {
         const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
         if (pendingData && Array.isArray(pendingData)) {
-          // Support both old format (objects with id field) and new format (just IDs)
-          const pendingIds = pendingData.map(item => {
-            if (typeof item === 'string') {
-              return item;
-            } else if (item && item.id) {
-              return item.id;
-            }
-            return null;
-          }).filter(id => id !== null);
+          const pendingIds = convertPendingListToIds(pendingData);
           
           if (pendingIds.includes(nextArticleId)) {
             const updatedPending = pendingIds.filter(id => id !== nextArticleId);
@@ -986,15 +995,7 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
   try {
     const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
     if (pendingData && Array.isArray(pendingData)) {
-      // Support both old format (objects with id field) and new format (just IDs)
-      const pendingIds = pendingData.map(item => {
-        if (typeof item === 'string') {
-          return item;
-        } else if (item && item.id) {
-          return item.id;
-        }
-        return null;
-      }).filter(id => id !== null);
+      const pendingIds = convertPendingListToIds(pendingData);
       
       // Keep only IDs that are still in the pending list
       checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => pendingIds.includes(id));
