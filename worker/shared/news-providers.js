@@ -151,15 +151,15 @@ class APITubeProvider {
    */
   async fetchPage(nextPage = null) {
     // APITube endpoint for general news
-    // For crypto-specific news, you may want to filter by category or keywords
     const newsUrl = new URL('https://api.apitube.io/v1/news/everything');
     
-    // Query parameters - customize based on your needs
-    // Example: Filter by language, categories, keywords, etc.
+    // Query parameters for cryptocurrency news filtering
+    // Using APITube's specific topic and category filters for more precise results
+    // Reference: https://docs.apitube.io/platform/news-api/common-workflows/examples/topic-examples
+    // Reference: https://docs.apitube.io/platform/news-api/list-of-categories
     newsUrl.searchParams.set('language', 'en');
-    // Add crypto-specific filters for Bitcoin news
-    newsUrl.searchParams.set('q', 'bitcoin OR cryptocurrency');
-    // or use categories/topics if APITube provides crypto category
+    newsUrl.searchParams.set('topic.id', 'crypto_news');  // Cryptocurrency topic filter
+    newsUrl.searchParams.set('category.id', 'medtop:20001279');  // Cryptocurrency category (IPTC Media Topics)
     
     // Handle pagination
     if (nextPage) {

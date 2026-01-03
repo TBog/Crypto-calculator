@@ -309,7 +309,7 @@ describe('APITubeProvider', () => {
       consoleSpy.mockRestore();
     });
 
-    it('should include query parameter for Bitcoin/cryptocurrency filtering', async () => {
+    it('should include APITube-specific topic and category filters for cryptocurrency', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
@@ -323,7 +323,11 @@ describe('APITubeProvider', () => {
       await provider.fetchPage();
 
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('q=bitcoin+OR+cryptocurrency'),
+        expect.stringContaining('topic.id=crypto_news'),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('category.id=medtop%3A20001279'),
         expect.any(Object)
       );
       expect(mockFetch).toHaveBeenCalledWith(
