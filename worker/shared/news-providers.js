@@ -194,7 +194,20 @@ class APITubeProvider {
       let errorMessage = `APITube API request failed: ${response.status} ${response.statusText}`;
       try {
         const errorData = await response.json();
-        if (errorData.error || errorData.message) {
+        
+        // APITube error response structure:
+        // { "status": "not_ok", "errors": [{ "status": 400, "code": "ER0116", "message": "...", "links": {...} }] }
+        if (errorData.errors && Array.isArray(errorData.errors) && errorData.errors.length > 0) {
+          const firstError = errorData.errors[0];
+          const errorDetails = [];
+          if (firstError.code) errorDetails.push(`Code: ${firstError.code}`);
+          if (firstError.message) errorDetails.push(firstError.message);
+          if (firstError.links?.about) errorDetails.push(`Docs: ${firstError.links.about}`);
+          
+          errorMessage += ` - ${errorDetails.join(', ')}`;
+          console.error('APITube API error details:', errorData);
+        } else if (errorData.error || errorData.message) {
+          // Fallback for other error formats
           errorMessage += ` - ${errorData.error || errorData.message}`;
           console.error('APITube API error details:', errorData);
         }

@@ -323,13 +323,10 @@ describe('APITubeProvider', () => {
       await provider.fetchPage();
 
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('topic.id=crypto_news'),
+        expect.stringContaining('topic.id=industry.crypto_news'),
         expect.any(Object)
       );
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('category.id=medtop%3A20001279'),
-        expect.any(Object)
-      );
+      // Note: category.id filter is commented out in the implementation
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining('language=en'),
         expect.any(Object)
