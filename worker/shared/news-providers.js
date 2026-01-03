@@ -158,8 +158,8 @@ class APITubeProvider {
     // Reference: https://docs.apitube.io/platform/news-api/common-workflows/examples/topic-examples
     // Reference: https://docs.apitube.io/platform/news-api/list-of-categories
     newsUrl.searchParams.set('language', 'en');
-    newsUrl.searchParams.set('topic.id', 'crypto_news');  // Cryptocurrency topic filter
-    newsUrl.searchParams.set('category.id', 'medtop:20001279');  // Cryptocurrency category (IPTC Media Topics)
+    newsUrl.searchParams.set('topic.id', 'industry.crypto_news');  // Cryptocurrency topic filter
+    //newsUrl.searchParams.set('category.id', 'medtop:20001279');  // Cryptocurrency category (IPTC Media Topics)
     
     // Handle pagination
     if (nextPage) {
