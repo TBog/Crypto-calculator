@@ -309,6 +309,46 @@ describe('APITubeProvider', () => {
       consoleSpy.mockRestore();
     });
 
+    it('should parse APITube errors array format with code and message', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: async () => ({
+          status: 'not_ok',
+          code: '',
+          request_id: '0065c09e-b50d-41b3-ad11-6e796985f41f',
+          errors: [{
+            status: 400,
+            code: 'ER0116',
+            message: 'Invalid topic.id value',
+            links: {
+              about: 'https://docs.apitube.io/platform/news-api/parameters#topics'
+            },
+            timestamp: '2026-01-03T03:09:09Z'
+          }],
+          user_input: null
+        })
+      });
+      global.fetch = mockFetch;
+
+      await expect(provider.fetchPage()).rejects.toThrow(
+        'APITube API request failed: 400 Bad Request - Code: ER0116, Invalid topic.id value, Docs: https://docs.apitube.io/platform/news-api/parameters#topics'
+      );
+      expect(consoleSpy).toHaveBeenCalledWith('APITube API error details:', expect.objectContaining({
+        status: 'not_ok',
+        errors: expect.arrayContaining([
+          expect.objectContaining({
+            code: 'ER0116',
+            message: 'Invalid topic.id value'
+          })
+        ])
+      }));
+      
+      consoleSpy.mockRestore();
+    });
+
     it('should include APITube-specific topic and category filters for cryptocurrency', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
@@ -323,13 +363,10 @@ describe('APITubeProvider', () => {
       await provider.fetchPage();
 
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('topic.id=crypto_news'),
+        expect.stringContaining('topic.id=industry.crypto_news'),
         expect.any(Object)
       );
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('category.id=medtop%3A20001279'),
-        expect.any(Object)
-      );
+      // Note: category.id filter is commented out in the implementation
       expect(mockFetch).toHaveBeenCalledWith(
         expect.stringContaining('language=en'),
         expect.any(Object)
