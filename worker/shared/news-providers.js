@@ -157,8 +157,8 @@ class APITubeProvider {
     // Query parameters - customize based on your needs
     // Example: Filter by language, categories, keywords, etc.
     newsUrl.searchParams.set('language', 'en');
-    // Add crypto-specific filters if needed:
-    // newsUrl.searchParams.set('q', 'bitcoin OR cryptocurrency');
+    // Add crypto-specific filters for Bitcoin news
+    newsUrl.searchParams.set('q', 'bitcoin OR cryptocurrency');
     // or use categories/topics if APITube provides crypto category
     
     // Handle pagination

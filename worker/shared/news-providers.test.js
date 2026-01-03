@@ -286,6 +286,29 @@ describe('APITubeProvider', () => {
 
       await expect(provider.fetchPage()).rejects.toThrow('APITube API request failed: 403');
     });
+
+    it('should include query parameter for Bitcoin/cryptocurrency filtering', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: [],
+          meta: { total: 0 },
+          links: { next_page: null }
+        })
+      });
+      global.fetch = mockFetch;
+
+      await provider.fetchPage();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('q=bitcoin+OR+cryptocurrency'),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('language=en'),
+        expect.any(Object)
+      );
+    });
   });
 });
 
