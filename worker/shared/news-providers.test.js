@@ -285,7 +285,7 @@ describe('APITubeProvider', () => {
       });
       global.fetch = mockFetch;
 
-      await expect(provider.fetchPage()).rejects.toThrow('APITube API request failed: 403');
+      await expect(provider.fetchPage()).rejects.toThrow('APITube API request failed: 403 Forbidden');
     });
 
     it('should log error details when API returns error with JSON body', async () => {
