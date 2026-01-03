@@ -301,7 +301,7 @@ describe('APITubeProvider', () => {
       });
       global.fetch = mockFetch;
 
-      await expect(provider.fetchPage()).rejects.toThrow('Invalid query parameter');
+      await expect(provider.fetchPage()).rejects.toThrow('APITube API request failed: 400 Bad Request - Invalid query parameter');
       expect(consoleSpy).toHaveBeenCalledWith('APITube API error details:', expect.objectContaining({
         error: 'Invalid query parameter'
       }));
