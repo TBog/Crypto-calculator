@@ -52,14 +52,11 @@ function convertPendingListToIds(pendingData) {
     return [];
   }
   
-  return pendingData.map(item => {
-    if (typeof item === 'string') {
-      return item;
-    } else if (item && item.id) {
-      return item.id;
-    }
-    return null;
-  }).filter(id => id !== null);
+  return pendingData.filter(item => {
+    return typeof item === 'string' || (item && item.id);
+  }).map(item => {
+    return typeof item === 'string' ? item : item.id;
+  });
 }
 
 /**
@@ -997,12 +994,16 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     if (pendingData && Array.isArray(pendingData)) {
       const pendingIds = convertPendingListToIds(pendingData);
       
+      // Convert to Set for O(1) lookups instead of O(n) with includes()
+      const pendingIdSet = new Set(pendingIds);
+      const pendingProcessingSet = new Set(checkpoint.pendingProcessingIds);
+      
       // Keep only IDs that are still in the pending list
-      checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => pendingIds.includes(id));
+      checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => pendingIdSet.has(id));
       
       // Add current article if it's from pending list
-      if (checkpoint.currentArticleId && pendingIds.includes(checkpoint.currentArticleId)) {
-        if (!checkpoint.pendingProcessingIds.includes(checkpoint.currentArticleId)) {
+      if (checkpoint.currentArticleId && pendingIdSet.has(checkpoint.currentArticleId)) {
+        if (!pendingProcessingSet.has(checkpoint.currentArticleId)) {
           checkpoint.pendingProcessingIds.push(checkpoint.currentArticleId);
         }
       }
