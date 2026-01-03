@@ -211,8 +211,11 @@ async function migrateLegacyData(env, config) {
 
 /**
  * Add new articles to the pending list for processing
- * The updater only writes to the pending list, not directly to article storage
- * The processor will handle writing articles to KV after processing
+ * 
+ * NEW BEHAVIOR: The updater now writes articles directly to KV storage,
+ * making them immediately visible on the frontend even while processing.
+ * The pending list only contains article IDs (not full article objects).
+ * 
  * @param {Object} kv - KV storage interface (allows mocking for tests)
  * @param {Array} newArticles - New articles to be processed
  * @param {Object} config - Configuration values
@@ -229,29 +232,31 @@ async function addToPendingList(kv, newArticles, config) {
     return 0;
   }
   
-  // Read existing pending list
+  // Read existing pending list (now contains only IDs)
   let pendingList = [];
   try {
     const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
     if (pendingData && Array.isArray(pendingData)) {
       pendingList = pendingData;
-      console.log(`Found ${pendingList.length} articles in pending list`);
+      console.log(`Found ${pendingList.length} article IDs in pending list`);
     }
   } catch (error) {
     console.log('No existing pending list found, starting fresh');
   }
   
   // Read ID index to check which articles already exist
-  let existingArticleIds = new Set();
+  let idIndex = [];
   try {
-    const idIndex = await kv.get(config.KV_KEY_IDS, { type: 'json' });
-    if (idIndex && Array.isArray(idIndex)) {
-      existingArticleIds = new Set(idIndex);
-      console.log(`Found ${existingArticleIds.size} articles in ID index`);
+    const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
+    if (idIndexData && Array.isArray(idIndexData)) {
+      idIndex = idIndexData;
+      console.log(`Found ${idIndex.length} articles in ID index`);
     }
   } catch (error) {
     console.log('No ID index found');
   }
+  
+  const existingArticleIds = new Set(idIndex);
   
   // Create a map of article ID to article data for new articles
   const articleMap = new Map();
@@ -262,25 +267,67 @@ async function addToPendingList(kv, newArticles, config) {
     }
   });
   
-  // Merge: Add new articles that aren't already in pending list or ID index
-  const pendingIdSet = new Set(pendingList.map(item => item.id));
+  // Determine which articles are truly new
+  const pendingIdSet = new Set(pendingList);
   const articlesToAdd = [];
   
   for (const id of newArticleIds) {
     if (!pendingIdSet.has(id) && !existingArticleIds.has(id)) {
-      articlesToAdd.push({
-        id,
-        article: articleMap.get(id),
-        addedAt: Date.now()
-      });
+      articlesToAdd.push(id);
     }
   }
   
-  // Add new articles to the beginning of the pending list (latest first)
+  if (articlesToAdd.length === 0) {
+    console.log('No new articles to add (all already exist)');
+    return pendingList.length;
+  }
+  
+  // Write articles directly to KV storage (makes them visible immediately)
+  console.log(`Writing ${articlesToAdd.length} articles to KV storage...`);
+  const writePromises = articlesToAdd.map(id => {
+    const article = articleMap.get(id);
+    const articleKey = `article:${id}`;
+    return kv.put(articleKey, JSON.stringify(article), {
+      expirationTtl: config.ID_INDEX_TTL
+    });
+  });
+  
+  const writeResults = await Promise.allSettled(writePromises);
+  const failedWrites = writeResults.filter(r => r.status === 'rejected');
+  
+  if (failedWrites.length > 0) {
+    console.error(`✗ Failed to write ${failedWrites.length} articles to KV`);
+    throw new Error(`KV put failed for ${failedWrites.length} articles`);
+  }
+  
+  console.log(`✓ Wrote ${articlesToAdd.length} articles to KV storage`);
+  
+  // Update ID index with new articles (prepend to maintain newest-first order)
+  const updatedIdIndex = [...articlesToAdd, ...idIndex];
+  
+  // Limit ID index size
+  const maxStoredArticles = config.MAX_STORED_ARTICLES || 500;
+  const trimmedIdIndex = updatedIdIndex.slice(0, maxStoredArticles);
+  
+  try {
+    await kv.put(
+      config.KV_KEY_IDS,
+      JSON.stringify(trimmedIdIndex),
+      {
+        expirationTtl: config.ID_INDEX_TTL
+      }
+    );
+    console.log(`✓ Updated ID index with ${trimmedIdIndex.length} articles`);
+  } catch (error) {
+    console.error(`✗ Failed to write ID index to KV:`, error.message);
+    throw new Error(`KV put failed for ID index: ${error.message}`);
+  }
+  
+  // Update pending list with new article IDs (prepend to maintain newest-first order)
   const mergedPendingList = [...articlesToAdd, ...pendingList];
   
   // Trim pending list based on ID index (remove articles that are already in the index)
-  let trimmedPendingList = mergedPendingList.filter(item => !existingArticleIds.has(item.id));
+  let trimmedPendingList = mergedPendingList.filter(id => !existingArticleIds.has(id));
   
   // Limit pending list size to prevent unbounded growth
   const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
@@ -289,10 +336,9 @@ async function addToPendingList(kv, newArticles, config) {
     trimmedPendingList = trimmedPendingList.slice(0, maxPendingSize);
   }
   
-  console.log(`Adding ${articlesToAdd.length} new articles to pending list`);
-  console.log(`Trimmed ${mergedPendingList.length - trimmedPendingList.length} articles already in index`);
+  console.log(`Adding ${articlesToAdd.length} new article IDs to pending list`);
   
-  // Write updated pending list to KV
+  // Write updated pending list to KV (now only contains IDs)
   try {
     await kv.put(
       config.KV_KEY_PENDING,
@@ -301,7 +347,7 @@ async function addToPendingList(kv, newArticles, config) {
         expirationTtl: config.ID_INDEX_TTL
       }
     );
-    console.log(`✓ Updated pending list with ${trimmedPendingList.length} total articles (${articlesToAdd.length} new)`);
+    console.log(`✓ Updated pending list with ${trimmedPendingList.length} total article IDs (${articlesToAdd.length} new)`);
   } catch (error) {
     console.error(`✗ Failed to write pending list to KV:`, error.message);
     throw new Error(`KV put failed for pending list: ${error.message}`);
@@ -350,7 +396,10 @@ async function handleScheduled(event, env, ctx) {
       if (pendingData && Array.isArray(pendingData)) {
         const beforeSize = knownIds.size;
         pendingData.forEach(item => {
-          if (item && item.id) {
+          // Support both old format (objects with id field) and new format (just IDs)
+          if (typeof item === 'string') {
+            knownIds.add(item);
+          } else if (item && item.id) {
             knownIds.add(item.id);
           }
         });
@@ -373,6 +422,14 @@ async function handleScheduled(event, env, ctx) {
           console.log('Loaded 1 article ID from checkpoint (current)');
         } else {
           console.log('No current article in checkpoint');
+        }
+        
+        // Add pending processing article IDs (new field)
+        if (checkpoint.pendingProcessingIds && Array.isArray(checkpoint.pendingProcessingIds)) {
+          const beforeSize = knownIds.size;
+          checkpoint.pendingProcessingIds.forEach(id => knownIds.add(id));
+          const addedCount = knownIds.size - beforeSize;
+          console.log(`Loaded ${addedCount} article IDs from checkpoint (pending processing)`);
         }
       } else {
         console.log('No checkpoint found');
