@@ -129,8 +129,9 @@ describe('Checkpoint-based Article Processing', () => {
       
       const pendingList = await mockKV.get(config.KV_KEY_PENDING, { type: 'json' });
       expect(pendingList).toHaveLength(2);
-      expect(pendingList[0].id).toBe('article-1');
-      expect(pendingList[1].id).toBe('article-2');
+      // Pending list now only contains IDs (not objects)
+      expect(pendingList[0]).toBe('article-1');
+      expect(pendingList[1]).toBe('article-2');
     });
 
     it('should not add duplicate articles', async () => {
@@ -256,16 +257,13 @@ describe('Checkpoint-based Article Processing', () => {
     });
 
     it('should process try-later articles when pending list is empty', async () => {
-      // Setup checkpoint with try-later article
+      // Setup article in KV
+      const article = { id: 'article-1', title: 'Test 1', needsSentiment: true, needsSummary: true };
+      await mockKV.put('article:article-1', JSON.stringify(article));
+      
+      // Setup checkpoint with try-later article (now only contains IDs)
       await mockKV.put(config.KV_KEY_CHECKPOINT, JSON.stringify({
-        tryLater: [
-          {
-            id: 'article-1',
-            article: { id: 'article-1', title: 'Test 1', needsSentiment: true, needsSummary: true },
-            failedAt: Date.now(),
-            reason: 'test'
-          }
-        ],
+        tryLater: ['article-1'],
         currentArticleId: null,
         currentArticle: null
       }));
