@@ -280,11 +280,60 @@ describe('APITubeProvider', () => {
     it('should throw error on API failure', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: false,
-        status: 403
+        status: 403,
+        statusText: 'Forbidden'
       });
       global.fetch = mockFetch;
 
-      await expect(provider.fetchPage()).rejects.toThrow('APITube API request failed: 403');
+      await expect(provider.fetchPage()).rejects.toThrow('APITube API request failed: 403 Forbidden');
+    });
+
+    it('should log error details when API returns error with JSON body', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: async () => ({
+          error: 'Invalid query parameter',
+          message: 'Query must not be empty'
+        })
+      });
+      global.fetch = mockFetch;
+
+      await expect(provider.fetchPage()).rejects.toThrow('APITube API request failed: 400 Bad Request - Invalid query parameter');
+      expect(consoleSpy).toHaveBeenCalledWith('APITube API error details:', expect.objectContaining({
+        error: 'Invalid query parameter'
+      }));
+      
+      consoleSpy.mockRestore();
+    });
+
+    it('should include APITube-specific topic and category filters for cryptocurrency', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: [],
+          meta: { total: 0 },
+          links: { next_page: null }
+        })
+      });
+      global.fetch = mockFetch;
+
+      await provider.fetchPage();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('topic.id=crypto_news'),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('category.id=medtop%3A20001279'),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('language=en'),
+        expect.any(Object)
+      );
     });
   });
 });

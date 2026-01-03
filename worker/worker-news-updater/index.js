@@ -89,6 +89,12 @@ async function aggregateArticles(env, knownIds, config) {
       
       console.log(`Page ${pageCount + 1}: ${pageData.articles.length} total, ${newArticles.length} new articles so far`);
       
+      // Stop pagination if the current page is empty
+      if (pageData.articles.length === 0) {
+        console.log('Stopping pagination: empty page returned');
+        break;
+      }
+      
       nextPage = pageData.nextPage;
       pageCount++;
       

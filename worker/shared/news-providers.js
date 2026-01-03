@@ -151,15 +151,15 @@ class APITubeProvider {
    */
   async fetchPage(nextPage = null) {
     // APITube endpoint for general news
-    // For crypto-specific news, you may want to filter by category or keywords
     const newsUrl = new URL('https://api.apitube.io/v1/news/everything');
     
-    // Query parameters - customize based on your needs
-    // Example: Filter by language, categories, keywords, etc.
+    // Query parameters for cryptocurrency news filtering
+    // Using APITube's specific topic and category filters for more precise results
+    // Reference: https://docs.apitube.io/platform/news-api/common-workflows/examples/topic-examples
+    // Reference: https://docs.apitube.io/platform/news-api/list-of-categories
     newsUrl.searchParams.set('language', 'en');
-    // Add crypto-specific filters if needed:
-    // newsUrl.searchParams.set('q', 'bitcoin OR cryptocurrency');
-    // or use categories/topics if APITube provides crypto category
+    newsUrl.searchParams.set('topic.id', 'crypto_news');  // Cryptocurrency topic filter
+    newsUrl.searchParams.set('category.id', 'medtop:20001279');  // Cryptocurrency category (IPTC Media Topics)
     
     // Handle pagination
     if (nextPage) {
@@ -190,7 +190,19 @@ class APITubeProvider {
     });
     
     if (!response.ok) {
-      throw new Error(`APITube API request failed: ${response.status}`);
+      // Log detailed error information from the API
+      let errorMessage = `APITube API request failed: ${response.status} ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        if (errorData.error || errorData.message) {
+          errorMessage += ` - ${errorData.error || errorData.message}`;
+          console.error('APITube API error details:', errorData);
+        }
+      } catch (e) {
+        // If we can't parse the error response, just use the status
+        console.error('APITube API error (no details available)');
+      }
+      throw new Error(errorMessage);
     }
     
     const data = await response.json();
