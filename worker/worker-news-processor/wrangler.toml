@@ -38,7 +38,7 @@ id = "4933e1596e304b71b4aac4cae364b75f"
 # Configuration variables (optional - defaults are set in shared/constants.js)
 # Uncomment and modify these to override defaults:
 [vars]
-MAX_ARTICLES_PER_RUN = 1         # Articles to process per run (must be 1 for free tier - HTML rewriter is slow)
+MAX_ARTICLES_PER_RUN = 1         # Articles to process per run (must be 1 for free tier - CPU time limit is 10ms)
 # MAX_CONTENT_CHARS = 10240      # Max chars to extract from webpage (default: 10KB)
 MAX_CONTENT_FETCH_ATTEMPTS = 2   # Max retry attempts for content fetch (default: 5)
 

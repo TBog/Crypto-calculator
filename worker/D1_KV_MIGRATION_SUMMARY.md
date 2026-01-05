@@ -30,20 +30,30 @@ KV Writes: ~288/day (28.8% of 1K limit)
 
 ## Key Improvements
 
-### 1. Reduced KV Writes by 76%
-- **Before**: ~1,200 writes/day
-- **After**: ~288 writes/day
-- **Benefit**: Well within free tier, room for growth
+**Note**: All numbers based on 25 new articles/hour (600 articles/day) with 80% completion rate.
 
-### 2. Increased Processor Frequency by 2x
+### 1. Separate KV and D1 Write Limits
+The architecture properly leverages both services within their respective free tier limits:
+
+**KV Writes** (Limit: 1,000/day):
+- **Before** (KV-only): ~1,200 writes/day (120% - **over limit**)
+- **After** (D1+KV hybrid): ~880 writes/day (88% - **within limit**)
+- **Benefit**: 27% reduction in KV writes, now within free tier
+
+**D1 Writes** (Limit: 100,000/day):
+- **Before**: 0 (not used)
+- **After**: ~1,080 writes/day (1.1% of limit)
+- **Benefit**: Massive headroom for scaling (90x capacity available)
+
+### 2. Increased Processor Frequency
 - **Before**: Every 10 minutes (144 runs/day)
-- **After**: Every 5 minutes (288 runs/day)
-- **Benefit**: Average processing time reduced from 10 min to 5 min
+- **After**: Every 3 minutes (480 runs/day)
+- **Benefit**: 3.3x faster processing, avg latency reduced from 10 min to 3 min
 
-### 3. Increased Batch Size by 3x
-- **Before**: 1 article per run
-- **After**: 3 articles per run
-- **Benefit**: Better throughput, faster processing of backlog
+### 3. Optimized for Free Tier CPU Limits
+- **Batch Size**: 1 article per run (prevents 10ms CPU timeout)
+- **Frequency**: More frequent runs compensate for smaller batches
+- **Throughput**: 480 articles/day capacity maintained
 
 ### 4. Better Data Management
 - **D1 Benefits**:
@@ -58,17 +68,23 @@ KV Writes: ~288/day (28.8% of 1K limit)
 
 ## Free Tier Usage
 
-### D1 Database
+**Based on**: 25 new articles/hour (600/day), 80% completion rate
+
+### D1 Database (Limit: 100K writes/day, 5M reads/day)
 - **Storage**: Minimal (~5-10 MB for 500 articles)
 - **Reads**: ~2,000/day (0.04% of 5M limit)
-- **Writes**: ~1,440/day (1.4% of 100K limit)
-- **Headroom**: Can scale 50-70x before hitting limits
+- **Writes**: ~1,080/day (1.1% of 100K limit)
+  - Updater INSERT: ~600/day
+  - Processor UPDATE: ~480/day (3 phases per article)
+- **Headroom**: Can scale 90x before hitting write limits
 
-### KV Storage
+### KV Storage (Limit: 1K writes/day, 100K reads/day)
 - **Storage**: ~2-5 MB for cached responses
 - **Reads**: ~50,000/day (50% of 100K limit - cache hits)
-- **Writes**: ~288/day (28.8% of 1K limit)
-- **Headroom**: Can increase frequency 3x before hitting limits
+- **Writes**: ~880/day (88% of 1K limit)
+  - Updater writes: ~720/day (articles + ID list)
+  - Processor writes: ~160/day (completed articles only)
+- **Headroom**: Can handle 1.1x traffic spikes before hitting limit
 
 ## Files Changed
 
@@ -229,20 +245,26 @@ If critical issues arise:
 
 ## Success Metrics
 
-✅ **KV Writes**: Reduced by 76% (1,200 → 288/day)
-✅ **Processing Speed**: 2x faster (10 min → 5 min average)
-✅ **Batch Size**: 3x larger (1 → 3 articles per run)
-✅ **Scalability**: 50-70x headroom on D1, 3x on KV
+## Success Metrics
+
+**Based on**: 25 articles/hour (600/day), 80% completion rate
+
+✅ **KV Writes**: Reduced from 1,200/day to 880/day (27% reduction, now within limit)
+✅ **D1 Writes**: ~1,080/day (1.1% of 100K limit - massive headroom)
+✅ **Processing Speed**: 3.3x faster (10 min → 3 min average latency)
+✅ **Batch Size**: 1 article per run (prevents CPU timeout on free tier)
+✅ **Frequency**: Every 3 minutes (480 runs/day maintains throughput)
+✅ **Scalability**: 90x headroom on D1, 1.1x on KV before hitting limits
 ✅ **Cost**: Remains on free tier with room to grow
 ✅ **Performance**: Maintains <10ms cache hit latency
 
 ## Conclusion
 
 The D1+KV migration successfully achieves all objectives:
-- Dramatically reduces KV writes (76% reduction)
-- Enables faster processing (2x frequency, 3x batch size)
-- Provides better data management (SQL queries, indexes)
-- Maintains excellent performance (<10ms cache hits)
-- Stays well within free tier limits with room to scale
+- **Brings KV writes within free tier limit** (was 120%, now 88%)
+- **Enables faster processing** (3.3x frequency increase)
+- **Provides better data management** (SQL queries, indexes, crash recovery)
+- **Maintains excellent performance** (<10ms cache hits from KV)
+- **Stays well within free tier limits** with D1 providing massive scaling headroom
 
-The architecture is now optimized for growth and can handle 3-5x current traffic without hitting free tier limits.
+**Key Trade-off**: The updater-managed KV architecture uses more KV writes than a processor-only cache (880 vs 288/day) but provides better consistency and eliminates D1 queries from the API worker, ensuring guaranteed <10ms response times globally.

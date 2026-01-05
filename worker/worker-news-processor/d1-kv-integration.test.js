@@ -54,8 +54,23 @@ describe('News Processor - D1+KV Integration', () => {
               const articleId = query._params[query._params.length - 1];
               const article = articles.get(articleId);
               if (article) {
-                // Simple update - merge params into article
-                Object.assign(article, { updatedAt: Date.now() });
+                // Parse SET clause and update fields
+                // The query format is: UPDATE articles SET field1 = ?, field2 = ?, ... WHERE id = ?
+                // Parameters are in order: value1, value2, ..., articleId
+                const setMatch = sql.match(/SET\s+(.+?)\s+WHERE/i);
+                if (setMatch) {
+                  const setClause = setMatch[1];
+                  const fields = setClause.split(',').map(f => f.trim().split('=')[0].trim());
+                  
+                  // Update article with new values (params exclude the last one which is articleId)
+                  fields.forEach((field, index) => {
+                    if (index < query._params.length - 1) {
+                      const value = query._params[index];
+                      article[field] = value;
+                    }
+                  });
+                }
+                article.updatedAt = Date.now();
                 return { meta: { changes: 1 } };
               }
               return { meta: { changes: 0 } };
@@ -277,14 +292,14 @@ describe('News Processor - D1+KV Integration', () => {
       
       // Simulate final attempt - give up
       await updateArticle(mockDB, 'failing-article', {
-        contentTimeout: undefined,
+        contentTimeout: 0,
         summaryError: 'fetch_failed (max retries)',
         needsSummary: false // Give up
       });
       
       article = await getArticleById(mockDB, 'failing-article');
       expect(article.needsSummary).toBe(0);
-      expect(article.contentTimeout).toBeFalsy();
+      expect(article.contentTimeout).toBe(0);
     });
   });
 

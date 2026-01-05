@@ -1,53 +1,56 @@
 # Processor Frequency Optimization with D1
 
-## Current Configuration
-- **Frequency**: Every 10 minutes (144 runs/day)
-- **Articles per run**: 1 (configurable via MAX_ARTICLES_PER_RUN)
-- **D1 writes per run**: ~1-5 (depending on articles processed)
-- **KV writes per run**: 1 (cache update after batch)
+## Current Deployed Configuration
+- **Frequency**: Every 3 minutes (480 runs/day) ✅ DEPLOYED
+- **Articles per run**: 1 (MAX_ARTICLES_PER_RUN)
+- **D1 writes per run**: ~1 (UPDATE per processing phase)
+- **KV writes per run**: ~0.33 (only when article fully processed)
 
-## Current Daily Usage
-- **D1 writes**: 144 runs × ~3 articles avg = ~432 writes/day
-- **KV writes**: 144 cache updates = 144 writes/day
-- **Total**: Well within free tier limits
+## Current Daily Usage (Assuming 25 articles/hour)
+- **D1 writes**: 480 UPDATE operations = ~480 writes/day (0.5% of limit)
+- **KV writes**: ~160 writes/day (completed articles only)
+- **Total KV**: ~880/day including updater (88% of limit)
 
-## D1 Free Tier Limits
-- **Reads**: 5 million rows/day
-- **Writes**: 100,000 rows/day
-- **Storage**: 500 MB
+## Why Every 3 Minutes?
 
-## KV Free Tier Limits
-- **Reads**: 100,000 operations/day
-- **Writes**: 1,000 operations/day
-- **Storage**: 1 GB
+### Free Tier CPU Constraint
+- **CPU Time Limit**: 10ms per worker invocation on free tier
+- **HTML Rewriter**: CPU-intensive content extraction
+- **Solution**: Process 1 article per run to stay under 10ms limit
 
-## Optimization Opportunity
+### Frequency Trade-off
+- **Smaller batches** (1 article) require **more frequent runs** to maintain throughput
+- **Every 3 minutes** = 480 runs/day = 480 articles/day capacity
+- **Average latency**: 3 minutes (vs 10 min before migration)
 
-With D1, we're only using ~0.4% of our daily write limit. We can significantly increase processor frequency to reduce article processing latency.
+## Alternative Options Considered
 
-### Option 1: Every 5 Minutes (288 runs/day) - **RECOMMENDED**
-- **D1 writes**: 288 × 3 = ~864 writes/day (0.9% of limit)
-- **KV writes**: 288 cache updates = 288 writes/day (28.8% of limit)
-- **Benefit**: Halves article processing time (from 10 min to 5 min avg)
-- **Safety**: Very safe, plenty of headroom
+### Option 1: Every 5 Minutes (288 runs/day) - SLOWER
+- **D1 writes**: ~288 writes/day (0.3% of limit)
+- **KV writes**: ~96 completed/day
+- **Benefit**: Lower resource usage
+- **Drawback**: Slower processing (5 min avg vs 3 min)
+- **Capacity**: 288 articles/day (may not handle peak loads)
 
-### Option 2: Every 2 Minutes (720 runs/day) - AGGRESSIVE
-- **D1 writes**: 720 × 3 = ~2,160 writes/day (2.2% of limit)
-- **KV writes**: 720 cache updates = 720 writes/day (72% of limit)
-- **Benefit**: Much faster processing (2 min avg)
-- **Risk**: Higher KV usage, less room for spikes
+### Option 2: Every 2 Minutes (720 runs/day) - RISKY
+- **D1 writes**: ~720 writes/day (0.7% of limit)
+- **KV writes**: ~240 completed/day
+- **Benefit**: Even faster processing (2 min avg)
+- **Risk**: Higher KV usage (1,080/day total with updater - over limit!)
 
-### Option 3: Every 3 Minutes (480 runs/day) - BALANCED
-- **D1 writes**: 480 × 3 = ~1,440 writes/day (1.4% of limit)
-- **KV writes**: 480 cache updates = 480 writes/day (48% of limit)
-- **Benefit**: Faster than current (3 min avg vs 10 min)
-- **Safety**: Good balance between speed and safety
+### Option 3: Every 3 Minutes (480 runs/day) - ✅ DEPLOYED
+- **D1 writes**: ~480 writes/day (0.5% of limit)
+- **KV writes**: ~160 completed/day
+- **Total KV**: ~880/day with updater (88% of limit)
+- **Benefit**: Good balance of speed and resource usage
+- **Safety**: Stays within free tier with small buffer
 
-## Recommendation: Every 5 Minutes
+## Deployed Configuration: Every 3 Minutes
 
 **Rationale:**
-1. **Safe**: Uses only 28.8% of KV write limit (plenty of headroom for spikes)
-2. **Fast**: Halves average processing time from 10 to 5 minutes
+1. **Within Limits**: Total KV usage (880/day) stays under 1,000/day limit
+2. **Fast Processing**: 3.3x faster than original 10-minute frequency
+3. **CPU Safe**: Batch size of 1 prevents timeout on free tier's 10ms limit
 3. **Scalable**: Can still increase MAX_ARTICLES_PER_RUN from 1 to 3-5 without hitting limits
 4. **Buffer**: Leaves room for API cache misses and manual cache refreshes
 

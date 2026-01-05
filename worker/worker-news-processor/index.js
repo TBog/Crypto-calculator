@@ -522,12 +522,18 @@ async function processArticle(db, env, article, config) {
           
           // Update article in D1 with extracted content or error
           const articleId = getArticleId(article);
-          await updateArticleInD1(db, articleId, {
+          const articleUpdates = {
             contentTimeout: updates.contentTimeout,
             summaryError: updates.summaryError,
-            needsSummary: updates.needsSummary !== undefined ? updates.needsSummary : undefined,
             processedAt: updates.processedAt
-          });
+          };
+          
+          // Only update needsSummary if this run explicitly set it
+          if (updates.needsSummary !== undefined) {
+            articleUpdates.needsSummary = updates.needsSummary;
+          }
+          
+          await updateArticleInD1(db, articleId, articleUpdates);
         }
         return updates;
       }
@@ -608,7 +614,6 @@ async function processArticle(db, env, article, config) {
         summaryError: 'no_link',
         processedAt: updates.processedAt
       });
-    }
     }
   }
   
@@ -711,6 +716,12 @@ async function processBatchFromD1(db, env, config) {
       
     } catch (error) {
       console.error(`Failed to process article ${articleId}:`, error.message);
+      // Clear checkpoint on failure to avoid getting stuck on this article
+      try {
+        await updateCheckpoint(db, null);
+      } catch (checkpointError) {
+        console.error('Failed to clear checkpoint after processing error:', checkpointError.message);
+      }
       // Continue with next article - don't fail entire batch
     }
   }
@@ -987,7 +998,7 @@ export {
   processArticle, 
   articleNeedsProcessing, 
   articleIsComplete, 
-  updateKVCache 
+  updateKVWithProcessedArticles 
 };
 
 export default {

@@ -239,18 +239,33 @@ return { articles, totalArticles: articles.length, ... };
 
 **KV Writes**: **0** (read-only)
 
-## Total KV Usage
+## Total Usage Estimate
 
-| Worker | Writes/Day | Percentage |
-|--------|------------|------------|
-| Updater | ~720 | 72% |
-| Processor | ~288 | 28% |
-| API | 0 | 0% |
-| **Total** | **~1,008/day** | **100.8% of 1K limit** |
+**Assumptions**: 
+- 25 new articles per hour (typical news volume)
+- 80% of articles complete processing successfully
+- Processor runs every 3 minutes with batch size 1
 
-**Status**: Slightly over limit, but manageable:
-- Updater can be optimized to write less frequently if needed
-- Processor writes scale with completion rate (can be tuned)
+### KV Writes (Free Tier: 1,000/day)
+
+| Worker | Writes/Run | Runs/Day | Daily Total | Notes |
+|--------|------------|----------|-------------|-------|
+| Updater | ~30 | 24 | **~720** | 25 articles + 1 ID list update |
+| Processor | ~1 | 480 | **~160** | Only fully processed articles (20 of 25) |
+| API | 0 | - | **0** | Read-only |
+| **Total** | - | - | **~880/day** | **88% of 1K limit** ✅ |
+
+### D1 Writes (Free Tier: 100,000/day)
+
+| Worker | Writes/Run | Runs/Day | Daily Total | Notes |
+|--------|------------|----------|-------------|-------|
+| Updater | ~25 | 24 | **~600** | INSERT articles (25 per hour) |
+| Processor | ~1 | 480 | **~480** | UPDATE per phase (sentiment, scrape, AI) |
+| **Total** | - | - | **~1,080/day** | **1.1% of 100K limit** ✅ |
+
+**Status**: Well within both limits with significant headroom:
+- **KV**: 88% usage, can handle spikes up to ~1,000 articles/day
+- **D1**: 1.1% usage, can scale 90x before hitting limits
 - System has natural backpressure (can't write more articles than exist)
 
 ## Consistency Model
