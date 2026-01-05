@@ -61,8 +61,8 @@ The D1 database must be created before deploying workers. Follow these steps:
    # Development database
    wrangler d1 create crypto-news-db
    
-   # Production database (optional)
-   wrangler d1 create crypto-news-db --env production
+   # Production database (optional, use a separate name)
+   wrangler d1 create crypto-news-db-prod
    ```
 
 2. **Update database IDs** in the following files:
