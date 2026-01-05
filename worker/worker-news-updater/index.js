@@ -156,37 +156,167 @@ async function markArticlesForProcessing(articles) {
 }
 
 /**
- * Add new articles to D1 database
+ * Add new articles to both KV and D1
  * 
- * D1-BASED BEHAVIOR: The updater writes articles directly to D1 database,
- * making them immediately queryable. No KV writes occur at this stage.
+ * HYBRID BEHAVIOR: The updater writes articles to both storages:
+ * - KV: Individual articles by ID + article ID list (updater has exclusive write access)
+ * - D1: Full articles for processing
+ * 
+ * This ensures API worker can read from KV only, while processor works with D1.
  * 
  * @param {D1Database} db - D1 database instance
+ * @param {Object} kv - KV namespace
  * @param {Array} newArticles - New articles to be added
  * @param {Object} config - Configuration values
  * @returns {Promise<Object>} Result with inserted and skipped counts
  */
-async function addArticlesToD1(db, newArticles, config) {
+async function addArticlesToKVAndD1(db, kv, newArticles, config) {
   if (newArticles.length === 0) {
-    console.log('No new articles to add to D1');
+    console.log('No new articles to add');
     return { inserted: 0, skipped: 0 };
   }
   
-  console.log(`Inserting ${newArticles.length} articles into D1...`);
+  console.log(`Adding ${newArticles.length} articles to KV and D1...`);
   
-  // Use batch insert from d1-utils (handles INSERT OR IGNORE)
-  const result = await insertArticlesBatch(db, newArticles);
+  // Step 1: Insert into D1 (handles INSERT OR IGNORE for duplicates)
+  const d1Result = await insertArticlesBatch(db, newArticles);
+  console.log(`✓ D1 insert: ${d1Result.inserted} new, ${d1Result.skipped} duplicates`);
   
-  console.log(`✓ D1 insert complete: ${result.inserted} new, ${result.skipped} duplicates`);
+  // Step 2: Get current KV article ID list
+  let existingIds = [];
+  try {
+    const idData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
+    if (idData && Array.isArray(idData)) {
+      existingIds = idData;
+      console.log(`Found ${existingIds.length} existing article IDs in KV`);
+    }
+  } catch (error) {
+    console.log('No existing ID list in KV, starting fresh');
+  }
   
-  return result;
+  const existingIdSet = new Set(existingIds);
+  
+  // Step 3: Write new articles to KV individually (only truly new ones)
+  const newArticleIds = [];
+  const kvWritePromises = [];
+  
+  for (const article of newArticles) {
+    const articleId = getArticleId(article);
+    if (!articleId) continue;
+    
+    if (!existingIdSet.has(articleId)) {
+      newArticleIds.push(articleId);
+      const articleKey = `article:${articleId}`;
+      kvWritePromises.push(
+        kv.put(articleKey, JSON.stringify(article), {
+          expirationTtl: config.ID_INDEX_TTL
+        })
+      );
+    }
+  }
+  
+  if (kvWritePromises.length > 0) {
+    const kvResults = await Promise.allSettled(kvWritePromises);
+    const failedWrites = kvResults.filter(r => r.status === 'rejected');
+    
+    if (failedWrites.length > 0) {
+      console.error(`✗ Failed to write ${failedWrites.length} articles to KV`);
+      throw new Error(`KV article writes failed for ${failedWrites.length} articles`);
+    }
+    
+    console.log(`✓ Wrote ${kvWritePromises.length} new articles to KV`);
+  }
+  
+  // Step 4: Update KV article ID list (prepend new IDs, newest first)
+  const updatedIdList = [...newArticleIds, ...existingIds];
+  const trimmedIdList = updatedIdList.slice(0, config.MAX_STORED_ARTICLES);
+  
+  await kv.put(
+    config.KV_KEY_IDS,
+    JSON.stringify(trimmedIdList),
+    {
+      expirationTtl: config.ID_INDEX_TTL
+    }
+  );
+  console.log(`✓ Updated KV ID list with ${trimmedIdList.length} total articles`);
+  
+  return { inserted: d1Result.inserted, skipped: d1Result.skipped, kvWrites: kvWritePromises.length + 1 };
 }
 
 /**
- * Main scheduled event handler with D1-optimized pipeline
- * Phase 1: Preparation - Read known article IDs from D1
+ * Trim D1 articles that are not in the KV article ID list
+ * The updater is responsible for maintaining consistency between KV and D1.
+ * Articles not in KV ID list are removed from D1.
+ * 
+ * @param {D1Database} db - D1 database instance
+ * @param {Object} kv - KV namespace
+ * @param {Object} config - Configuration values
+ * @returns {Promise<number>} Number of articles deleted from D1
+ */
+async function trimD1Articles(db, kv, config) {
+  console.log('Checking if D1 trimming is needed...');
+  
+  // Get KV article ID list (source of truth for what should exist)
+  let kvIds = [];
+  try {
+    const idData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
+    if (idData && Array.isArray(idData)) {
+      kvIds = idData;
+    }
+  } catch (error) {
+    console.log('No KV ID list found, skipping trim');
+    return 0;
+  }
+  
+  if (kvIds.length === 0) {
+    console.log('KV ID list is empty, skipping trim');
+    return 0;
+  }
+  
+  // Get all D1 article IDs
+  const d1Ids = await getArticleIds(db, 10000); // Get all IDs
+  
+  if (d1Ids.size === 0) {
+    console.log('No articles in D1, skipping trim');
+    return 0;
+  }
+  
+  // Find articles in D1 that are not in KV ID list
+  const kvIdSet = new Set(kvIds);
+  const idsToDelete = Array.from(d1Ids).filter(id => !kvIdSet.has(id));
+  
+  if (idsToDelete.length === 0) {
+    console.log('No articles to trim from D1');
+    return 0;
+  }
+  
+  console.log(`Trimming ${idsToDelete.length} articles from D1 that are not in KV ID list...`);
+  
+  // Delete articles in batches (SQLite has a limit on IN clause)
+  const batchSize = 500;
+  let totalDeleted = 0;
+  
+  for (let i = 0; i < idsToDelete.length; i += batchSize) {
+    const batch = idsToDelete.slice(i, i + batchSize);
+    const placeholders = batch.map(() => '?').join(',');
+    
+    const result = await db.prepare(
+      `DELETE FROM articles WHERE id IN (${placeholders})`
+    ).bind(...batch).run();
+    
+    totalDeleted += result.meta?.changes || 0;
+  }
+  
+  console.log(`✓ Trimmed ${totalDeleted} articles from D1`);
+  return totalDeleted;
+}
+
+/**
+ * Main scheduled event handler with KV+D1 hybrid pipeline
+ * Phase 1: Preparation - Read known article IDs from KV (source of truth)
  * Phase 2: Fetch & Early Exit - Aggregate new articles, stop when hitting known article
- * Phase 3: D1 Insert - Write new articles to D1 (0 KV writes at this stage)
+ * Phase 3: Write to KV and D1 - Updater has exclusive write access to KV article IDs
+ * Phase 4: Trim D1 - Remove articles not in KV ID list
  * @param {Event} event - Scheduled event
  * @param {Object} env - Environment variables
  * @param {Object} ctx - Execution context
@@ -199,34 +329,49 @@ async function handleScheduled(event, env, ctx) {
   const config = getNewsUpdaterConfig(env);
   
   try {
-    // Phase 1: Preparation - Read known article IDs from D1
-    console.log('Phase 1: Reading known article IDs from D1...');
+    // Phase 1: Preparation - Read known article IDs from KV (source of truth)
+    console.log('Phase 1: Reading known article IDs from KV...');
     
-    // Get article IDs from D1 for deduplication
-    const knownIds = await getArticleIds(env.DB, config.MAX_STORED_ARTICLES);
-    console.log(`Loaded ${knownIds.size} article IDs from D1`);
+    let knownIds = new Set();
+    try {
+      const idData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
+      if (idData && Array.isArray(idData)) {
+        idData.forEach(id => knownIds.add(id));
+        console.log(`Loaded ${idData.length} article IDs from KV`);
+      }
+    } catch (error) {
+      console.log('No existing ID list in KV');
+    }
     
     // Phase 2: Optimized Fetch with Early Exit
     console.log('Phase 2: Fetching articles with early-exit optimization...');
     const newArticles = await aggregateArticles(env, knownIds, config);
     
     if (newArticles.length === 0) {
-      console.log('No new articles to process, skipping D1 insert');
-      console.log('=== Bitcoin News Updater Cron Job Completed (No Updates) ===');
-      return;
+      console.log('No new articles found, proceeding to trim check');
+    } else {
+      // Mark articles for later processing
+      console.log('Phase 2: Marking articles for AI processing...');
+      const markedArticles = await markArticlesForProcessing(newArticles);
+      
+      // Phase 3: Write to both KV and D1
+      console.log('Phase 3: Adding articles to KV and D1...');
+      const result = await addArticlesToKVAndD1(env.DB, env.CRYPTO_NEWS_CACHE, markedArticles, config);
+      
+      console.log(`Added ${result.inserted} new articles (${result.skipped} duplicates, ${result.kvWrites} KV writes)`);
     }
     
-    // Mark articles for later processing
-    console.log('Phase 2: Marking articles for AI processing...');
-    const markedArticles = await markArticlesForProcessing(newArticles);
-    
-    // Phase 3: Insert into D1 (0 KV writes!)
-    console.log('Phase 3: Adding articles to D1 database...');
-    const result = await addArticlesToD1(env.DB, markedArticles, config);
+    // Phase 4: Trim D1 articles not in KV ID list
+    console.log('Phase 4: Trimming D1 articles...');
+    const trimmed = await trimD1Articles(env.DB, env.CRYPTO_NEWS_CACHE, config);
     
     console.log('=== Bitcoin News Updater Cron Job Completed Successfully ===');
-    console.log(`Inserted ${result.inserted} new articles into D1 (${result.skipped} duplicates skipped)`);
-    console.log(`Articles are ready for processing by processor worker`);
+    if (newArticles.length > 0) {
+      console.log(`Added ${newArticles.length} new articles to KV and D1`);
+    }
+    if (trimmed > 0) {
+      console.log(`Trimmed ${trimmed} old articles from D1`);
+    }
   } catch (error) {
     console.error('=== Bitcoin News Updater Cron Job Failed ===');
     console.error('Error:', error);

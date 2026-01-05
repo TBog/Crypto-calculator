@@ -328,11 +328,8 @@ describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
         source: 'Test Source',
         imageUrl: null,
         aiSummary: null,
-        needsSentiment: 0,
-        needsSummary: 0,
-        processedAt: Date.now(),
-        createdAt: Date.now(),
-        updatedAt: Date.now()
+        needsSentiment: false,
+        needsSummary: false
       };
 
       const request = new Request('http://localhost/api/bitcoin-news', {
@@ -342,23 +339,17 @@ describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
       });
 
       const env = {
-        DB: {
-          prepare: (sql) => ({
-            bind: (...args) => ({
-              all: async () => ({
-                results: [mockArticle]
-              })
-            })
-          })
-        },
         CRYPTO_NEWS_CACHE: {
           get: async (key, options) => {
-            // Return null to trigger D1 fallback
+            // Return article ID list
+            if (key === 'BTC_ID_INDEX') {
+              return ['article1-id'];
+            }
+            // Return individual article
+            if (key === 'article:article1-id') {
+              return mockArticle;
+            }
             return null;
-          },
-          put: async (key, value, options) => {
-            // Mock successful cache write
-            return;
           }
         }
       };
@@ -385,21 +376,9 @@ describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
       });
 
       const env = {
-        DB: {
-          prepare: (sql) => ({
-            bind: (...args) => ({
-              all: async () => ({
-                results: [] // No articles in D1
-              })
-            })
-          })
-        },
         CRYPTO_NEWS_CACHE: {
           get: async (key, options) => {
             return null; // No data in KV
-          },
-          put: async (key, value, options) => {
-            return;
           }
         }
       };

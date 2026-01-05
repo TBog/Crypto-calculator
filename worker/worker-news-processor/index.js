@@ -669,12 +669,13 @@ async function processBatchFromD1(db, env, config) {
   
   if (articlesToProcess.length === 0) {
     console.log('No articles need processing');
-    return { processed: 0, articlesProcessed: [] };
+    return { processed: 0, articlesProcessed: [], fullyProcessed: [] };
   }
   
   console.log(`Found ${articlesToProcess.length} article(s) needing processing`);
   
   const processedArticles = [];
+  const fullyProcessedArticles = [];
   
   // Process each article
   for (const article of articlesToProcess) {
@@ -694,6 +695,16 @@ async function processBatchFromD1(db, env, config) {
       // Clear checkpoint after processing
       await updateCheckpoint(db, null);
       
+      // Check if article is now fully processed (no more flags set)
+      const updatedArticle = await getArticleById(db, articleId);
+      const isFullyProcessed = updatedArticle && 
+                              updatedArticle.needsSentiment === 0 && 
+                              updatedArticle.needsSummary === 0;
+      
+      if (isFullyProcessed) {
+        fullyProcessedArticles.push(updatedArticle);
+      }
+      
       processedArticles.push(articleId);
       
     } catch (error) {
@@ -702,35 +713,35 @@ async function processBatchFromD1(db, env, config) {
     }
   }
   
-  console.log(`Processed ${processedArticles.length} article(s)`);
+  console.log(`Processed ${processedArticles.length} article(s), ${fullyProcessedArticles.length} fully processed`);
   
-  return { processed: processedArticles.length, articlesProcessed: processedArticles };
+  return { 
+    processed: processedArticles.length, 
+    articlesProcessed: processedArticles,
+    fullyProcessed: fullyProcessedArticles
+  };
 }
 /**
- * Update KV cache with processed articles from D1
- * This writes the final results to KV for fast frontend access
+ * Update KV cache with fully processed articles
+ * This writes individual articles to KV when they complete processing
  * 
  * @param {Object} kv - KV storage binding
- * @param {D1Database} db - D1 database instance
+ * @param {Array} fullyProcessedArticles - Array of D1 article rows that are fully processed
  * @param {Object} config - Configuration object
  * @returns {Promise<number>} Number of articles written to KV
  */
-async function updateKVCache(kv, db, config) {
-  console.log('Updating KV cache with processed articles from D1...');
-  
-  // Get all articles from D1 (up to MAX_STORED_ARTICLES)
-  const articles = await getAllArticles(db, config.MAX_STORED_ARTICLES || 500);
-  
-  if (articles.length === 0) {
-    console.log('No articles to cache');
+async function updateKVWithProcessedArticles(kv, fullyProcessedArticles, config) {
+  if (fullyProcessedArticles.length === 0) {
+    console.log('No fully processed articles to update in KV');
     return 0;
   }
   
+  console.log(`Updating KV with ${fullyProcessedArticles.length} fully processed article(s)...`);
+  
   // Convert D1 rows to article objects
-  const articleObjects = articles.map(rowToArticle);
+  const articleObjects = fullyProcessedArticles.map(rowToArticle);
   
   // Write each article to KV
-  let writtenCount = 0;
   const writePromises = [];
   
   for (const article of articleObjects) {
@@ -751,6 +762,7 @@ async function updateKVCache(kv, db, config) {
   const results = await Promise.allSettled(writePromises);
   
   // Count successful writes
+  let writtenCount = 0;
   results.forEach(result => {
     if (result.status === 'fulfilled') {
       writtenCount++;
@@ -759,21 +771,7 @@ async function updateKVCache(kv, db, config) {
     }
   });
   
-  // Update ID index in KV
-  const articleIds = articleObjects.map(a => getArticleId(a)).filter(id => id);
-  
-  try {
-    await kv.put(
-      config.KV_KEY_IDS,
-      JSON.stringify(articleIds),
-      { expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30 }
-    );
-    console.log(`✓ Updated KV ID index with ${articleIds.length} articles`);
-  } catch (error) {
-    console.error('Failed to update KV ID index:', error.message);
-  }
-  
-  console.log(`✓ Updated ${writtenCount} articles in KV cache`);
+  console.log(`✓ Updated ${writtenCount} fully processed articles in KV`);
   
   return writtenCount;
 }
@@ -784,11 +782,9 @@ async function updateKVCache(kv, db, config) {
  * Architecture:
  * 1. Read articles from D1 that need processing
  * 2. Process articles (updates D1 incrementally)
- * 3. After batch completes, update KV cache with final results
+ * 3. Write fully processed articles to KV
  * 
- * This reduces KV writes from ~720/day to ~150/day by:
- * - Using D1 for intermediate updates during processing
- * - Writing to KV only for final cache updates after batch completion
+ * The updater manages the KV article ID list, processor only updates individual articles.
  * 
  * @param {Event} event - Scheduled event
  * @param {Object} env - Environment variables
@@ -807,9 +803,17 @@ async function handleScheduled(event, env) {
     if (result.processed > 0) {
       console.log(`✓ Processed ${result.processed} article(s)`);
       
-      // Update KV cache with all processed articles (final results only)
-      const cachedCount = await updateKVCache(env.CRYPTO_NEWS_CACHE, env.DB, config);
-      console.log(`✓ Updated KV cache with ${cachedCount} articles`);
+      // Update KV only with fully processed articles
+      if (result.fullyProcessed && result.fullyProcessed.length > 0) {
+        const cachedCount = await updateKVWithProcessedArticles(
+          env.CRYPTO_NEWS_CACHE, 
+          result.fullyProcessed, 
+          config
+        );
+        console.log(`✓ Updated ${cachedCount} fully processed articles in KV`);
+      } else {
+        console.log('No articles fully processed in this batch');
+      }
     } else {
       console.log('No articles to process - idle run');
     }
