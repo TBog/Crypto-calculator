@@ -1,9 +1,9 @@
 /**
  * Scheduled Cloudflare Worker for Processing Pending Bitcoin News Articles
  * 
- * This worker runs on a cron schedule (every 10 minutes) to:
+ * This worker runs on a cron schedule (every 5 minutes) to:
  * 1. Read articles from D1 that need processing (check postprocessing flags)
- * 2. Process up to 5 articles per run (to stay within subrequest limits)
+ * 2. Process up to 3 articles per run (to stay within subrequest limits)
  * 3. Update each article in D1 after processing (incremental writes for reliability)
  * 4. Update KV cache with final results after processing batch
  * 
@@ -15,20 +15,20 @@
  * Postprocessing flags:
  * - needsSentiment: true → needs sentiment analysis
  * - needsSummary: true → needs AI summary generation
- * - contentTimeout: integer → number of failed fetch attempts (retry if < 5)
+ * - contentTimeout: integer → number of failed fetch attempts (retry if < 3)
  * - summaryError: string → reason why summary failed (for debugging)
  * 
  * Summary error reasons:
  * - "content_mismatch" → webpage doesn't match article title
- * - "fetch_failed (attempt X/5)" → failed to fetch content, retry count
+ * - "fetch_failed (attempt X/3)" → failed to fetch content, retry count
  * - "no_link" → article has no URL
- * - "error: <msg> (attempt X/5)" → AI generation error with retry count
+ * - "error: <msg> (attempt X/3)" → AI generation error with retry count
  * 
- * This approach solves the "Too many subrequests" error by:
- * - Processing articles in small batches (5 at a time)
- * - Running frequently (every 10 minutes) to keep articles up-to-date
+ * This approach with D1+KV:
+ * - Processing articles in small batches (3 at a time)
+ * - Running frequently (every 5 minutes) to keep articles up-to-date
  * - Using D1 for intermediate article updates during processing
- * - Using KV only for final results cache (reduces KV writes from ~720/day to ~150/day)
+ * - Using KV only for final results cache (reduces KV writes from ~720/day to ~288/day)
  * 
  * Neuron Budget Optimization:
  * - Content extraction skips headers, footers, navigation, ads, and sidebars
@@ -399,7 +399,7 @@ async function analyzeSentiment(env, article) {
  * - Phase 2 (has extractedContent): Decode and run AI summary, save to D1, exit
  * 
  * This splits work naturally without defensive saves during processing.
- * The 10-minute cron schedule ensures phases execute quickly in sequence.
+ * The 5-minute cron schedule ensures phases execute quickly in sequence.
  * 
  * Checks postprocessing flags and processes accordingly:
  * - needsSentiment: true → needs sentiment analysis
