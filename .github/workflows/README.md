@@ -44,8 +44,9 @@ Before the `deploy-workers.yml` workflow can run, you need to configure the foll
 
 1. **CLOUDFLARE_API_TOKEN**
    - Go to Cloudflare Dashboard → My Profile → API Tokens
-   - Create a token with "Edit Cloudflare Workers" permissions
-   - Make sure the token also has D1 database permissions for schema deployment
+   - Create a token with:
+     - "Edit Cloudflare Workers" permissions (for `deploy-workers.yml`)
+     - "Edit D1 Databases" permissions (required for D1 schema deployment and `wrangler d1 execute`, e.g. `deploy-d1-schema.yml`)
    - Add this as a repository secret
 
 2. **CLOUDFLARE_ACCOUNT_ID**
