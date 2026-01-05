@@ -182,8 +182,10 @@ The workflow will:
 You can also deploy the schema manually using Wrangler:
 
 ```bash
-# Initialize the database schema (development)
+# From the repository root, navigate to the worker directory
 cd worker
+
+# Initialize the database schema (development)
 wrangler d1 execute crypto-news-db --file=./schema.sql
 
 # Initialize the database schema (production)
