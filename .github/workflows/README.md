@@ -22,7 +22,19 @@ Deploys Cloudflare Workers for the backend API and cron jobs.
 - **Workers deployed**:
   - `worker-api`: Main API worker (crypto-cache)
   - `worker-news-updater`: News updater cron job (runs hourly)
-  - `worker-news-processor`: News processor cron job (runs every 10 minutes)
+  - `worker-news-processor`: News processor cron job (runs every 3 minutes)
+
+### 4. Deploy D1 Database Schema (`deploy-d1-schema.yml`)
+Deploys the Cloudflare D1 database schema automatically or on-demand.
+- **Trigger**: Push to `main` branch (when `worker/schema.sql` changes) or manual dispatch
+- **What it does**:
+  - Deploys schema from `worker/schema.sql` to D1 database
+  - Initializes the `processing_checkpoint` table
+  - Verifies the deployment by querying the database
+- **Manual options**: 
+  - `development` - Deploy to development database only
+  - `production` - Deploy to production database only
+  - `both` - Deploy to both environments
 
 ## Cloudflare Workers Deployment
 
@@ -32,12 +44,55 @@ Before the `deploy-workers.yml` workflow can run, you need to configure the foll
 
 1. **CLOUDFLARE_API_TOKEN**
    - Go to Cloudflare Dashboard → My Profile → API Tokens
-   - Create a token with "Edit Cloudflare Workers" permissions
+   - Create a token with:
+     - "Edit Cloudflare Workers" permissions (for `deploy-workers.yml`)
+     - "Edit D1 Databases" permissions (required for D1 schema deployment and `wrangler d1 execute`, e.g. `deploy-d1-schema.yml`)
    - Add this as a repository secret
 
 2. **CLOUDFLARE_ACCOUNT_ID**
    - Found in your Cloudflare Dashboard URL or in the Workers overview
    - Add this as a repository secret
+
+### D1 Database Setup
+
+The D1 database must be created before deploying workers. Follow these steps:
+
+1. **Create the D1 database** (one-time setup):
+   ```bash
+   # Development database
+   wrangler d1 create crypto-news-db
+   
+   # Production database (optional, use a separate name)
+   wrangler d1 create crypto-news-db-prod
+   ```
+
+2. **Update database IDs** in the following files:
+   - `worker/worker-news-updater/wrangler.toml`
+   - `worker/worker-news-processor/wrangler.toml`
+
+3. **Deploy the schema** using one of these methods:
+   
+   **Option A: Automatic (Recommended)**
+   - Push changes to `main` branch - the schema will deploy automatically
+   
+   **Option B: Manual via GitHub Actions**
+   - Go to Actions → "Deploy D1 Database Schema"
+   - Click "Run workflow"
+   - Select environment (development/production/both)
+   - Click "Run workflow"
+   
+   **Option C: Local via Wrangler**
+   ```bash
+   cd worker
+   wrangler d1 execute crypto-news-db --file=schema.sql
+   ```
+
+4. **Verify the deployment**:
+   ```bash
+   wrangler d1 execute crypto-news-db --command "SELECT name FROM sqlite_master WHERE type='table'"
+   ```
+
+See `worker/D1_SETUP_GUIDE.md` for detailed instructions.
 
 ### How It Works
 

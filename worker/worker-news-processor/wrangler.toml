@@ -20,7 +20,7 @@ binding = "AI"
 [[d1_databases]]
 binding = "DB"
 database_name = "crypto-news-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "1729d3f6-8035-41c4-90b3-e1d75d3ace86"
 # Create database with: wrangler d1 create crypto-news-db
 # Initialize schema with: wrangler d1 execute crypto-news-db --file=../schema.sql
 # See D1_SETUP_GUIDE.md for detailed instructions
