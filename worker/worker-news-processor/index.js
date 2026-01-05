@@ -600,6 +600,166 @@ function articleIsComplete(article, config) {
 }
 
 /**
+ * Helper function to synchronize pendingProcessingIds with current pending list
+ * @param {Object} checkpoint - Current checkpoint
+ * @param {Array<string>} currentPendingIds - Current pending list IDs
+ * @param {Object} config - Configuration object
+ */
+function syncPendingProcessingIds(checkpoint, currentPendingIds, config) {
+  if (!checkpoint.pendingProcessingIds) {
+    checkpoint.pendingProcessingIds = [];
+  }
+  
+  // Convert to Set for O(1) lookups
+  const pendingIdSet = new Set(currentPendingIds);
+  const pendingProcessingSet = new Set(checkpoint.pendingProcessingIds);
+  
+  // Keep only IDs that are still in the pending list
+  checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => pendingIdSet.has(id));
+  
+  // Add current article if it's from pending list
+  if (checkpoint.currentArticleId && pendingIdSet.has(checkpoint.currentArticleId)) {
+    if (!pendingProcessingSet.has(checkpoint.currentArticleId)) {
+      checkpoint.pendingProcessingIds.push(checkpoint.currentArticleId);
+    }
+  }
+  
+  // Limit size to match pending list max size
+  const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
+  if (checkpoint.pendingProcessingIds.length > maxPendingSize) {
+    checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.slice(0, maxPendingSize);
+  }
+}
+
+/**
+ * Get next article to process from pending list or try-later list
+ * This function is extracted for testing purposes
+ * 
+ * @param {Object} kv - KV storage interface (allows mocking for tests)
+ * @param {Object} checkpoint - Current checkpoint
+ * @param {Object} config - Configuration object
+ * @param {Array<string>} pendingList - Current pending list (IDs only)
+ * @returns {Promise<Object>} Result with { articleId, article, pendingList, idIndex }
+ */
+async function getNextArticleToProcess(kv, checkpoint, config, pendingList) {
+  let nextArticle = null;
+  let nextArticleId = null;
+  
+  // Read ID index for later use when updating
+  let idIndex = [];
+  try {
+    const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
+    if (idIndexData && Array.isArray(idIndexData)) {
+      idIndex = idIndexData;
+    }
+  } catch (error) {
+    // No index yet
+  }
+  
+  // Limit pending list size to prevent unbounded growth
+  const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
+  const limitedPending = pendingList.slice(0, maxPendingSize);
+  
+  if (limitedPending.length > 0) {
+    // Get first article ID from pending list
+    nextArticleId = limitedPending[0];
+    
+    // Read article from KV storage
+    try {
+      const articleKey = `article:${nextArticleId}`;
+      nextArticle = await kv.get(articleKey, { type: 'json' });
+      
+      if (!nextArticle) {
+        console.log(`Article not found in KV: ${nextArticleId}, removing from pending list`);
+        // Remove from pending list and update checkpoint
+        const updatedPending = pendingList.filter(id => id !== nextArticleId);
+        await kv.put(
+          config.KV_KEY_PENDING,
+          JSON.stringify(updatedPending),
+          { expirationTtl: config.ID_INDEX_TTL }
+        );
+        
+        // Update checkpoint's pendingProcessingIds
+        if (checkpoint.pendingProcessingIds) {
+          checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => id !== nextArticleId);
+        }
+        
+        return { articleId: null, article: null, pendingList: updatedPending, idIndex };
+      }
+      
+      // Validate article has required fields
+      if (!getArticleId(nextArticle)) {
+        console.log(`Article ${nextArticleId} missing ID field, removing from pending list`);
+        const updatedPending = pendingList.filter(id => id !== nextArticleId);
+        await kv.put(
+          config.KV_KEY_PENDING,
+          JSON.stringify(updatedPending),
+          { expirationTtl: config.ID_INDEX_TTL }
+        );
+        
+        // Update checkpoint's pendingProcessingIds
+        if (checkpoint.pendingProcessingIds) {
+          checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => id !== nextArticleId);
+        }
+        
+        return { articleId: null, article: null, pendingList: updatedPending, idIndex };
+      }
+      
+      // Check if article actually needs processing
+      if (!articleNeedsProcessing(nextArticle, config)) {
+        console.log(`Article ${nextArticleId} doesn't need processing, removing from pending list`);
+        // Remove from pending list
+        const updatedPending = pendingList.filter(id => id !== nextArticleId);
+        await kv.put(
+          config.KV_KEY_PENDING,
+          JSON.stringify(updatedPending),
+          { expirationTtl: config.ID_INDEX_TTL }
+        );
+        
+        // Update checkpoint's pendingProcessingIds
+        if (checkpoint.pendingProcessingIds) {
+          checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => id !== nextArticleId);
+        }
+        
+        return { articleId: null, article: null, pendingList: updatedPending, idIndex };
+      }
+    } catch (error) {
+      console.error(`Error reading article ${nextArticleId} from KV:`, error.message);
+      return { articleId: null, article: null, pendingList, idIndex };
+    }
+  } else if (checkpoint.tryLater && checkpoint.tryLater.length > 0) {
+    // Get first article ID from try-later list
+    nextArticleId = checkpoint.tryLater[0];
+    
+    // Read article from KV storage
+    try {
+      const articleKey = `article:${nextArticleId}`;
+      nextArticle = await kv.get(articleKey, { type: 'json' });
+      
+      if (!nextArticle) {
+        console.log(`Article not found in KV (try-later): ${nextArticleId}, removing from list`);
+        checkpoint.tryLater = checkpoint.tryLater.filter(id => id !== nextArticleId);
+        try {
+          await kv.put(
+            config.KV_KEY_CHECKPOINT,
+            JSON.stringify(checkpoint),
+            { expirationTtl: config.ID_INDEX_TTL }
+          );
+        } catch (error) {
+          console.error(`Failed to update checkpoint after removing missing article:`, error.message);
+        }
+        return { articleId: null, article: null, pendingList, idIndex };
+      }
+    } catch (error) {
+      console.error(`Error reading article ${nextArticleId} from KV (try-later):`, error.message);
+      return { articleId: null, article: null, pendingList, idIndex };
+    }
+  }
+  
+  return { articleId: nextArticleId, article: nextArticle, pendingList, idIndex };
+}
+
+/**
  * Process a single article through the checkpoint-based pipeline
  * This function encapsulates the core processing logic for testing
  * 
@@ -645,11 +805,22 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
   let nextArticle = null;
   let nextArticleId = null;
   let cachedIdIndex = null; // Cache ID index to avoid redundant KV reads
+  let currentPendingList = []; // Track current pending list for sync
   
   if (checkpoint.currentArticleId && checkpoint.currentArticle) {
     // Continue processing current article
     nextArticleId = checkpoint.currentArticleId;
     nextArticle = checkpoint.currentArticle;
+    
+    // Still need to read pending list for sync later
+    try {
+      const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
+      if (pendingData && Array.isArray(pendingData)) {
+        currentPendingList = convertPendingListToIds(pendingData);
+      }
+    } catch (error) {
+      // No pending list
+    }
   } else {
     // Read pending list (now contains only IDs)
     let pendingList = [];
@@ -662,101 +833,18 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       // No pending list
     }
     
-    // Read ID index for later use when updating
-    // Cache this for later reuse when updating the index
-    let idIndex = [];
-    try {
-      const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
-      if (idIndexData && Array.isArray(idIndexData)) {
-        idIndex = idIndexData;
-      }
-    } catch (error) {
-      // No index yet
-    }
-    cachedIdIndex = idIndex; // Cache for later use
+    currentPendingList = pendingList;
     
-    // Limit pending list size to prevent unbounded growth
-    const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
-    const limitedPending = pendingList.slice(0, maxPendingSize);
+    // Use the new helper function to get next article
+    const result = await getNextArticleToProcess(kv, checkpoint, config, pendingList);
+    nextArticleId = result.articleId;
+    nextArticle = result.article;
+    cachedIdIndex = result.idIndex; // Cache for later use
+    currentPendingList = result.pendingList; // Use updated pending list
     
-    if (limitedPending.length > 0) {
-      // Get first article ID from pending list
-      nextArticleId = limitedPending[0];
-      
-      // Read article from KV storage
-      try {
-        const articleKey = `article:${nextArticleId}`;
-        nextArticle = await kv.get(articleKey, { type: 'json' });
-        
-        if (!nextArticle) {
-          console.log(`Article not found in KV: ${nextArticleId}, removing from pending list`);
-          // Remove from pending list and try next
-          const updatedPending = pendingList.filter(id => id !== nextArticleId);
-          await kv.put(
-            config.KV_KEY_PENDING,
-            JSON.stringify(updatedPending),
-            { expirationTtl: config.ID_INDEX_TTL }
-          );
-          return { processed: false, articleId: null, article: null, checkpoint };
-        }
-        
-        // Validate article has required fields
-        if (!nextArticle.id && !getArticleId(nextArticle)) {
-          console.log(`Article ${nextArticleId} missing ID field, removing from pending list`);
-          const updatedPending = pendingList.filter(id => id !== nextArticleId);
-          await kv.put(
-            config.KV_KEY_PENDING,
-            JSON.stringify(updatedPending),
-            { expirationTtl: config.ID_INDEX_TTL }
-          );
-          return { processed: false, articleId: null, article: null, checkpoint };
-        }
-        
-        // Check if article actually needs processing
-        if (!articleNeedsProcessing(nextArticle, config)) {
-          console.log(`Article ${nextArticleId} doesn't need processing, removing from pending list`);
-          // Remove from pending list
-          const updatedPending = pendingList.filter(id => id !== nextArticleId);
-          await kv.put(
-            config.KV_KEY_PENDING,
-            JSON.stringify(updatedPending),
-            { expirationTtl: config.ID_INDEX_TTL }
-          );
-          return { processed: false, articleId: null, article: null, checkpoint };
-        }
-      } catch (error) {
-        console.error(`Error reading article ${nextArticleId} from KV:`, error.message);
-        return { processed: false, articleId: null, article: null, checkpoint };
-      }
-    } else if (checkpoint.tryLater && checkpoint.tryLater.length > 0) {
-      // Get first article ID from try-later list
-      nextArticleId = checkpoint.tryLater[0];
-      
-      // Read article from KV storage
-      try {
-        const articleKey = `article:${nextArticleId}`;
-        nextArticle = await kv.get(articleKey, { type: 'json' });
-        
-        if (!nextArticle) {
-          console.log(`Article not found in KV (try-later): ${nextArticleId}, removing from list`);
-          checkpoint.tryLater = checkpoint.tryLater.filter(id => id !== nextArticleId);
-          try {
-            await kv.put(
-              config.KV_KEY_CHECKPOINT,
-              JSON.stringify(checkpoint),
-              { expirationTtl: config.ID_INDEX_TTL }
-            );
-          } catch (error) {
-            console.error(`Failed to update checkpoint after removing missing article:`, error.message);
-          }
-          return { processed: false, articleId: null, article: null, checkpoint };
-        }
-      } catch (error) {
-        console.error(`Error reading article ${nextArticleId} from KV (try-later):`, error.message);
-        return { processed: false, articleId: null, article: null, checkpoint };
-      }
-    } else {
-      // No articles to process
+    // If no article to process, sync and return
+    if (!nextArticleId || !nextArticle) {
+      syncPendingProcessingIds(checkpoint, currentPendingList, config);
       return { processed: false, articleId: null, article: null, checkpoint };
     }
   }
@@ -922,19 +1010,18 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       
       // Remove from pending list when max retries reached
       try {
-        const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
-        if (pendingData && Array.isArray(pendingData)) {
-          const pendingIds = convertPendingListToIds(pendingData);
-          
-          if (pendingIds.includes(nextArticleId)) {
-            const updatedPending = pendingIds.filter(id => id !== nextArticleId);
-            await kv.put(
-              config.KV_KEY_PENDING,
-              JSON.stringify(updatedPending),
-              { expirationTtl: config.ID_INDEX_TTL }
-            );
-            console.log(`✓ Removed max-retries article from pending list: ${nextArticleId}`);
-          }
+        // Use Set for O(1) lookup performance
+        const pendingIdSet = new Set(currentPendingList);
+        
+        if (pendingIdSet.has(nextArticleId)) {
+          const updatedPending = currentPendingList.filter(id => id !== nextArticleId);
+          await kv.put(
+            config.KV_KEY_PENDING,
+            JSON.stringify(updatedPending),
+            { expirationTtl: config.ID_INDEX_TTL }
+          );
+          currentPendingList = updatedPending; // Update local copy
+          console.log(`✓ Removed max-retries article from pending list: ${nextArticleId}`);
         }
       } catch (error) {
         console.error(`✗ Failed to remove article from pending list:`, error.message);
@@ -957,19 +1044,18 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
       
       // Remove from pending list when fully complete
       try {
-        const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
-        if (pendingData && Array.isArray(pendingData)) {
-          const pendingIds = convertPendingListToIds(pendingData);
-          
-          if (pendingIds.includes(nextArticleId)) {
-            const updatedPending = pendingIds.filter(id => id !== nextArticleId);
-            await kv.put(
-              config.KV_KEY_PENDING,
-              JSON.stringify(updatedPending),
-              { expirationTtl: config.ID_INDEX_TTL }
-            );
-            console.log(`✓ Removed completed article from pending list: ${nextArticleId}`);
-          }
+        // Use Set for O(1) lookup performance
+        const pendingIdSet = new Set(currentPendingList);
+        
+        if (pendingIdSet.has(nextArticleId)) {
+          const updatedPending = currentPendingList.filter(id => id !== nextArticleId);
+          await kv.put(
+            config.KV_KEY_PENDING,
+            JSON.stringify(updatedPending),
+            { expirationTtl: config.ID_INDEX_TTL }
+          );
+          currentPendingList = updatedPending; // Update local copy
+          console.log(`✓ Removed completed article from pending list: ${nextArticleId}`);
         }
       } catch (error) {
         console.error(`✗ Failed to remove article from pending list:`, error.message);
@@ -982,42 +1068,8 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
   }
   
   // Maintain pendingProcessingIds list (tracks articles being processed)
-  // This list should only contain IDs from the pending list that are being processed
-  // It has the same max length as the pending list
-  if (!checkpoint.pendingProcessingIds) {
-    checkpoint.pendingProcessingIds = [];
-  }
-  
-  // Read pending list to sync pendingProcessingIds
-  try {
-    const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
-    if (pendingData && Array.isArray(pendingData)) {
-      const pendingIds = convertPendingListToIds(pendingData);
-      
-      // Convert to Set for O(1) lookups instead of O(n) with includes()
-      const pendingIdSet = new Set(pendingIds);
-      const pendingProcessingSet = new Set(checkpoint.pendingProcessingIds);
-      
-      // Keep only IDs that are still in the pending list
-      checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => pendingIdSet.has(id));
-      
-      // Add current article if it's from pending list
-      if (checkpoint.currentArticleId && pendingIdSet.has(checkpoint.currentArticleId)) {
-        if (!pendingProcessingSet.has(checkpoint.currentArticleId)) {
-          checkpoint.pendingProcessingIds.push(checkpoint.currentArticleId);
-        }
-      }
-      
-      // Limit size to match pending list max size
-      const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
-      if (checkpoint.pendingProcessingIds.length > maxPendingSize) {
-        checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.slice(0, maxPendingSize);
-      }
-    }
-  } catch (error) {
-    // If we can't read pending list, clear pendingProcessingIds
-    checkpoint.pendingProcessingIds = [];
-  }
+  // Use the local copy that was maintained throughout the function
+  syncPendingProcessingIds(checkpoint, currentPendingList, config);
   
   checkpoint.lastUpdate = Date.now();
   
@@ -1234,7 +1286,7 @@ async function handleFetch(request, env) {
 }
 
 // Export for testing
-export { TextExtractor, fetchArticleContent, processNextArticle, processArticle, articleNeedsProcessing, articleIsComplete };
+export { TextExtractor, fetchArticleContent, processNextArticle, processArticle, articleNeedsProcessing, articleIsComplete, getNextArticleToProcess, syncPendingProcessingIds };
 
 export default {
   async scheduled(event, env, ctx) {

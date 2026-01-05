@@ -237,7 +237,15 @@ async function addToPendingList(kv, newArticles, config) {
   try {
     const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
     if (pendingData && Array.isArray(pendingData)) {
-      pendingList = pendingData;
+      // Convert from old format (objects) to new format (IDs) for backward compatibility
+      pendingList = pendingData.map(item => {
+        if (typeof item === 'string') {
+          return item;
+        } else if (item && item.id) {
+          return item.id;
+        }
+        return null;
+      }).filter(id => id !== null);
       console.log(`Found ${pendingList.length} article IDs in pending list`);
     }
   } catch (error) {
@@ -302,6 +310,17 @@ async function addToPendingList(kv, newArticles, config) {
   
   console.log(`✓ Wrote ${articlesToAdd.length} articles to KV storage`);
   
+  // Before merging, trim existing pending list to remove articles already in the OLD ID index
+  // This handles cases where articles were processed and added to ID index by processor
+  // Use the OLD idIndex (before we added new articles) to avoid filtering out newly added articles
+  const existingIdIndexSet = new Set(idIndex);
+  const trimmedExistingPending = pendingList.filter(id => !existingIdIndexSet.has(id));
+  
+  // Update pending list with new article IDs (prepend to maintain newest-first order)
+  const mergedPendingList = [...articlesToAdd, ...trimmedExistingPending];
+  
+  let trimmedPendingList = mergedPendingList;
+  
   // Update ID index with new articles (prepend to maintain newest-first order)
   const updatedIdIndex = [...articlesToAdd, ...idIndex];
   
@@ -320,14 +339,9 @@ async function addToPendingList(kv, newArticles, config) {
     console.log(`✓ Updated ID index with ${trimmedIdIndex.length} articles`);
   } catch (error) {
     console.error(`✗ Failed to write ID index to KV:`, error.message);
-    throw new Error(`KV put failed for ID index: ${error.message}`);
+    // Don't throw - proceed to update pending list so articles will still be processed
+    // Articles are already written to KV and visible to users
   }
-  
-  // Update pending list with new article IDs (prepend to maintain newest-first order)
-  const mergedPendingList = [...articlesToAdd, ...pendingList];
-  
-  // Trim pending list based on ID index (remove articles that are already in the index)
-  let trimmedPendingList = mergedPendingList.filter(id => !existingArticleIds.has(id));
   
   // Limit pending list size to prevent unbounded growth
   const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
