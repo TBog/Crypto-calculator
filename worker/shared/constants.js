@@ -25,10 +25,10 @@ export const KV_KEY_CHECKPOINT = 'BTC_CHECKPOINT'; // Processor checkpoint state
 // =============================================================================
 
 // Maximum articles to keep in KV storage (prevent size issues)
-export const MAX_STORED_ARTICLES = 500;
+export const MAX_STORED_ARTICLES = 100;
 
 // Maximum number of pages to fetch from news API (safety limit)
-export const MAX_PAGES = 15;
+export const MAX_PAGES = 10;
 
 // ID index TTL in seconds (30 days)
 export const ID_INDEX_TTL = 60 * 60 * 24 * 30;  // 2592000 seconds
@@ -45,7 +45,7 @@ export const MAX_ARTICLES_PER_RUN = 5;
 export const MAX_CONTENT_CHARS = 10 * 1024;  // 10KB
 
 // Maximum retry attempts for content fetching before giving up
-export const MAX_CONTENT_FETCH_ATTEMPTS = 5;
+export const MAX_CONTENT_FETCH_ATTEMPTS = 3;
 
 // Delete old articles from KV when they are removed from the ID index
 // When true, articles beyond MAX_STORED_ARTICLES limit are deleted from KV.
@@ -75,7 +75,7 @@ export const DELETE_OLD_ARTICLES = false;
 // Note: When first deploying with an empty KV, many articles will be added to pending list.
 // The MAX_STORED_ARTICLES should be manually increased over time to prevent spikes in
 // requests, neuron usage, and processing time during initial deployment.
-export const MAX_PENDING_LIST_SIZE = 500;
+export const MAX_PENDING_LIST_SIZE = 100;
 
 // HTML entity decoding map and regex (shared utility for text processing)
 export const HTML_ENTITY_MAP = {
@@ -105,7 +105,7 @@ export const PRICE_HISTORY_CACHE_TTL = 600;  // 10 minutes
 export const MARKET_CHART_CACHE_TTL = 300;  // 5 minutes
 
 // Cache duration for Bitcoin news (in seconds)
-export const BITCOIN_NEWS_CACHE_TTL = 60;  // 1 minute
+export const BITCOIN_NEWS_CACHE_TTL = 300;  // 5 minutes
 
 // CORS configuration (in seconds)
 export const CORS_MAX_AGE = 86400;  // 24 hours
