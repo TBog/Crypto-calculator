@@ -18,6 +18,11 @@
 
 import { createNewsProvider, getArticleId } from '../shared/news-providers.js';
 import { getNewsUpdaterConfig } from '../shared/constants.js';
+import { 
+  insertArticlesBatch, 
+  getArticleIds, 
+  rowsToArticles 
+} from '../shared/d1-utils.js';
 
 /**
  * Fetch and aggregate articles with early-exit optimization
@@ -151,230 +156,37 @@ async function markArticlesForProcessing(articles) {
 }
 
 /**
- * Migrate legacy BTC_ANALYZED_NEWS data to individual article storage
- * This function is called during the transition period to migrate old data
- * @param {Object} env - Environment variables
+ * Add new articles to D1 database
+ * 
+ * D1-BASED BEHAVIOR: The updater writes articles directly to D1 database,
+ * making them immediately queryable. No KV writes occur at this stage.
+ * 
+ * @param {D1Database} db - D1 database instance
+ * @param {Array} newArticles - New articles to be added
  * @param {Object} config - Configuration values
- * @returns {Promise<Array>} Array of migrated article IDs
+ * @returns {Promise<Object>} Result with inserted and skipped counts
  */
-async function migrateLegacyData(env, config) {
-  console.log('Checking for legacy BTC_ANALYZED_NEWS data to migrate...');
-  
-  try {
-    const legacyData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_NEWS, { type: 'json' });
-    
-    if (!legacyData || !legacyData.articles || legacyData.articles.length === 0) {
-      console.log('No legacy data found to migrate');
-      return [];
-    }
-    
-    console.log(`Found ${legacyData.articles.length} articles in legacy format, migrating...`);
-    
-    // Store each legacy article individually
-    const writePromises = legacyData.articles.map(article => {
-      const articleId = getArticleId(article);
-      if (!articleId) return Promise.resolve();
-      
-      const articleKey = `article:${articleId}`;
-      return env.CRYPTO_NEWS_CACHE.put(articleKey, JSON.stringify(article), {
-        expirationTtl: config.ID_INDEX_TTL
-      });
-    });
-    
-    // Use allSettled so we can detect partial failures explicitly
-    const writeResults = await Promise.allSettled(writePromises.filter(p => p));
-    const failedWrites = writeResults.filter(result => result.status === 'rejected');
-    
-    if (failedWrites.length > 0) {
-      console.error(`✗ Failed to migrate ${failedWrites.length} legacy articles`);
-      // Keep legacy key intact by treating this as a migration failure
-      throw new Error('Legacy data migration failed for some articles');
-    }
-    
-    // Extract IDs for the index (in original order - latest first)
-    const migratedIds = legacyData.articles
-      .map(article => getArticleId(article))
-      .filter(id => id);
-    
-    console.log(`✓ Migrated ${migratedIds.length} articles to individual storage`);
-    
-    // Delete the legacy key after successful migration
-    await env.CRYPTO_NEWS_CACHE.delete(config.KV_KEY_NEWS);
-    console.log('✓ Deleted legacy BTC_ANALYZED_NEWS key');
-    
-    return migratedIds;
-  } catch (error) {
-    console.error('Error migrating legacy data:', error.message);
-    return [];
+async function addArticlesToD1(db, newArticles, config) {
+  if (newArticles.length === 0) {
+    console.log('No new articles to add to D1');
+    return { inserted: 0, skipped: 0 };
   }
+  
+  console.log(`Inserting ${newArticles.length} articles into D1...`);
+  
+  // Use batch insert from d1-utils (handles INSERT OR IGNORE)
+  const result = await insertArticlesBatch(db, newArticles);
+  
+  console.log(`✓ D1 insert complete: ${result.inserted} new, ${result.skipped} duplicates`);
+  
+  return result;
 }
 
 /**
- * Add new articles to the pending list for processing
- * 
- * NEW BEHAVIOR: The updater now writes articles directly to KV storage,
- * making them immediately visible on the frontend even while processing.
- * The pending list only contains article IDs (not full article objects).
- * 
- * @param {Object} kv - KV storage interface (allows mocking for tests)
- * @param {Array} newArticles - New articles to be processed
- * @param {Object} config - Configuration values
- * @returns {Promise<number>} Number of articles in pending list after update
- */
-async function addToPendingList(kv, newArticles, config) {
-  // Extract IDs from new articles
-  const newArticleIds = newArticles
-    .map(article => getArticleId(article))
-    .filter(id => id);
-  
-  if (newArticleIds.length === 0) {
-    console.log('No new articles to add to pending list');
-    return 0;
-  }
-  
-  // Read existing pending list (now contains only IDs)
-  let pendingList = [];
-  try {
-    const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
-    if (pendingData && Array.isArray(pendingData)) {
-      // Convert from old format (objects) to new format (IDs) for backward compatibility
-      pendingList = pendingData.map(item => {
-        if (typeof item === 'string') {
-          return item;
-        } else if (item && item.id) {
-          return item.id;
-        }
-        return null;
-      }).filter(id => id !== null);
-      console.log(`Found ${pendingList.length} article IDs in pending list`);
-    }
-  } catch (error) {
-    console.log('No existing pending list found, starting fresh');
-  }
-  
-  // Read ID index to check which articles already exist
-  let idIndex = [];
-  try {
-    const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
-    if (idIndexData && Array.isArray(idIndexData)) {
-      idIndex = idIndexData;
-      console.log(`Found ${idIndex.length} articles in ID index`);
-    }
-  } catch (error) {
-    console.log('No ID index found');
-  }
-  
-  const existingArticleIds = new Set(idIndex);
-  
-  // Create a map of article ID to article data for new articles
-  const articleMap = new Map();
-  newArticles.forEach(article => {
-    const id = getArticleId(article);
-    if (id) {
-      articleMap.set(id, article);
-    }
-  });
-  
-  // Determine which articles are truly new
-  const pendingIdSet = new Set(pendingList);
-  const articlesToAdd = [];
-  
-  for (const id of newArticleIds) {
-    if (!pendingIdSet.has(id) && !existingArticleIds.has(id)) {
-      articlesToAdd.push(id);
-    }
-  }
-  
-  if (articlesToAdd.length === 0) {
-    console.log('No new articles to add (all already exist)');
-    return pendingList.length;
-  }
-  
-  // Write articles directly to KV storage (makes them visible immediately)
-  console.log(`Writing ${articlesToAdd.length} articles to KV storage...`);
-  const writePromises = articlesToAdd.map(id => {
-    const article = articleMap.get(id);
-    const articleKey = `article:${id}`;
-    return kv.put(articleKey, JSON.stringify(article), {
-      expirationTtl: config.ID_INDEX_TTL
-    });
-  });
-  
-  const writeResults = await Promise.allSettled(writePromises);
-  const failedWrites = writeResults.filter(r => r.status === 'rejected');
-  
-  if (failedWrites.length > 0) {
-    console.error(`✗ Failed to write ${failedWrites.length} articles to KV`);
-    throw new Error(`KV put failed for ${failedWrites.length} articles`);
-  }
-  
-  console.log(`✓ Wrote ${articlesToAdd.length} articles to KV storage`);
-  
-  // Before merging, trim existing pending list to remove articles already in the OLD ID index
-  // This handles cases where articles were processed and added to ID index by processor
-  // Use the OLD idIndex (before we added new articles) to avoid filtering out newly added articles
-  const existingIdIndexSet = new Set(idIndex);
-  const trimmedExistingPending = pendingList.filter(id => !existingIdIndexSet.has(id));
-  
-  // Update pending list with new article IDs (prepend to maintain newest-first order)
-  const mergedPendingList = [...articlesToAdd, ...trimmedExistingPending];
-  
-  let trimmedPendingList = mergedPendingList;
-  
-  // Update ID index with new articles (prepend to maintain newest-first order)
-  const updatedIdIndex = [...articlesToAdd, ...idIndex];
-  
-  // Limit ID index size
-  const maxStoredArticles = config.MAX_STORED_ARTICLES || 500;
-  const trimmedIdIndex = updatedIdIndex.slice(0, maxStoredArticles);
-  
-  try {
-    await kv.put(
-      config.KV_KEY_IDS,
-      JSON.stringify(trimmedIdIndex),
-      {
-        expirationTtl: config.ID_INDEX_TTL
-      }
-    );
-    console.log(`✓ Updated ID index with ${trimmedIdIndex.length} articles`);
-  } catch (error) {
-    console.error(`✗ Failed to write ID index to KV:`, error.message);
-    // Don't throw - proceed to update pending list so articles will still be processed
-    // Articles are already written to KV and visible to users
-  }
-  
-  // Limit pending list size to prevent unbounded growth
-  const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
-  if (trimmedPendingList.length > maxPendingSize) {
-    console.log(`Pending list exceeds max size (${maxPendingSize}), trimming older articles`);
-    trimmedPendingList = trimmedPendingList.slice(0, maxPendingSize);
-  }
-  
-  console.log(`Adding ${articlesToAdd.length} new article IDs to pending list`);
-  
-  // Write updated pending list to KV (now only contains IDs)
-  try {
-    await kv.put(
-      config.KV_KEY_PENDING,
-      JSON.stringify(trimmedPendingList),
-      {
-        expirationTtl: config.ID_INDEX_TTL
-      }
-    );
-    console.log(`✓ Updated pending list with ${trimmedPendingList.length} total article IDs (${articlesToAdd.length} new)`);
-  } catch (error) {
-    console.error(`✗ Failed to write pending list to KV:`, error.message);
-    throw new Error(`KV put failed for pending list: ${error.message}`);
-  }
-  
-  return trimmedPendingList.length;
-}
-
-/**
- * Main scheduled event handler with optimized three-phase pipeline
- * Phase 1: Preparation - Read ID index from KV
+ * Main scheduled event handler with D1-optimized pipeline
+ * Phase 1: Preparation - Read known article IDs from D1
  * Phase 2: Fetch & Early Exit - Aggregate new articles, stop when hitting known article
- * Phase 3: KV Update - Write both full payload and ID index (2 writes)
+ * Phase 3: D1 Insert - Write new articles to D1 (0 KV writes at this stage)
  * @param {Event} event - Scheduled event
  * @param {Object} env - Environment variables
  * @param {Object} ctx - Execution context
@@ -387,94 +199,34 @@ async function handleScheduled(event, env, ctx) {
   const config = getNewsUpdaterConfig(env);
   
   try {
-    // Phase 1: Preparation - Read ID index, pending queue, and checkpoint
-    console.log('Phase 1: Reading known article IDs from KV...');
-    let knownIds = new Set();
+    // Phase 1: Preparation - Read known article IDs from D1
+    console.log('Phase 1: Reading known article IDs from D1...');
     
-    // Load ID index (processed and stored articles)
-    try {
-      const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
-      if (idIndexData && Array.isArray(idIndexData)) {
-        idIndexData.forEach(id => knownIds.add(id));
-        console.log(`Loaded ${idIndexData.length} article IDs from ID index`);
-      } else {
-        console.log('No existing ID index found');
-      }
-    } catch (error) {
-      console.log('Error reading ID index:', error.message);
-    }
-    
-    // Load pending queue IDs (articles waiting to be processed)
-    try {
-      const pendingData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_PENDING, { type: 'json' });
-      if (pendingData && Array.isArray(pendingData)) {
-        const beforeSize = knownIds.size;
-        pendingData.forEach(item => {
-          // Support both old format (objects with id field) and new format (just IDs)
-          if (typeof item === 'string') {
-            knownIds.add(item);
-          } else if (item && item.id) {
-            knownIds.add(item.id);
-          }
-        });
-        const addedCount = knownIds.size - beforeSize;
-        console.log(`Loaded ${addedCount} IDs from pending queue`);
-      } else {
-        console.log('No pending queue found');
-      }
-    } catch (error) {
-      console.log('Error reading pending queue:', error.message);
-    }
-    
-    // Load checkpoint IDs (articles in processing)
-    try {
-      const checkpoint = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-      if (checkpoint) {
-        // Add currently processing article
-        if (checkpoint.currentArticleId) {
-          knownIds.add(checkpoint.currentArticleId);
-          console.log('Loaded 1 article ID from checkpoint (current)');
-        } else {
-          console.log('No current article in checkpoint');
-        }
-        
-        // Add pending processing article IDs (new field)
-        if (checkpoint.pendingProcessingIds && Array.isArray(checkpoint.pendingProcessingIds)) {
-          const beforeSize = knownIds.size;
-          checkpoint.pendingProcessingIds.forEach(id => knownIds.add(id));
-          const addedCount = knownIds.size - beforeSize;
-          console.log(`Loaded ${addedCount} article IDs from checkpoint (pending processing)`);
-        }
-      } else {
-        console.log('No checkpoint found');
-      }
-    } catch (error) {
-      console.log('Error reading checkpoint:', error.message);
-    }
-    
-    console.log(`Total known article IDs: ${knownIds.size}`);
+    // Get article IDs from D1 for deduplication
+    const knownIds = await getArticleIds(env.DB, config.MAX_STORED_ARTICLES);
+    console.log(`Loaded ${knownIds.size} article IDs from D1`);
     
     // Phase 2: Optimized Fetch with Early Exit
     console.log('Phase 2: Fetching articles with early-exit optimization...');
     const newArticles = await aggregateArticles(env, knownIds, config);
     
     if (newArticles.length === 0) {
-      console.log('No new articles to process, skipping analysis and KV update');
+      console.log('No new articles to process, skipping D1 insert');
       console.log('=== Bitcoin News Updater Cron Job Completed (No Updates) ===');
       return;
     }
     
-    // Phase 2: Mark articles for later processing
-    // This avoids hitting subrequest limits in the producer
+    // Mark articles for later processing
     console.log('Phase 2: Marking articles for AI processing...');
     const markedArticles = await markArticlesForProcessing(newArticles);
     
-    // Phase 3: Add to Pending List (1 write)
-    console.log('Phase 3: Adding articles to pending list...');
-    await addToPendingList(env.CRYPTO_NEWS_CACHE, markedArticles, config);
+    // Phase 3: Insert into D1 (0 KV writes!)
+    console.log('Phase 3: Adding articles to D1 database...');
+    const result = await addArticlesToD1(env.DB, markedArticles, config);
     
     console.log('=== Bitcoin News Updater Cron Job Completed Successfully ===');
-    console.log(`Added ${newArticles.length} articles to pending list for processing by consumer worker`);
+    console.log(`Inserted ${result.inserted} new articles into D1 (${result.skipped} duplicates skipped)`);
+    console.log(`Articles are ready for processing by processor worker`);
   } catch (error) {
     console.error('=== Bitcoin News Updater Cron Job Failed ===');
     console.error('Error:', error);
@@ -483,57 +235,42 @@ async function handleScheduled(event, env, ctx) {
 }
 
 /**
- * Handle HTTP fetch requests to provide cache statistics
- * When called via HTTP (not scheduled), returns JSON with cache info:
+ * Handle HTTP fetch requests to provide database statistics
+ * When called via HTTP (not scheduled), returns JSON with D1 stats:
  * - Number of articles stored
- * - List of article IDs
- * - Latest 10 articles (fetched individually from KV)
+ * - Number of articles needing processing
+ * - Latest 10 articles
  * @param {Request} request - HTTP request
  * @param {Object} env - Environment variables
- * @returns {Promise<Response>} JSON response with cache statistics
+ * @returns {Promise<Response>} JSON response with database statistics
  */
 async function handleFetch(request, env) {
   const config = getNewsUpdaterConfig(env);
   
   try {
-    // Read ID index
-    const idIndexData = await env.CRYPTO_NEWS_CACHE.get(config.KV_KEY_IDS, { type: 'json' });
+    // Get article counts from D1
+    const countsResult = await env.DB.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN needsSentiment = 1 OR needsSummary = 1 THEN 1 ELSE 0 END) as needsProcessing,
+        SUM(CASE WHEN processedAt IS NOT NULL THEN 1 ELSE 0 END) as processed
+      FROM articles
+    `).first();
     
-    if (!idIndexData || !Array.isArray(idIndexData) || idIndexData.length === 0) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'No cached articles found',
-        totalArticles: 0,
-        articleIds: [],
-        latestArticles: []
-      }), {
-        status: 404,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        }
-      });
-    }
+    // Get latest 10 articles
+    const articlesResult = await env.DB.prepare(`
+      SELECT * FROM articles
+      ORDER BY pubDate DESC
+      LIMIT 10
+    `).all();
     
-    // Fetch latest 10 articles individually
-    const latestIds = idIndexData.slice(0, 10);
-    const articlePromises = latestIds.map(id => 
-      env.CRYPTO_NEWS_CACHE.get(`article:${id}`, { type: 'json' })
-    );
-    const latestArticlesData = await Promise.all(articlePromises);
-    
-    // Filter out any null results and add ID field
-    const latestArticles = latestArticlesData
-      .filter(article => article !== null)
-      .map(article => ({
-        ...article,
-        id: getArticleId(article),
-      }));
+    const latestArticles = rowsToArticles(articlesResult.results || []);
     
     const response = {
       success: true,
-      totalArticles: idIndexData.length,
-      articleIds: idIndexData,
+      totalArticles: countsResult?.total || 0,
+      needsProcessing: countsResult?.needsProcessing || 0,
+      processed: countsResult?.processed || 0,
       latestArticles: latestArticles
     };
     
@@ -545,12 +282,13 @@ async function handleFetch(request, env) {
       }
     });
   } catch (error) {
-    console.error('Error fetching cache statistics:', error);
+    console.error('Error fetching database statistics:', error);
     return new Response(JSON.stringify({
       success: false,
       error: error.message,
       totalArticles: 0,
-      articleIds: [],
+      needsProcessing: 0,
+      processed: 0,
       latestArticles: []
     }), {
       status: 500,
@@ -562,9 +300,6 @@ async function handleFetch(request, env) {
   }
 }
 
-// Export for testing
-export { addToPendingList };
-
 export default {
   async scheduled(event, env, ctx) {
     // Use waitUntil to ensure the job completes even if it takes time
@@ -572,7 +307,7 @@ export default {
   },
   
   async fetch(request, env, ctx) {
-    // Handle HTTP requests to provide cache statistics
+    // Handle HTTP requests to provide database statistics
     return handleFetch(request, env);
   }
 };

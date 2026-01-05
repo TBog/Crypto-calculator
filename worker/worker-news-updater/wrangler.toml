@@ -13,6 +13,15 @@ crons = ["0 * * * *"]
 [ai]
 binding = "AI"
 
+# D1 database for article storage and queries
+[[d1_databases]]
+binding = "DB"
+database_name = "crypto-news-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+# Create database with: wrangler d1 create crypto-news-db
+# Initialize schema with: wrangler d1 execute crypto-news-db --file=../schema.sql
+# See D1_SETUP_GUIDE.md for detailed instructions
+
 # KV namespace for storing analyzed news
 [[kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
@@ -55,6 +64,12 @@ head_sampling_rate = 1
 [env.production]
 # Production environment configuration
 # Secrets are automatically available in env.NEWSDATA_API_KEY, env.APITUBE_API_KEY, and env.NEWS_PROVIDER
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "crypto-news-db"
+database_id = "REPLACE_WITH_YOUR_PRODUCTION_D1_DATABASE_ID"
+# Create production database with: wrangler d1 create crypto-news-db --env production
+
 [[env.production.kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with production KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production
