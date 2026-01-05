@@ -604,6 +604,7 @@ function articleIsComplete(article, config) {
  * @param {Object} checkpoint - Current checkpoint
  * @param {Array<string>} currentPendingIds - Current pending list IDs
  * @param {Object} config - Configuration object
+ * @returns {void}
  */
 function syncPendingProcessingIds(checkpoint, currentPendingIds, config) {
   if (!checkpoint.pendingProcessingIds) {
