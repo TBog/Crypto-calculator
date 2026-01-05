@@ -76,6 +76,18 @@ KV is used alongside D1 for caching final API responses:
 
 ## Setup Instructions
 
+### Quick Start with GitHub Actions
+
+The repository includes automated GitHub Actions for deploying both the D1 schema and the workers:
+
+1. **Deploy D1 Schema**: The `deploy-d1-schema.yml` workflow automatically deploys the database schema when changes are pushed to `main` or can be manually triggered
+2. **Deploy Workers**: The `deploy-workers.yml` workflow automatically deploys all workers when changes are pushed to `main`
+
+This means you only need to:
+1. Create the D1 database (see step 1 below)
+2. Update the database IDs in `wrangler.toml` files (see step 2 below)
+3. Push to `main` branch - GitHub Actions will handle the rest!
+
 ### 1. Create D1 Database
 
 ```bash
@@ -142,7 +154,37 @@ database_id = "YOUR_PRODUCTION_DATABASE_ID"
 
 ### 3. Run Database Migrations
 
+#### Option A: Using GitHub Actions (Recommended)
+
+The repository includes a GitHub Action workflow that automatically deploys the D1 schema.
+
+**Automatic Deployment:**
+- The schema is automatically deployed to the development database when `worker/schema.sql` is updated on the `main` branch
+- The workflow runs automatically on push to ensure the database schema is always up-to-date
+
+**Manual Deployment:**
+1. Go to the "Actions" tab in the GitHub repository
+2. Select the "Deploy D1 Database Schema" workflow
+3. Click "Run workflow"
+4. Choose the environment:
+   - `development` - Deploy to development database only
+   - `production` - Deploy to production database only
+   - `both` - Deploy to both environments
+5. Click "Run workflow"
+
+The workflow will:
+- Deploy the schema from `worker/schema.sql`
+- Initialize the `processing_checkpoint` table
+- Verify the deployment was successful
+
+#### Option B: Using Wrangler CLI Locally
+
+You can also deploy the schema manually using Wrangler:
+
 ```bash
+# From the repository root, navigate to the worker directory
+cd worker
+
 # Initialize the database schema (development)
 wrangler d1 execute crypto-news-db --file=./schema.sql
 
