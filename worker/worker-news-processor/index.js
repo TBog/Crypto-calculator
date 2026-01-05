@@ -613,12 +613,14 @@ function syncPendingProcessingIds(checkpoint, currentPendingIds, config) {
   
   // Convert to Set for O(1) lookups
   const pendingIdSet = new Set(currentPendingIds);
-  const pendingProcessingSet = new Set(checkpoint.pendingProcessingIds);
   
   // Keep only IDs that are still in the pending list
   checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => pendingIdSet.has(id));
   
-  // Add current article if it's from pending list
+  // Create Set after filtering for checking if current article needs to be added
+  const pendingProcessingSet = new Set(checkpoint.pendingProcessingIds);
+  
+  // Add current article if it's from pending list and not already tracked
   if (checkpoint.currentArticleId && pendingIdSet.has(checkpoint.currentArticleId)) {
     if (!pendingProcessingSet.has(checkpoint.currentArticleId)) {
       checkpoint.pendingProcessingIds.push(checkpoint.currentArticleId);
@@ -640,7 +642,7 @@ function syncPendingProcessingIds(checkpoint, currentPendingIds, config) {
  * @param {Object} checkpoint - Current checkpoint
  * @param {Object} config - Configuration object
  * @param {Array<string>} pendingList - Current pending list (IDs only)
- * @returns {Promise<Object>} Result with { articleId, article, pendingList, idIndex, pendingListModified }
+ * @returns {Promise<Object>} Result with { articleId, article, pendingList, idIndex, pendingListModified }, where pendingListModified is a boolean indicating if the pending list was changed and needs to be written to KV
  */
 async function getNextArticleToProcess(kv, checkpoint, config, pendingList) {
   let nextArticle = null;
@@ -814,8 +816,6 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     } catch (error) {
       // No pending list
     }
-    
-    currentPendingList = pendingList;
     
     // Use the new helper function to get next article
     const result = await getNextArticleToProcess(kv, checkpoint, config, pendingList);

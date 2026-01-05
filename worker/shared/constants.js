@@ -105,7 +105,7 @@ export const PRICE_HISTORY_CACHE_TTL = 600;  // 10 minutes
 export const MARKET_CHART_CACHE_TTL = 300;  // 5 minutes
 
 // Cache duration for Bitcoin news (in seconds)
-export const BITCOIN_NEWS_CACHE_TTL = 300;  // 5 minute
+export const BITCOIN_NEWS_CACHE_TTL = 300;  // 5 minutes
 
 // CORS configuration (in seconds)
 export const CORS_MAX_AGE = 86400;  // 24 hours
