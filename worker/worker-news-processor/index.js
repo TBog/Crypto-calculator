@@ -640,11 +640,12 @@ function syncPendingProcessingIds(checkpoint, currentPendingIds, config) {
  * @param {Object} checkpoint - Current checkpoint
  * @param {Object} config - Configuration object
  * @param {Array<string>} pendingList - Current pending list (IDs only)
- * @returns {Promise<Object>} Result with { articleId, article, pendingList, idIndex }
+ * @returns {Promise<Object>} Result with { articleId, article, pendingList, idIndex, pendingListModified }
  */
 async function getNextArticleToProcess(kv, checkpoint, config, pendingList) {
   let nextArticle = null;
   let nextArticleId = null;
+  let pendingListModified = false; // Track if pending list needs to be written
   
   // Read ID index for later use when updating
   let idIndex = [];
@@ -671,62 +672,50 @@ async function getNextArticleToProcess(kv, checkpoint, config, pendingList) {
       nextArticle = await kv.get(articleKey, { type: 'json' });
       
       if (!nextArticle) {
-        console.log(`Article not found in KV: ${nextArticleId}, removing from pending list`);
-        // Remove from pending list and update checkpoint
-        const updatedPending = pendingList.filter(id => id !== nextArticleId);
-        await kv.put(
-          config.KV_KEY_PENDING,
-          JSON.stringify(updatedPending),
-          { expirationTtl: config.ID_INDEX_TTL }
-        );
+        console.log(`Article not found in KV: ${nextArticleId}, will remove from pending list`);
+        // Remove from pending list - mark as modified but don't write yet
+        pendingList = pendingList.filter(id => id !== nextArticleId);
+        pendingListModified = true;
         
         // Update checkpoint's pendingProcessingIds
         if (checkpoint.pendingProcessingIds) {
           checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => id !== nextArticleId);
         }
         
-        return { articleId: null, article: null, pendingList: updatedPending, idIndex };
+        return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
       }
       
       // Validate article has required fields
       if (!getArticleId(nextArticle)) {
-        console.log(`Article ${nextArticleId} missing ID field, removing from pending list`);
-        const updatedPending = pendingList.filter(id => id !== nextArticleId);
-        await kv.put(
-          config.KV_KEY_PENDING,
-          JSON.stringify(updatedPending),
-          { expirationTtl: config.ID_INDEX_TTL }
-        );
+        console.log(`Article ${nextArticleId} missing ID field, will remove from pending list`);
+        pendingList = pendingList.filter(id => id !== nextArticleId);
+        pendingListModified = true;
         
         // Update checkpoint's pendingProcessingIds
         if (checkpoint.pendingProcessingIds) {
           checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => id !== nextArticleId);
         }
         
-        return { articleId: null, article: null, pendingList: updatedPending, idIndex };
+        return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
       }
       
       // Check if article actually needs processing
       if (!articleNeedsProcessing(nextArticle, config)) {
-        console.log(`Article ${nextArticleId} doesn't need processing, removing from pending list`);
+        console.log(`Article ${nextArticleId} doesn't need processing, will remove from pending list`);
         // Remove from pending list
-        const updatedPending = pendingList.filter(id => id !== nextArticleId);
-        await kv.put(
-          config.KV_KEY_PENDING,
-          JSON.stringify(updatedPending),
-          { expirationTtl: config.ID_INDEX_TTL }
-        );
+        pendingList = pendingList.filter(id => id !== nextArticleId);
+        pendingListModified = true;
         
         // Update checkpoint's pendingProcessingIds
         if (checkpoint.pendingProcessingIds) {
           checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => id !== nextArticleId);
         }
         
-        return { articleId: null, article: null, pendingList: updatedPending, idIndex };
+        return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
       }
     } catch (error) {
       console.error(`Error reading article ${nextArticleId} from KV:`, error.message);
-      return { articleId: null, article: null, pendingList, idIndex };
+      return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
     }
   } else if (checkpoint.tryLater && checkpoint.tryLater.length > 0) {
     // Get first article ID from try-later list
@@ -740,24 +729,16 @@ async function getNextArticleToProcess(kv, checkpoint, config, pendingList) {
       if (!nextArticle) {
         console.log(`Article not found in KV (try-later): ${nextArticleId}, removing from list`);
         checkpoint.tryLater = checkpoint.tryLater.filter(id => id !== nextArticleId);
-        try {
-          await kv.put(
-            config.KV_KEY_CHECKPOINT,
-            JSON.stringify(checkpoint),
-            { expirationTtl: config.ID_INDEX_TTL }
-          );
-        } catch (error) {
-          console.error(`Failed to update checkpoint after removing missing article:`, error.message);
-        }
-        return { articleId: null, article: null, pendingList, idIndex };
+        // Note: Checkpoint will be written later, so we don't write it here
+        return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
       }
     } catch (error) {
       console.error(`Error reading article ${nextArticleId} from KV (try-later):`, error.message);
-      return { articleId: null, article: null, pendingList, idIndex };
+      return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
     }
   }
   
-  return { articleId: nextArticleId, article: nextArticle, pendingList, idIndex };
+  return { articleId: nextArticleId, article: nextArticle, pendingList, idIndex, pendingListModified };
 }
 
 /**
@@ -842,32 +823,35 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     nextArticle = result.article;
     cachedIdIndex = result.idIndex; // Cache for later use
     currentPendingList = result.pendingList; // Use updated pending list
+    const pendingListModified = result.pendingListModified;
     
-    // If no article to process, sync and return
+    // If no article to process, write pending list if modified, sync and return
     if (!nextArticleId || !nextArticle) {
+      // Write pending list only if it was modified (optimization to reduce KV writes)
+      if (pendingListModified) {
+        try {
+          await kv.put(
+            config.KV_KEY_PENDING,
+            JSON.stringify(currentPendingList),
+            { expirationTtl: config.ID_INDEX_TTL }
+          );
+          console.log(`✓ Updated pending list (removed invalid articles)`);
+        } catch (error) {
+          console.error(`✗ Failed to write pending list:`, error.message);
+          // Don't throw - this is not critical
+        }
+      }
+      
       syncPendingProcessingIds(checkpoint, currentPendingList, config);
       return { processed: false, articleId: null, article: null, checkpoint };
     }
   }
   
   // Step 4: Update checkpoint with current article
+  // Note: We'll write checkpoint only once at the end to reduce KV writes
   checkpoint.currentArticleId = nextArticleId;
   checkpoint.currentArticle = nextArticle;
   checkpoint.lastUpdate = Date.now();
-  
-  try {
-    await kv.put(
-      config.KV_KEY_CHECKPOINT,
-      JSON.stringify(checkpoint),
-      {
-        expirationTtl: config.ID_INDEX_TTL
-      }
-    );
-    console.log(`✓ Checkpoint updated (before processing): article ${nextArticleId}`);
-  } catch (error) {
-    console.error(`✗ Failed to write checkpoint (before processing):`, error.message);
-    throw new Error(`KV put failed for checkpoint: ${error.message}`);
-  }
   
   // Step 5: Process the article
   let updatedArticle;
@@ -879,21 +863,9 @@ async function processNextArticle(kv, env, config, processArticleFn = processArt
     
     // Check if processing completed or if it needs more runs
     if (articleNeedsProcessing(updatedArticle, config)) {
-      // Article needs more processing runs, save progress
+      // Article needs more processing runs, save progress in checkpoint
       checkpoint.currentArticle = updatedArticle;
-      try {
-        await kv.put(
-          config.KV_KEY_CHECKPOINT,
-          JSON.stringify(checkpoint),
-          {
-            expirationTtl: config.ID_INDEX_TTL
-          }
-        );
-        console.log(`✓ Checkpoint updated (partial progress): article ${nextArticleId}`);
-      } catch (error) {
-        console.error(`✗ Failed to write checkpoint (partial progress):`, error.message);
-        throw new Error(`KV put failed for checkpoint: ${error.message}`);
-      }
+      // Checkpoint will be written at the end of this function
     }
     
     // Check if article hit max retries

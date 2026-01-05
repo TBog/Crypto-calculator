@@ -3,13 +3,13 @@ main = "index.js"
 compatibility_date = "2024-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Cron trigger - runs every 2 minutes to balance processing speed with write limits
+# Cron trigger - runs every 10 minutes to stay within KV write limits
 # Format: "minute hour day month day-of-week"
-# "*/2 * * * *" = every 2 minutes (720 runs/day)
-# This provides safety margin for free tier 1,000 writes/day limit
-# while still processing articles reasonably fast
+# "*/10 * * * *" = every 10 minutes (144 runs/day)
+# This keeps us well under the free tier 1,000 writes/day limit
+# Previous: "*/2 * * * *" was causing ~2160 writes/day from processor alone
 [triggers]
-crons = ["*/2 * * * *"]
+crons = ["*/10 * * * *"]
 
 # AI binding for sentiment analysis and summarization
 [ai]
