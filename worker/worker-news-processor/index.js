@@ -2,9 +2,10 @@
  * Scheduled Cloudflare Worker for Processing Pending Bitcoin News Articles
  * 
  * This worker runs on a cron schedule (every 10 minutes) to:
- * 1. Read articles from KV that need processing (check postprocessing flags)
+ * 1. Read articles from D1 that need processing (check postprocessing flags)
  * 2. Process up to 5 articles per run (to stay within subrequest limits)
- * 3. Update each article in KV after processing (incremental writes for reliability)
+ * 3. Update each article in D1 after processing (incremental writes for reliability)
+ * 4. Update KV cache with final results after processing batch
  * 
  * Also supports on-demand processing via HTTP GET:
  * - URL: GET /process?articleId=<id>
@@ -26,7 +27,8 @@
  * This approach solves the "Too many subrequests" error by:
  * - Processing articles in small batches (5 at a time)
  * - Running frequently (every 10 minutes) to keep articles up-to-date
- * - Using free KV storage instead of paid Queues
+ * - Using D1 for intermediate article updates during processing
+ * - Using KV only for final results cache (reduces KV writes from ~720/day to ~150/day)
  * 
  * Neuron Budget Optimization:
  * - Content extraction skips headers, footers, navigation, ads, and sidebars
@@ -40,24 +42,16 @@ import {
   MAX_CONTENT_FETCH_ATTEMPTS,
   decodeHTMLEntities
 } from '../shared/constants.js';
+import {
+  getArticlesNeedingProcessing,
+  getArticleById,
+  updateArticle as updateArticleInD1,
+  updateCheckpoint,
+  rowToArticle,
+  getAllArticles
+} from '../shared/d1-utils.js';
 
-/**
- * Helper function to convert pending list items to IDs
- * Supports both old format (objects with id field) and new format (just IDs)
- * @param {Array} pendingData - Pending list data from KV
- * @returns {Array<string>} Array of article IDs
- */
-function convertPendingListToIds(pendingData) {
-  if (!pendingData || !Array.isArray(pendingData)) {
-    return [];
-  }
-  
-  return pendingData.filter(item => {
-    return typeof item === 'string' || (item && item.id);
-  }).map(item => {
-    return typeof item === 'string' ? item : item.id;
-  });
-}
+
 
 /**
  * HTMLRewriter handler to extract text content from HTML
@@ -400,24 +394,25 @@ async function analyzeSentiment(env, article) {
  * Process a single article with AI analysis
  * 
  * Architecture: Phase-based processing across successive cron runs
- * - Phase 0 (needsSentiment): Analyze sentiment, save, exit
- * - Phase 1 (no extractedContent): Scrape content (raw/undecoded), save, exit
- * - Phase 2 (has extractedContent): Decode and run AI summary, save, exit
+ * - Phase 0 (needsSentiment): Analyze sentiment, save to D1, exit
+ * - Phase 1 (no extractedContent): Scrape content (raw/undecoded), save to D1, exit
+ * - Phase 2 (has extractedContent): Decode and run AI summary, save to D1, exit
  * 
  * This splits work naturally without defensive saves during processing.
- * The 1-minute cron schedule ensures phases execute quickly in sequence.
+ * The 10-minute cron schedule ensures phases execute quickly in sequence.
  * 
  * Checks postprocessing flags and processes accordingly:
  * - needsSentiment: true → needs sentiment analysis
  * - needsSummary: true → needs AI summary generation
  * - contentTimeout: integer → number of failed attempts (retry if < MAX_ATTEMPTS)
  * 
+ * @param {D1Database} db - D1 database instance
  * @param {Object} env - Environment variables
  * @param {Object} article - Article to process
  * @param {Object} config - Configuration object
  * @returns {Promise<Object>} Processed article with updates
  */
-async function processArticle(env, article, config) {
+async function processArticle(db, env, article, config) {
   const updates = { ...article };
   let needsUpdate = false;
   
@@ -435,10 +430,25 @@ async function processArticle(env, article, config) {
       needsUpdate = true;
       console.log(`  ✓ Sentiment: ${sentimentResult}`);
       
+      // Update article in D1
+      const articleId = getArticleId(article);
+      await updateArticleInD1(db, articleId, {
+        sentiment: sentimentResult,
+        needsSentiment: false,
+        processedAt: Date.now()
+      });
+      
     } catch (error) {
       console.error(`  Failed sentiment analysis:`, error.message);
       // Keep flag as true to retry next run, but still record last processing attempt time
       updates.processedAt = Date.now();
+      
+      // Update only processedAt in D1
+      const articleId = getArticleId(article);
+      await updateArticleInD1(db, articleId, {
+        processedAt: Date.now()
+      });
+      
       return updates;
     }
   }
@@ -507,6 +517,15 @@ async function processArticle(env, article, config) {
         // Exit after scraping phase - AI will run in next cron call
         if (needsUpdate) {
           updates.processedAt = Date.now();
+          
+          // Update article in D1 with extracted content or error
+          const articleId = getArticleId(article);
+          await updateArticleInD1(db, articleId, {
+            contentTimeout: updates.contentTimeout,
+            summaryError: updates.summaryError,
+            needsSummary: updates.needsSummary !== undefined ? updates.needsSummary : undefined,
+            processedAt: updates.processedAt
+          });
         }
         return updates;
       }
@@ -545,7 +564,7 @@ async function processArticle(env, article, config) {
         }
       } catch (error) {
         console.error(`  Failed AI summary generation:`, error.message);
-        // Keep the extracted content for next retry
+        const timeoutCount = article.contentTimeout || 0;
         updates.summaryError = `ai_error: ${error.message.substring(0, 100)} (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
         
         // If we've hit max retries, stop trying
@@ -558,12 +577,36 @@ async function processArticle(env, article, config) {
         
         needsUpdate = true;
       }
+      
+      // Update article in D1 after AI phase
+      if (needsUpdate) {
+        updates.processedAt = Date.now();
+        
+        const articleId = getArticleId(article);
+        await updateArticleInD1(db, articleId, {
+          aiSummary: updates.aiSummary,
+          needsSummary: updates.needsSummary !== undefined ? updates.needsSummary : undefined,
+          contentTimeout: updates.contentTimeout,
+          summaryError: updates.summaryError,
+          processedAt: updates.processedAt
+        });
+      }
     } else {
       console.log(`  AI Summary: No link available`);
       // No link, set flag to false (can't process)
       updates.needsSummary = false;
       updates.summaryError = 'no_link';  // Store reason for failure
       needsUpdate = true;
+      
+      // Update article in D1
+      updates.processedAt = Date.now();
+      const articleId = getArticleId(article);
+      await updateArticleInD1(db, articleId, {
+        needsSummary: false,
+        summaryError: 'no_link',
+        processedAt: updates.processedAt
+      });
+    }
     }
   }
   
@@ -577,508 +620,175 @@ async function processArticle(env, article, config) {
 
 /**
  * Helper function to check if an article needs processing
- * @param {Object} article - Article object
+ * @param {Object} article - Article object (D1 row format with integers for booleans)
  * @param {Object} config - Configuration object
  * @returns {boolean} True if article needs processing
  */
 function articleNeedsProcessing(article, config) {
-  return (article.needsSentiment ?? true) || 
-         (article.needsSummary ?? true) || 
+  // Convert D1 integer booleans to actual booleans
+  const needsSentiment = article.needsSentiment === 1;
+  const needsSummary = article.needsSummary === 1;
+  
+  return needsSentiment || 
+         needsSummary || 
          (article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
 }
 
 /**
  * Helper function to check if an article is fully complete
- * @param {Object} article - Article object
+ * @param {Object} article - Article object (D1 row format with integers for booleans)
  * @param {Object} config - Configuration object
  * @returns {boolean} True if article is fully complete
  */
 function articleIsComplete(article, config) {
-  return !(article.needsSentiment ?? true) && 
-         !(article.needsSummary ?? true) && 
+  // Convert D1 integer booleans to actual booleans
+  const needsSentiment = article.needsSentiment === 1;
+  const needsSummary = article.needsSummary === 1;
+  
+  return !needsSentiment && 
+         !needsSummary && 
          !(article.contentTimeout && article.contentTimeout < config.MAX_CONTENT_FETCH_ATTEMPTS);
 }
 
 /**
- * Helper function to synchronize pendingProcessingIds with current pending list
- * @param {Object} checkpoint - Current checkpoint
- * @param {Array<string>} currentPendingIds - Current pending list IDs
- * @param {Object} config - Configuration object
- * @returns {void}
- */
-function syncPendingProcessingIds(checkpoint, currentPendingIds, config) {
-  if (!checkpoint.pendingProcessingIds) {
-    checkpoint.pendingProcessingIds = [];
-  }
-  
-  // Convert to Set for O(1) lookups
-  const pendingIdSet = new Set(currentPendingIds);
-  
-  // Keep only IDs that are still in the pending list
-  checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => pendingIdSet.has(id));
-  
-  // Create Set after filtering for checking if current article needs to be added
-  const pendingProcessingSet = new Set(checkpoint.pendingProcessingIds);
-  
-  // Add current article if it's from pending list and not already tracked
-  if (checkpoint.currentArticleId && pendingIdSet.has(checkpoint.currentArticleId)) {
-    if (!pendingProcessingSet.has(checkpoint.currentArticleId)) {
-      checkpoint.pendingProcessingIds.push(checkpoint.currentArticleId);
-    }
-  }
-  
-  // Limit size to match pending list max size
-  const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
-  if (checkpoint.pendingProcessingIds.length > maxPendingSize) {
-    checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.slice(0, maxPendingSize);
-  }
-}
-
-/**
- * Get next article to process from pending list or try-later list
- * This function is extracted for testing purposes
+ * Process next batch of articles from D1
+ * Simplified approach: Read articles from D1, process them, update D1
  * 
- * @param {Object} kv - KV storage interface (allows mocking for tests)
- * @param {Object} checkpoint - Current checkpoint
- * @param {Object} config - Configuration object
- * @param {Array<string>} pendingList - Current pending list (IDs only)
- * @returns {Promise<Object>} Result with { articleId, article, pendingList, idIndex, pendingListModified }, where pendingListModified is a boolean indicating if the pending list was changed and needs to be written to KV
- */
-async function getNextArticleToProcess(kv, checkpoint, config, pendingList) {
-  let nextArticle = null;
-  let nextArticleId = null;
-  let pendingListModified = false; // Track if pending list needs to be written
-  
-  // Read ID index for later use when updating
-  let idIndex = [];
-  try {
-    const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
-    if (idIndexData && Array.isArray(idIndexData)) {
-      idIndex = idIndexData;
-    }
-  } catch (error) {
-    // No index yet
-  }
-  
-  // Limit pending list size to prevent unbounded growth
-  const maxPendingSize = config.MAX_PENDING_LIST_SIZE || 500;
-  const limitedPending = pendingList.slice(0, maxPendingSize);
-  
-  if (limitedPending.length > 0) {
-    // Get first article ID from pending list
-    nextArticleId = limitedPending[0];
-    
-    // Read article from KV storage
-    try {
-      const articleKey = `article:${nextArticleId}`;
-      nextArticle = await kv.get(articleKey, { type: 'json' });
-      
-      if (!nextArticle) {
-        console.log(`Article not found in KV: ${nextArticleId}, will remove from pending list`);
-        // Remove from pending list - mark as modified but don't write yet
-        pendingList = pendingList.filter(id => id !== nextArticleId);
-        pendingListModified = true;
-        
-        // Update checkpoint's pendingProcessingIds
-        if (checkpoint.pendingProcessingIds) {
-          checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => id !== nextArticleId);
-        }
-        
-        return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
-      }
-      
-      // Validate article has required fields
-      if (!getArticleId(nextArticle)) {
-        console.log(`Article ${nextArticleId} missing ID field, will remove from pending list`);
-        pendingList = pendingList.filter(id => id !== nextArticleId);
-        pendingListModified = true;
-        
-        // Update checkpoint's pendingProcessingIds
-        if (checkpoint.pendingProcessingIds) {
-          checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => id !== nextArticleId);
-        }
-        
-        return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
-      }
-      
-      // Check if article actually needs processing
-      if (!articleNeedsProcessing(nextArticle, config)) {
-        console.log(`Article ${nextArticleId} doesn't need processing, will remove from pending list`);
-        // Remove from pending list
-        pendingList = pendingList.filter(id => id !== nextArticleId);
-        pendingListModified = true;
-        
-        // Update checkpoint's pendingProcessingIds
-        if (checkpoint.pendingProcessingIds) {
-          checkpoint.pendingProcessingIds = checkpoint.pendingProcessingIds.filter(id => id !== nextArticleId);
-        }
-        
-        return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
-      }
-    } catch (error) {
-      console.error(`Error reading article ${nextArticleId} from KV:`, error.message);
-      return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
-    }
-  } else if (checkpoint.tryLater && checkpoint.tryLater.length > 0) {
-    // Get first article ID from try-later list
-    nextArticleId = checkpoint.tryLater[0];
-    
-    // Read article from KV storage
-    try {
-      const articleKey = `article:${nextArticleId}`;
-      nextArticle = await kv.get(articleKey, { type: 'json' });
-      
-      if (!nextArticle) {
-        console.log(`Article not found in KV (try-later): ${nextArticleId}, removing from list`);
-        checkpoint.tryLater = checkpoint.tryLater.filter(id => id !== nextArticleId);
-        // Note: Checkpoint will be written later, so we don't write it here
-        return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
-      }
-    } catch (error) {
-      console.error(`Error reading article ${nextArticleId} from KV (try-later):`, error.message);
-      return { articleId: null, article: null, pendingList, idIndex, pendingListModified };
-    }
-  }
-  
-  return { articleId: nextArticleId, article: nextArticle, pendingList, idIndex, pendingListModified };
-}
-
-/**
- * Process a single article through the checkpoint-based pipeline
- * This function encapsulates the core processing logic for testing
- * 
- * @param {Object} kv - KV storage interface (allows mocking for tests)
+ * @param {D1Database} db - D1 database instance
  * @param {Object} env - Environment variables (for AI processing)
  * @param {Object} config - Configuration object
- * @param {Function} processArticleFn - Article processing function (allows mocking)
- * @returns {Promise<Object>} Result object with { processed: boolean, articleId: string|null, article: Object, checkpoint: Object }
+ * @returns {Promise<Object>} Result object with { processed: number, articlesProcessed: Array }
  */
-async function processNextArticle(kv, env, config, processArticleFn = processArticle) {
-  // Step 1: Read checkpoint to determine state
-  let checkpoint = {
-    currentArticleId: null,
-    currentArticle: null,
-    tryLater: [],
-    pendingProcessingIds: [],
-    lastUpdate: null
-  };
+async function processBatchFromD1(db, env, config) {
+  const maxArticles = config.MAX_ARTICLES_PER_RUN || 5;
   
-  try {
-    const checkpointData = await kv.get(config.KV_KEY_CHECKPOINT, { type: 'json' });
-    if (checkpointData) {
-      // Explicitly exclude processedIds during transition from old checkpoint format
-      const { processedIds, ...cleanCheckpointData } = checkpointData;
-      checkpoint = { ...checkpoint, ...cleanCheckpointData };
-    }
-  } catch (error) {
-    // Checkpoint doesn't exist, use defaults
+  console.log(`Reading up to ${maxArticles} articles needing processing from D1...`);
+  
+  // Get articles from D1 that need processing
+  const articlesToProcess = await getArticlesNeedingProcessing(db, maxArticles);
+  
+  if (articlesToProcess.length === 0) {
+    console.log('No articles need processing');
+    return { processed: 0, articlesProcessed: [] };
   }
   
-  // Step 2: Check if previous article completed successfully
-  if (checkpoint.currentArticleId && checkpoint.currentArticle) {
-    const article = checkpoint.currentArticle;
-    
-    if (!articleNeedsProcessing(article, config)) {
-      // Article completed successfully
-      checkpoint.currentArticleId = null;
-      checkpoint.currentArticle = null;
-    }
-  }
+  console.log(`Found ${articlesToProcess.length} article(s) needing processing`);
   
-  // Step 3: Get next article to process
-  let nextArticle = null;
-  let nextArticleId = null;
-  let cachedIdIndex = null; // Cache ID index to avoid redundant KV reads
-  let currentPendingList = []; // Track current pending list for sync
+  const processedArticles = [];
   
-  if (checkpoint.currentArticleId && checkpoint.currentArticle) {
-    // Continue processing current article
-    nextArticleId = checkpoint.currentArticleId;
-    nextArticle = checkpoint.currentArticle;
-    
-    // Still need to read pending list for sync later
-    try {
-      const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
-      if (pendingData && Array.isArray(pendingData)) {
-        currentPendingList = convertPendingListToIds(pendingData);
-      }
-    } catch (error) {
-      // No pending list
-    }
-  } else {
-    // Read pending list (now contains only IDs)
-    let pendingList = [];
-    try {
-      const pendingData = await kv.get(config.KV_KEY_PENDING, { type: 'json' });
-      if (pendingData && Array.isArray(pendingData)) {
-        pendingList = convertPendingListToIds(pendingData);
-      }
-    } catch (error) {
-      // No pending list
-    }
-    
-    // Use the new helper function to get next article
-    const result = await getNextArticleToProcess(kv, checkpoint, config, pendingList);
-    nextArticleId = result.articleId;
-    nextArticle = result.article;
-    cachedIdIndex = result.idIndex; // Cache for later use
-    currentPendingList = result.pendingList; // Use updated pending list
-    const pendingListModified = result.pendingListModified;
-    
-    // If no article to process, write pending list if modified, sync and return
-    if (!nextArticleId || !nextArticle) {
-      // Write pending list only if it was modified (optimization to reduce KV writes)
-      if (pendingListModified) {
-        try {
-          await kv.put(
-            config.KV_KEY_PENDING,
-            JSON.stringify(currentPendingList),
-            { expirationTtl: config.ID_INDEX_TTL }
-          );
-          console.log(`✓ Updated pending list (removed invalid articles)`);
-        } catch (error) {
-          console.error(`✗ Failed to write pending list:`, error.message);
-          // Don't throw - this is not critical
-        }
-      }
-      
-      syncPendingProcessingIds(checkpoint, currentPendingList, config);
-      return { processed: false, articleId: null, article: null, checkpoint };
-    }
-  }
-  
-  // Step 4: Update checkpoint with current article
-  // Note: We'll write checkpoint only once at the end to reduce KV writes
-  checkpoint.currentArticleId = nextArticleId;
-  checkpoint.currentArticle = nextArticle;
-  checkpoint.lastUpdate = Date.now();
-  
-  // Step 5: Process the article
-  let updatedArticle;
-  let processingFailed = false;
-  let failureReason = null;
-  
-  try {
-    updatedArticle = await processArticleFn(env, nextArticle, config);
-    
-    // Check if processing completed or if it needs more runs
-    if (articleNeedsProcessing(updatedArticle, config)) {
-      // Article needs more processing runs, save progress in checkpoint
-      checkpoint.currentArticle = updatedArticle;
-      // Checkpoint will be written at the end of this function
-    }
-    
-    // Check if article hit max retries
-    if ((updatedArticle.contentTimeout || 0) >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
-      processingFailed = true;
-      failureReason = 'max_retries_reached';
-    }
-    
-  } catch (error) {
-    processingFailed = true;
-    failureReason = error.message;
-    updatedArticle = { ...nextArticle, summaryError: `processing_error: ${error.message}` };
-  }
-  
-  // Step 6: Write article to KV and update ID index
-  const articleKey = `article:${nextArticleId}`;
-  try {
-    await kv.put(articleKey, JSON.stringify(updatedArticle), {
-      expirationTtl: config.ID_INDEX_TTL
-    });
-    console.log(`✓ Article written to KV: ${articleKey}`);
-  } catch (error) {
-    console.error(`✗ Failed to write article to KV (${articleKey}):`, error.message);
-    throw new Error(`KV put failed for article: ${error.message}`);
-  }
-  
-  // Update ID index
-  // Reuse cached index if available (from earlier read when filtering pending list)
-  let idIndex = cachedIdIndex;
-  let removedArticleIds = [];
-  
-  if (idIndex === null) {
-    // Index not cached, need to read it
-    idIndex = [];
-    try {
-      const idIndexData = await kv.get(config.KV_KEY_IDS, { type: 'json' });
-      if (idIndexData && Array.isArray(idIndexData)) {
-        idIndex = idIndexData;
-      }
-    } catch (error) {
-      // No index yet
-    }
-  }
-  
-  if (!idIndex.includes(nextArticleId)) {
-    idIndex.unshift(nextArticleId);
-    
-    // Limit index size and track removed articles
-    const maxArticles = config.MAX_STORED_ARTICLES || 500;
-    if (idIndex.length > maxArticles) {
-      removedArticleIds = idIndex.slice(maxArticles);
-      idIndex = idIndex.slice(0, maxArticles);
-    }
+  // Process each article
+  for (const article of articlesToProcess) {
+    const articleId = article.id;
+    console.log(`Processing article: ${articleId} - "${article.title?.substring(0, 50)}..."`);
     
     try {
-      await kv.put(
-        config.KV_KEY_IDS,
-        JSON.stringify(idIndex),
-        {
-          expirationTtl: config.ID_INDEX_TTL
-        }
-      );
-      console.log(`✓ ID index updated: ${idIndex.length} articles`);
+      // Convert D1 row to article object format for processing
+      const articleObj = rowToArticle(article);
+      
+      // Update checkpoint to track current article
+      await updateCheckpoint(db, articleId);
+      
+      // Process the article (updates D1 internally)
+      await processArticle(db, env, articleObj, config);
+      
+      // Clear checkpoint after processing
+      await updateCheckpoint(db, null);
+      
+      processedArticles.push(articleId);
+      
     } catch (error) {
-      console.error(`✗ Failed to write ID index:`, error.message);
-      throw new Error(`KV put failed for ID index: ${error.message}`);
-    }
-    
-    // Delete old articles from KV if configured to do so
-    if (config.DELETE_OLD_ARTICLES && removedArticleIds.length > 0) {
-      try {
-        const deletePromises = removedArticleIds.map(id => kv.delete(`article:${id}`));
-        const deleteResults = await Promise.allSettled(deletePromises);
-        const failedDeletes = deleteResults.filter(r => r.status === 'rejected').length;
-        
-        if (failedDeletes > 0) {
-          console.error(`✗ Failed to delete ${failedDeletes} of ${removedArticleIds.length} old articles`);
-        } else {
-          console.log(`✓ Deleted ${removedArticleIds.length} old articles from KV`);
-        }
-      } catch (error) {
-        console.error(`✗ Failed to delete old articles:`, error.message);
-        // Don't throw here - deletion failure is not critical
-      }
+      console.error(`Failed to process article ${articleId}:`, error.message);
+      // Continue with next article - don't fail entire batch
     }
   }
   
+  console.log(`Processed ${processedArticles.length} article(s)`);
   
-  // Step 7: Update checkpoint based on success/failure
-  if (processingFailed) {
-    // When max retries reached, mark as processed with empty sentiment/summary
-    // instead of adding to try-later list
-    if (failureReason === 'max_retries_reached') {
-      // Mark article as processed with empty values
-      updatedArticle.needsSentiment = false;
-      updatedArticle.needsSummary = false;
-      updatedArticle.sentiment = updatedArticle.sentiment || '';
-      updatedArticle.aiSummary = updatedArticle.aiSummary || '';
-      
-      // Re-write the article with updated values
-      try {
-        await kv.put(`article:${nextArticleId}`, JSON.stringify(updatedArticle), {
-          expirationTtl: config.ID_INDEX_TTL
-        });
-        console.log(`✓ Article re-written with empty values (max retries): ${nextArticleId}`);
-      } catch (error) {
-        console.error(`✗ Failed to re-write article (max retries) to KV:`, error.message);
-        throw new Error(`KV put failed for article: ${error.message}`);
-      }
-      
-      checkpoint.currentArticleId = null;
-      checkpoint.currentArticle = null;
-      // Remove from try-later list if it was there (now only contains IDs)
-      checkpoint.tryLater = (checkpoint.tryLater || []).filter(id => id !== nextArticleId);
-      
-      // Remove from pending list when max retries reached
-      try {
-        // Use Set for O(1) lookup performance
-        const pendingIdSet = new Set(currentPendingList);
-        
-        if (pendingIdSet.has(nextArticleId)) {
-          const updatedPending = currentPendingList.filter(id => id !== nextArticleId);
-          await kv.put(
-            config.KV_KEY_PENDING,
-            JSON.stringify(updatedPending),
-            { expirationTtl: config.ID_INDEX_TTL }
-          );
-          currentPendingList = updatedPending; // Update local copy
-          console.log(`✓ Removed max-retries article from pending list: ${nextArticleId}`);
-        }
-      } catch (error) {
-        console.error(`✗ Failed to remove article from pending list:`, error.message);
-        // Don't throw - this is not critical
-      }
+  return { processed: processedArticles.length, articlesProcessed: processedArticles };
+}
+/**
+ * Update KV cache with processed articles from D1
+ * This writes the final results to KV for fast frontend access
+ * 
+ * @param {Object} kv - KV storage binding
+ * @param {D1Database} db - D1 database instance
+ * @param {Object} config - Configuration object
+ * @returns {Promise<number>} Number of articles written to KV
+ */
+async function updateKVCache(kv, db, config) {
+  console.log('Updating KV cache with processed articles from D1...');
+  
+  // Get all articles from D1 (up to MAX_STORED_ARTICLES)
+  const articles = await getAllArticles(db, config.MAX_STORED_ARTICLES || 500);
+  
+  if (articles.length === 0) {
+    console.log('No articles to cache');
+    return 0;
+  }
+  
+  // Convert D1 rows to article objects
+  const articleObjects = articles.map(rowToArticle);
+  
+  // Write each article to KV
+  let writtenCount = 0;
+  const writePromises = [];
+  
+  for (const article of articleObjects) {
+    const articleId = getArticleId(article);
+    if (!articleId) continue;
+    
+    const articleKey = `article:${articleId}`;
+    const promise = kv.put(
+      articleKey,
+      JSON.stringify(article),
+      { expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30 }
+    );
+    
+    writePromises.push(promise);
+  }
+  
+  // Wait for all writes to complete
+  const results = await Promise.allSettled(writePromises);
+  
+  // Count successful writes
+  results.forEach(result => {
+    if (result.status === 'fulfilled') {
+      writtenCount++;
     } else {
-      // Move article to try-later list for other failures (now only stores IDs)
-      checkpoint.tryLater = (checkpoint.tryLater || []).filter(id => id !== nextArticleId);
-      checkpoint.tryLater.push(nextArticleId);
-      
-      checkpoint.currentArticleId = null;
-      checkpoint.currentArticle = null;
+      console.error('Failed to write article to KV:', result.reason);
     }
-  } else {
-    // Check if article is fully complete
-    if (articleIsComplete(updatedArticle, config)) {
-      checkpoint.currentArticleId = null;
-      checkpoint.currentArticle = null;
-      checkpoint.tryLater = (checkpoint.tryLater || []).filter(id => id !== nextArticleId);
-      
-      // Remove from pending list when fully complete
-      try {
-        // Use Set for O(1) lookup performance
-        const pendingIdSet = new Set(currentPendingList);
-        
-        if (pendingIdSet.has(nextArticleId)) {
-          const updatedPending = currentPendingList.filter(id => id !== nextArticleId);
-          await kv.put(
-            config.KV_KEY_PENDING,
-            JSON.stringify(updatedPending),
-            { expirationTtl: config.ID_INDEX_TTL }
-          );
-          currentPendingList = updatedPending; // Update local copy
-          console.log(`✓ Removed completed article from pending list: ${nextArticleId}`);
-        }
-      } catch (error) {
-        console.error(`✗ Failed to remove article from pending list:`, error.message);
-        // Don't throw - this is not critical
-      }
-    } else {
-      // Keep in checkpoint for next run
-      checkpoint.currentArticle = updatedArticle;
-    }
-  }
+  });
   
-  // Maintain pendingProcessingIds list (tracks articles being processed)
-  // Use the local copy that was maintained throughout the function
-  syncPendingProcessingIds(checkpoint, currentPendingList, config);
-  
-  checkpoint.lastUpdate = Date.now();
+  // Update ID index in KV
+  const articleIds = articleObjects.map(a => getArticleId(a)).filter(id => id);
   
   try {
     await kv.put(
-      config.KV_KEY_CHECKPOINT,
-      JSON.stringify(checkpoint),
-      {
-        expirationTtl: config.ID_INDEX_TTL
-      }
+      config.KV_KEY_IDS,
+      JSON.stringify(articleIds),
+      { expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30 }
     );
-    console.log(`✓ Checkpoint updated (after processing): article complete=${articleIsComplete(updatedArticle, config)}`);
+    console.log(`✓ Updated KV ID index with ${articleIds.length} articles`);
   } catch (error) {
-    console.error(`✗ Failed to write checkpoint (after processing):`, error.message);
-    throw new Error(`KV put failed for checkpoint: ${error.message}`);
+    console.error('Failed to update KV ID index:', error.message);
   }
   
-  return { processed: true, articleId: nextArticleId, article: updatedArticle, checkpoint };
+  console.log(`✓ Updated ${writtenCount} articles in KV cache`);
+  
+  return writtenCount;
 }
 
 /**
- * Main scheduled event handler with checkpoint-based processing
+ * Main scheduled event handler with D1-based processing
  * 
  * Architecture:
- * 1. Read checkpoint to determine current state
- * 2. If checkpoint has an article being processed, check if it completed successfully
- * 3. Get next article from pending list or try-later list
- * 4. Update checkpoint with current article
- * 5. Process the article (may take multiple runs for phases)
- * 6. Write article to KV and update ID index
- * 7. Update checkpoint on success or move to try-later on failure
+ * 1. Read articles from D1 that need processing
+ * 2. Process articles (updates D1 incrementally)
+ * 3. After batch completes, update KV cache with final results
  * 
- * KV Operation Tracking:
- * - Logs read and write counts for monitoring free tier limits
- * - Cloudflare Free Tier: 100,000 reads/day, 1,000 writes/day
- * - Early exit when no work avoids unnecessary checkpoint writes
+ * This reduces KV writes from ~720/day to ~150/day by:
+ * - Using D1 for intermediate updates during processing
+ * - Writing to KV only for final cache updates after batch completion
  * 
  * @param {Event} event - Scheduled event
  * @param {Object} env - Environment variables
@@ -1091,18 +801,17 @@ async function handleScheduled(event, env) {
   const config = getNewsProcessorConfig(env);
   
   try {
-    // Use the refactored processNextArticle function
-    const result = await processNextArticle(env.CRYPTO_NEWS_CACHE, env, config);
+    // Process batch of articles from D1
+    const result = await processBatchFromD1(env.DB, env, config);
     
-    if (result.processed) {
-      console.log(`✓ Processed article: ${result.articleId}`);
+    if (result.processed > 0) {
+      console.log(`✓ Processed ${result.processed} article(s)`);
       
-      // Use checkpoint from result (no need for extra KV read)
-      if (result.checkpoint) {
-        console.log(`Try-later queue: ${(result.checkpoint.tryLater || []).length}`);
-      }
+      // Update KV cache with all processed articles (final results only)
+      const cachedCount = await updateKVCache(env.CRYPTO_NEWS_CACHE, env.DB, config);
+      console.log(`✓ Updated KV cache with ${cachedCount} articles`);
     } else {
-      console.log('No articles to process - idle run (no writes performed)');
+      console.log('No articles to process - idle run');
     }
     
     console.log('=== Bitcoin News Processor Cron Job Completed Successfully ===');
@@ -1160,9 +869,8 @@ async function handleFetch(request, env) {
     
     console.log(`Processing on-demand request for article: ${articleId}`);
     
-    // Read article from KV
-    const articleKey = `article:${articleId}`;
-    const article = await env.CRYPTO_NEWS_CACHE.get(articleKey, { type: 'json' });
+    // Read article from D1
+    const article = await getArticleById(env.DB, articleId);
     
     if (!article) {
       return new Response(JSON.stringify({
@@ -1176,15 +884,18 @@ async function handleFetch(request, env) {
         }
       });
     }
+    
+    // Convert D1 row to article object
+    const articleObj = rowToArticle(article);
 
     // Check if we should return the article text
     if (articleText) {
-      const content = await fetchArticleContent(article.link, articleText === "debug");
+      const content = await fetchArticleContent(articleObj.link, articleText === "debug");
       
       return new Response(JSON.stringify({
         success: true,
         message: 'Article text sent to AI for summary',
-        link: article.link,
+        link: articleObj.link,
         content: content
       }), {
         status: 200,
@@ -1196,20 +907,13 @@ async function handleFetch(request, env) {
     }
     
     // Check if article needs processing
-    const needsProcessing = forceProcess ||
-                           (article.needsSentiment ?? true) || 
-                           (article.needsSummary ?? true) || 
-                           ((article.contentTimeout ?? 0) < config.MAX_CONTENT_FETCH_ATTEMPTS);
+    const needsProcessing = forceProcess || articleNeedsProcessing(article, config);
     
-    if (needsProcessing) {
-      // make sure we're generating a new summary
-      article.needsSummary = true;
-      article.contentTimeout = 1;
-    } else {
+    if (!needsProcessing) {
       return new Response(JSON.stringify({
         success: true,
         message: 'Article already processed',
-        article: article
+        article: articleObj
       }), {
         status: 200,
         headers: {
@@ -1219,22 +923,33 @@ async function handleFetch(request, env) {
       });
     }
     
-    // Process the article
-    console.log(`Processing article: "${article.title?.substring(0, 50)}..."`);
+    // If force processing, reset flags
+    if (forceProcess) {
+      articleObj.needsSummary = true;
+      articleObj.contentTimeout = 1;
+    }
     
-    const updatedArticle = await processArticle(env, article, config);
+    // Process the article (updates D1 internally)
+    console.log(`Processing article: "${articleObj.title?.substring(0, 50)}..."`);
     
-    // Write back to KV
-    await env.CRYPTO_NEWS_CACHE.put(articleKey, JSON.stringify(updatedArticle), {
+    await processArticle(env.DB, env, articleObj, config);
+    
+    // Read updated article from D1
+    const updatedArticle = await getArticleById(env.DB, articleId);
+    const updatedArticleObj = rowToArticle(updatedArticle);
+    
+    // Update KV cache with the processed article
+    const articleKey = `article:${articleId}`;
+    await env.CRYPTO_NEWS_CACHE.put(articleKey, JSON.stringify(updatedArticleObj), {
       expirationTtl: config.ID_INDEX_TTL || 60 * 60 * 24 * 30
     });
     
-    console.log(`Article processed and updated in KV`);
+    console.log(`Article processed and updated in D1 and KV cache`);
     
     return new Response(JSON.stringify({
       success: true,
       message: 'Article processed successfully',
-      article: updatedArticle
+      article: updatedArticleObj
     }), {
       status: 200,
       headers: {
@@ -1259,7 +974,15 @@ async function handleFetch(request, env) {
 }
 
 // Export for testing
-export { TextExtractor, fetchArticleContent, processNextArticle, processArticle, articleNeedsProcessing, articleIsComplete, getNextArticleToProcess, syncPendingProcessingIds };
+export { 
+  TextExtractor, 
+  fetchArticleContent, 
+  processBatchFromD1, 
+  processArticle, 
+  articleNeedsProcessing, 
+  articleIsComplete, 
+  updateKVCache 
+};
 
 export default {
   async scheduled(event, env, ctx) {
