@@ -22,7 +22,7 @@ on:
 jobs:
   deploy-schema:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -36,7 +36,10 @@ jobs:
         run: npm install -g wrangler
 
       - name: Deploy Schema to Development
-        if: github.event_name == 'push' || github.event.inputs.environment == 'development' || github.event.inputs.environment == 'both'
+        if: >-
+          github.event_name == 'push' ||
+          github.event.inputs.environment == 'development' ||
+          github.event.inputs.environment == 'both'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -47,36 +50,52 @@ jobs:
           echo "✅ Schema deployed to development database successfully"
 
       - name: Deploy Schema to Production
-        if: github.event.inputs.environment == 'production' || github.event.inputs.environment == 'both'
+        if: >-
+          github.event.inputs.environment == 'production' ||
+          github.event.inputs.environment == 'both'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           cd worker
           echo "Deploying schema to production database..."
-          wrangler d1 execute crypto-news-db --file=schema.sql --env production --yes
+          wrangler d1 execute crypto-news-db \
+            --file=schema.sql --env production --yes
           echo "✅ Schema deployed to production database successfully"
 
       - name: Verify Development Database
-        if: github.event_name == 'push' || github.event.inputs.environment == 'development' || github.event.inputs.environment == 'both'
+        if: >-
+          github.event_name == 'push' ||
+          github.event.inputs.environment == 'development' ||
+          github.event.inputs.environment == 'both'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           cd worker
           echo "Verifying development database schema..."
-          wrangler d1 execute crypto-news-db --command "SELECT name FROM sqlite_master WHERE type='table'" --json
+          wrangler d1 execute crypto-news-db \
+            --command "SELECT name FROM sqlite_master WHERE type='table'" \
+            --json
           echo "Checking processing checkpoint initialization..."
-          wrangler d1 execute crypto-news-db --command "SELECT * FROM processing_checkpoint" --json
+          wrangler d1 execute crypto-news-db \
+            --command "SELECT * FROM processing_checkpoint" \
+            --json
 
       - name: Verify Production Database
-        if: github.event.inputs.environment == 'production' || github.event.inputs.environment == 'both'
+        if: >-
+          github.event.inputs.environment == 'production' ||
+          github.event.inputs.environment == 'both'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           cd worker
           echo "Verifying production database schema..."
-          wrangler d1 execute crypto-news-db --command "SELECT name FROM sqlite_master WHERE type='table'" --env production --json
+          wrangler d1 execute crypto-news-db \
+            --command "SELECT name FROM sqlite_master WHERE type='table'" \
+            --env production --json
           echo "Checking processing checkpoint initialization..."
-          wrangler d1 execute crypto-news-db --command "SELECT * FROM processing_checkpoint" --env production --json
+          wrangler d1 execute crypto-news-db \
+            --command "SELECT * FROM processing_checkpoint" \
+            --env production --json
