@@ -3,14 +3,14 @@ main = "index.js"
 compatibility_date = "2024-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Cron trigger - runs every 5 minutes (optimized with D1)
+# Cron trigger - runs every 3 minutes (optimized for free tier with batch size 1)
 # Format: "minute hour day month day-of-week"
-# "*/5 * * * *" = every 5 minutes (288 runs/day)
-# With D1's 100K writes/day limit, we can safely increase frequency from 10 to 5 minutes
-# This reduces average article processing time from 10 min to 5 min
-# Expected usage: ~864 D1 writes/day, ~288 KV writes/day (well within free tier)
+# "*/3 * * * *" = every 3 minutes (480 runs/day)
+# With batch size 1 and HTML rewriter being slow, we run more frequently to compensate
+# This prevents CPU timeout on free tier (10ms limit) while maintaining good throughput
+# Expected usage: ~480 D1 writes/day, ~160 KV writes/day (well within free tier)
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/3 * * * *"]
 
 # AI binding for sentiment analysis and summarization
 [ai]
@@ -38,9 +38,9 @@ id = "4933e1596e304b71b4aac4cae364b75f"
 # Configuration variables (optional - defaults are set in shared/constants.js)
 # Uncomment and modify these to override defaults:
 [vars]
-MAX_ARTICLES_PER_RUN = 3        # Articles to process per run (increased from 1 with D1)
+MAX_ARTICLES_PER_RUN = 1         # Articles to process per run (must be 1 for free tier - HTML rewriter is slow)
 # MAX_CONTENT_CHARS = 10240      # Max chars to extract from webpage (default: 10KB)
-MAX_CONTENT_FETCH_ATTEMPTS = 2  # Max retry attempts for content fetch (default: 5)
+MAX_CONTENT_FETCH_ATTEMPTS = 2   # Max retry attempts for content fetch (default: 5)
 
 # Observability configuration for logs and traces
 [observability]

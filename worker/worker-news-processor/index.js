@@ -1,9 +1,9 @@
 /**
  * Scheduled Cloudflare Worker for Processing Pending Bitcoin News Articles
  * 
- * This worker runs on a cron schedule (every 5 minutes) to:
+ * This worker runs on a cron schedule (every 3 minutes) to:
  * 1. Read articles from D1 that need processing (check postprocessing flags)
- * 2. Process up to 3 articles per run (to stay within subrequest limits)
+ * 2. Process 1 article per run (free tier limit - HTML rewriter is CPU intensive)
  * 3. Update each article in D1 after processing (incremental writes for reliability)
  * 4. Update KV cache with final results after processing batch
  * 
@@ -25,10 +25,11 @@
  * - "error: <msg> (attempt X/3)" → AI generation error with retry count
  * 
  * This approach with D1+KV:
- * - Processing articles in small batches (3 at a time)
- * - Running frequently (every 5 minutes) to keep articles up-to-date
+ * - Processing articles one at a time (prevents CPU timeout on free tier)
+ * - Running frequently (every 3 minutes) to maintain throughput
  * - Using D1 for intermediate article updates during processing
- * - Using KV only for final results cache (reduces KV writes from ~720/day to ~288/day)
+ * - Using KV only for final results cache (reduces KV writes to ~160/day)
+ * - Phase-based processing with D1 updates after each step for crash recovery
  * 
  * Neuron Budget Optimization:
  * - Content extraction skips headers, footers, navigation, ads, and sidebars
@@ -399,7 +400,8 @@ async function analyzeSentiment(env, article) {
  * - Phase 2 (has extractedContent): Decode and run AI summary, save to D1, exit
  * 
  * This splits work naturally without defensive saves during processing.
- * The 5-minute cron schedule ensures phases execute quickly in sequence.
+ * The 3-minute cron schedule ensures phases execute quickly in sequence.
+ * Each phase updates D1 status for crash recovery and resumability.
  * 
  * Checks postprocessing flags and processes accordingly:
  * - needsSentiment: true → needs sentiment analysis
