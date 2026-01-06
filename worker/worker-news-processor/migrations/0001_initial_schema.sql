@@ -1,5 +1,5 @@
 -- Migration: Initial database schema
--- Created: 2026-01-06
+-- Created: 2024-10-01 (based on compatibility_date in wrangler.toml)
 -- Description: Creates the initial articles and processing_checkpoint tables
 
 -- Articles table: Stores all article data with processing status
