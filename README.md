@@ -207,6 +207,18 @@ This project includes Cloudflare Workers for API caching, CORS handling, AI-powe
 
 ### Deployment
 
+The project uses GitHub Actions for automated deployments with separate environments:
+
+**Development Environment:**
+- Automatically deployed when changes are pushed to the `main` branch
+- Workflows: `deploy-workers.yml`, `deploy-d1-schema.yml`
+- Uses default Cloudflare environment settings
+
+**Production Environment:**
+- Automatically deployed when changes are pushed to the `production` branch
+- Workflows: `deploy-workers-production.yml`, `deploy-d1-schema-production.yml`
+- Uses `[env.production]` settings from wrangler.toml files
+
 For detailed deployment instructions, see:
 - [worker/README.md](worker/README.md) - General worker deployment guide
 - [worker/DEPLOYMENT_GUIDE.md](worker/DEPLOYMENT_GUIDE.md) - Complete step-by-step setup for both workers
@@ -220,6 +232,16 @@ For detailed deployment instructions, see:
    - `NEWSDATA_API_KEY` (required for news feed)
 5. Create and bind KV namespace for news caching
 6. Set up scheduled cron job for news updates
+
+**To deploy to production:**
+1. Merge your changes to the `main` branch first
+2. Create and push to the `production` branch:
+   ```bash
+   git checkout production
+   git merge main
+   git push origin production
+   ```
+3. GitHub Actions will automatically deploy to the production environment
 
 ### Testing
 
