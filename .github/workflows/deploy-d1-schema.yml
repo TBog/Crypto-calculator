@@ -46,9 +46,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          cd worker
+          cd worker/worker-news-processor
           echo "Deploying schema to development database..."
-          wrangler d1 execute crypto-news-db --file=schema.sql --yes
+          wrangler d1 execute crypto-news-db --file=../schema.sql --yes
           echo "✅ Schema deployed to development database successfully"
 
       - name: Deploy Schema to Production
@@ -59,10 +59,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          cd worker
+          cd worker/worker-news-processor
           echo "Deploying schema to production database..."
           wrangler d1 execute crypto-news-db \
-            --file=schema.sql --env production --yes
+            --file=../schema.sql --env production --yes
           echo "✅ Schema deployed to production database successfully"
 
       - name: Verify Development Database
@@ -74,7 +74,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          cd worker
+          cd worker/worker-news-processor
           echo "Verifying development database schema..."
           wrangler d1 execute crypto-news-db \
             --command "SELECT name FROM sqlite_master WHERE type='table'" \
@@ -92,7 +92,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          cd worker
+          cd worker/worker-news-processor
           echo "Verifying production database schema..."
           wrangler d1 execute crypto-news-db \
             --command "SELECT name FROM sqlite_master WHERE type='table'" \
