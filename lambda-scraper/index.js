@@ -205,11 +205,12 @@ async function scrapeArticleContent(page, url, maxContentChars = MAX_CONTENT_CHA
 async function fetchArticlesFromD1(accountId, databaseId, apiToken, limit = BATCH_SIZE) {
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
   
+  // Use parameterized query to prevent SQL injection
   const query = `
     SELECT * FROM articles 
-    WHERE needsSummary = 1 OR (contentTimeout IS NOT NULL AND contentTimeout < ${MAX_CONTENT_FETCH_ATTEMPTS})
+    WHERE needsSummary = 1 OR (contentTimeout IS NOT NULL AND contentTimeout < ?)
     ORDER BY pubDate DESC
-    LIMIT ${limit}
+    LIMIT ?
   `;
   
   const response = await fetch(url, {
@@ -219,7 +220,8 @@ async function fetchArticlesFromD1(accountId, databaseId, apiToken, limit = BATC
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      sql: query
+      sql: query,
+      params: [MAX_CONTENT_FETCH_ATTEMPTS, limit]
     })
   });
   
@@ -355,7 +357,8 @@ async function processArticle(browser, article, config) {
       const content = await scrapeArticleContent(page, link, MAX_CONTENT_CHARS);
       
       if (content) {
-        // Save RAW extracted content (undecoded) for AI processing later
+        // Save extracted content for AI processing later
+        // Note: Text is extracted directly from DOM (already decoded by browser)
         await updateArticleInD1(config.accountId, config.databaseId, config.apiToken, articleId, {
           extractedContent: content,
           contentTimeout: timeoutCount,
@@ -363,7 +366,7 @@ async function processArticle(browser, article, config) {
           processedAt: Date.now()
         });
         
-        console.log(`  ✓ Content extracted and saved (${content.length} chars, raw)`);
+        console.log(`  ✓ Content extracted and saved (${content.length} chars)`);
       } else {
         // Failed to extract content
         const shouldGiveUp = timeoutCount >= MAX_CONTENT_FETCH_ATTEMPTS;

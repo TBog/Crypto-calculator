@@ -19,7 +19,10 @@ Parameters:
   
   ChromiumLayerArn:
     Type: String
-    Description: ARN of the Chromium Lambda Layer
+    Description: |
+      ARN of the Chromium Lambda Layer. 
+      Check latest version at: https://github.com/Sparticuz/chromium/releases
+      Update the version number (e.g., :43 -> :44) when new releases are available.
     Default: 'arn:aws:lambda:us-east-1:764866452798:layer:chrome-aws-lambda:43'
   
   ScheduleRate:

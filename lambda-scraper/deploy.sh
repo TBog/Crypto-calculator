@@ -65,6 +65,7 @@ if [[ "$use_cfn" =~ ^[Yy]$ ]]; then
     read -p "Cloudflare D1 Database ID: " cf_database_id
     read -sp "Cloudflare API Token: " cf_api_token
     echo ""
+    echo "Chromium Layer ARN: Check latest version at https://github.com/Sparticuz/chromium/releases"
     read -p "Chromium Layer ARN [arn:aws:lambda:$REGION:764866452798:layer:chrome-aws-lambda:43]: " layer_arn
     layer_arn=${layer_arn:-arn:aws:lambda:$REGION:764866452798:layer:chrome-aws-lambda:43}
     
@@ -107,6 +108,7 @@ else
     read -p "Cloudflare D1 Database ID: " cf_database_id
     read -sp "Cloudflare API Token: " cf_api_token
     echo ""
+    echo "Chromium Layer ARN: Check latest version at https://github.com/Sparticuz/chromium/releases"
     read -p "Chromium Layer ARN [arn:aws:lambda:$REGION:764866452798:layer:chrome-aws-lambda:43]: " layer_arn
     layer_arn=${layer_arn:-arn:aws:lambda:$REGION:764866452798:layer:chrome-aws-lambda:43}
     
