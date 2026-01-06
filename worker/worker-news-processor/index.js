@@ -525,6 +525,7 @@ async function processArticle(db, env, article, config) {
           const articleUpdates = {
             contentTimeout: updates.contentTimeout,
             summaryError: updates.summaryError,
+            extractedContent: updates.extractedContent,
             processedAt: updates.processedAt
           };
           
@@ -596,6 +597,7 @@ async function processArticle(db, env, article, config) {
           needsSummary: updates.needsSummary !== undefined ? updates.needsSummary : undefined,
           contentTimeout: updates.contentTimeout,
           summaryError: updates.summaryError,
+          extractedContent: updates.extractedContent,
           processedAt: updates.processedAt
         });
       }

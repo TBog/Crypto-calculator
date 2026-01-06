@@ -152,14 +152,20 @@ database_name = "crypto-news-db"
 database_id = "YOUR_PRODUCTION_DATABASE_ID"
 ```
 
-### 3. Run Database Migrations
+### 3. Run Database Schema and Migrations
+
+The database setup requires two steps:
+1. **Initial Schema**: Creates tables and indexes
+2. **Migrations**: Updates to existing tables (e.g., adding new columns)
 
 #### Option A: Using GitHub Actions (Recommended)
 
-The repository includes a GitHub Action workflow that automatically deploys the D1 schema.
+The repository includes a GitHub Action workflow that automatically deploys both the schema and migrations.
 
 **Automatic Deployment:**
-- The schema is automatically deployed to the development database when `worker/schema.sql` is updated on the `main` branch
+- The schema and migrations are automatically deployed to the development database when:
+  - `worker/schema.sql` is updated on the `main` branch
+  - Any file in `worker/migrations/*.sql` is updated on the `main` branch
 - The workflow runs automatically on push to ensure the database schema is always up-to-date
 
 **Manual Deployment:**
@@ -173,13 +179,34 @@ The repository includes a GitHub Action workflow that automatically deploys the 
 5. Click "Run workflow"
 
 The workflow will:
-- Deploy the schema from `worker/schema.sql`
+- Deploy the base schema from `worker/schema.sql`
+- Run all migration files from `worker/migrations/*.sql` in order
 - Initialize the `processing_checkpoint` table
 - Verify the deployment was successful
 
-#### Option B: Using Wrangler CLI Locally
+#### Option B: Using the Migration Script (Local Development)
 
-You can also deploy the schema manually using Wrangler:
+A helper script is provided to run migrations locally:
+
+```bash
+# From the repository root, navigate to the worker directory
+cd worker
+
+# Run migrations on development database
+./run-migrations.sh development
+
+# Run migrations on production database
+./run-migrations.sh production
+```
+
+The script will:
+- Run all migrations in order
+- Skip migrations that have already been applied
+- Verify the schema after completion
+
+#### Option C: Using Wrangler CLI Manually
+
+You can also deploy the schema and migrations manually using Wrangler:
 
 ```bash
 # From the repository root, navigate to the worker directory
@@ -188,9 +215,20 @@ cd worker
 # Initialize the database schema (development)
 wrangler d1 execute crypto-news-db --file=./schema.sql
 
+# Run migrations (development)
+cd worker-news-processor
+wrangler d1 execute crypto-news-db --file=../migrations/0001_add_extractedContent_column.sql --yes
+
 # Initialize the database schema (production)
+cd ..
 wrangler d1 execute crypto-news-db --file=./schema.sql --env production
+
+# Run migrations (production)
+cd worker-news-processor
+wrangler d1 execute crypto-news-db --file=../migrations/0001_add_extractedContent_column.sql --env production --yes
 ```
+
+**Note:** Some migrations may produce errors if they've already been applied (e.g., "duplicate column name"). This is expected and safe - it means the migration has already been run.
 
 ### 4. Verify Setup
 

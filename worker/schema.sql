@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS articles (
     -- Processing metadata
     contentTimeout INTEGER DEFAULT 0,       -- Content fetch retry count
     summaryError TEXT,                      -- Summary generation error (if any)
+    extractedContent TEXT,                  -- Cached raw article content (for Phase 1→2)
     queuedAt INTEGER,                       -- Timestamp when queued (milliseconds)
     processedAt INTEGER,                    -- Timestamp when fully processed (milliseconds)
     

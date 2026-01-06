@@ -22,9 +22,9 @@ export async function insertArticle(db, article) {
       id, title, description, link, pubDate, source, imageUrl,
       needsSentiment, needsSummary,
       sentiment, aiSummary,
-      contentTimeout, summaryError, queuedAt,
+      contentTimeout, summaryError, extractedContent, queuedAt,
       createdAt, updatedAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id,
     article.title || '',
@@ -39,6 +39,7 @@ export async function insertArticle(db, article) {
     article.aiSummary || null,
     article.contentTimeout || 0,
     article.summaryError || null,
+    article.extractedContent || null,
     article.queuedAt || now,
     now,
     now
@@ -65,9 +66,9 @@ export async function insertArticlesBatch(db, articles) {
         id, title, description, link, pubDate, source, imageUrl,
         needsSentiment, needsSummary,
         sentiment, aiSummary,
-        contentTimeout, summaryError, queuedAt,
+        contentTimeout, summaryError, extractedContent, queuedAt,
         createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       id,
       article.title || '',
@@ -82,6 +83,7 @@ export async function insertArticlesBatch(db, articles) {
       article.aiSummary || null,
       article.contentTimeout || 0,
       article.summaryError || null,
+      article.extractedContent || null,
       article.queuedAt || now,
       now,
       now
@@ -125,6 +127,7 @@ export async function updateArticle(db, articleId, updates) {
     needsSummary: updates.needsSummary !== undefined ? (updates.needsSummary ? 1 : 0) : undefined,
     contentTimeout: updates.contentTimeout,
     summaryError: updates.summaryError,
+    extractedContent: updates.extractedContent,
     processedAt: updates.processedAt
   };
   
@@ -322,6 +325,7 @@ export function rowToArticle(row) {
     aiSummary: row.aiSummary,
     contentTimeout: row.contentTimeout,
     summaryError: row.summaryError,
+    extractedContent: row.extractedContent,
     queuedAt: row.queuedAt,
     processedAt: row.processedAt,
     createdAt: row.createdAt,
