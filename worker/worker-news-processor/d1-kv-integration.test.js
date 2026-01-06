@@ -42,9 +42,10 @@ describe('News Processor - D1+KV Integration', () => {
                 aiSummary: rest[9] || null,
                 contentTimeout: rest[10] || 0,
                 summaryError: rest[11] || null,
-                queuedAt: rest[12] || Date.now(),
-                createdAt: rest[13] || Date.now(),
-                updatedAt: rest[14] || Date.now(),
+                extractedContent: rest[12] || null,
+                queuedAt: rest[13] || Date.now(),
+                createdAt: rest[14] || Date.now(),
+                updatedAt: rest[15] || Date.now(),
               });
               return { meta: { changes: 1 } };
             }
