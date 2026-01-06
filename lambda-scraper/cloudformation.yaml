@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Bitcoin News Scraper - AWS Lambda with EventBridge Schedule'
+
+Parameters:
+  CloudflareAccountId:
+    Type: String
+    Description: Cloudflare Account ID
+    NoEcho: false
+  
+  CloudflareD1DatabaseId:
+    Type: String
+    Description: Cloudflare D1 Database ID
+    NoEcho: false
+  
+  CloudflareApiToken:
+    Type: String
+    Description: Cloudflare API Token with D1 edit permissions
+    NoEcho: true
+  
+  ChromiumLayerArn:
+    Type: String
+    Description: ARN of the Chromium Lambda Layer
+    Default: 'arn:aws:lambda:us-east-1:764866452798:layer:chrome-aws-lambda:43'
+  
+  ScheduleRate:
+    Type: String
+    Description: EventBridge schedule rate (e.g., 'rate(2 minutes)')
+    Default: 'rate(2 minutes)'
+  
+  LambdaMemorySize:
+    Type: Number
+    Description: Lambda memory allocation in MB
+    Default: 1024
+    MinValue: 512
+    MaxValue: 10240
+  
+  LambdaTimeout:
+    Type: Number
+    Description: Lambda timeout in seconds
+    Default: 20
+    MinValue: 10
+    MaxValue: 900
+
+Resources:
+  # IAM Role for Lambda Execution
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: crypto-scraper-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: Project
+          Value: CryptoCalculator
+        - Key: Component
+          Value: NewsScraper
+
+  # Lambda Function
+  ScraperFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: crypto-news-scraper
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemorySize
+      Layers:
+        - !Ref ChromiumLayerArn
+      Environment:
+        Variables:
+          CLOUDFLARE_ACCOUNT_ID: !Ref CloudflareAccountId
+          CLOUDFLARE_D1_DATABASE_ID: !Ref CloudflareD1DatabaseId
+          CLOUDFLARE_API_TOKEN: !Ref CloudflareApiToken
+      Code:
+        ZipFile: |
+          // Placeholder - deploy actual code via CLI or CI/CD
+          export async function handler(event, context) {
+            return {
+              statusCode: 200,
+              body: JSON.stringify({ message: 'Deploy actual code' })
+            };
+          }
+      Tags:
+        - Key: Project
+          Value: CryptoCalculator
+        - Key: Component
+          Value: NewsScraper
+      Description: 'Bitcoin news article scraper with headless Chrome'
+
+  # EventBridge Rule for Scheduling
+  ScraperScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: crypto-scraper-schedule
+      Description: 'Trigger crypto news scraper on schedule'
+      State: ENABLED
+      ScheduleExpression: !Ref ScheduleRate
+      Targets:
+        - Arn: !GetAtt ScraperFunction.Arn
+          Id: ScraperFunctionTarget
+
+  # Permission for EventBridge to Invoke Lambda
+  EventBridgeInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ScraperFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScraperScheduleRule.Arn
+
+  # CloudWatch Log Group with Retention
+  ScraperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ScraperFunction}'
+      RetentionInDays: 7
+
+  # CloudWatch Alarm for Errors
+  ScraperErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: crypto-scraper-errors
+      AlarmDescription: 'Alert when scraper has high error rate'
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ScraperFunction
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm for Throttles
+  ScraperThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: crypto-scraper-throttles
+      AlarmDescription: 'Alert when scraper is being throttled'
+      MetricName: Throttles
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ScraperFunction
+      TreatMissingData: notBreaching
+
+Outputs:
+  FunctionArn:
+    Description: ARN of the Lambda function
+    Value: !GetAtt ScraperFunction.Arn
+    Export:
+      Name: CryptoScraperFunctionArn
+  
+  FunctionName:
+    Description: Name of the Lambda function
+    Value: !Ref ScraperFunction
+    Export:
+      Name: CryptoScraperFunctionName
+  
+  ScheduleRuleArn:
+    Description: ARN of the EventBridge schedule rule
+    Value: !GetAtt ScraperScheduleRule.Arn
+    Export:
+      Name: CryptoScraperScheduleRuleArn
+  
+  LogGroupName:
+    Description: Name of the CloudWatch log group
+    Value: !Ref ScraperLogGroup
+    Export:
+      Name: CryptoScraperLogGroupName
