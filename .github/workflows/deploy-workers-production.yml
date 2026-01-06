@@ -1,16 +1,16 @@
-name: Deploy Cloudflare Workers (Development)
+name: Deploy Cloudflare Workers (Production)
 
 on:
   push:
     branches:
-      - main
+      - production
     paths:
       - 'worker/**'
-      - '.github/workflows/deploy-workers.yml'
+      - '.github/workflows/deploy-workers-production.yml'
   workflow_dispatch:
 
 jobs:
-  deploy-dev:
+  deploy-production:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -21,7 +21,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Deploy Worker to Development - ${{ matrix.worker }}
+      - name: Deploy Worker to Production - ${{ matrix.worker }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -29,5 +29,5 @@ jobs:
           # Deploy from the worker directory (parent of worker-*)
           workingDirectory: worker
           # Specify the config file for this specific worker
-          # Deploys to default (development) environment
-          command: deploy --config ${{ matrix.worker }}/wrangler.toml
+          # Deploy to production environment using --env production
+          command: deploy --config ${{ matrix.worker }}/wrangler.toml --env production
