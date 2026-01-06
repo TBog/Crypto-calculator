@@ -81,4 +81,4 @@ wrangler d1 execute crypto-news-db --command "SELECT * FROM d1_migrations" --rem
 ## Resources
 
 - [Wrangler D1 Migrations Documentation](https://developers.cloudflare.com/d1/reference/migrations/)
-- [D1 Setup Guide](../D1_SETUP_GUIDE.md)
+- [D1 Setup Guide](../../D1_SETUP_GUIDE.md)
