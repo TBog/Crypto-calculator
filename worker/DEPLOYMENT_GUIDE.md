@@ -566,7 +566,25 @@ After successful deployment:
 
 ## Automated Deployment with GitHub Actions
 
-For continuous deployment, the repository includes a GitHub Actions workflow that automatically deploys all three workers when changes are pushed to the `main` branch.
+For continuous deployment, the repository includes separate GitHub Actions workflows for development and production environments.
+
+### Deployment Environments
+
+**Development Environment:**
+- **Branch:** `main`
+- **Workflows:** 
+  - `deploy-workers.yml` - Deploys all three workers to development
+  - `deploy-d1-schema.yml` - Deploys database schema to development
+- **Trigger:** Automatic on push to `main` branch
+- **Environment:** Default (development) Cloudflare environment
+
+**Production Environment:**
+- **Branch:** `production`
+- **Workflows:**
+  - `deploy-workers-production.yml` - Deploys all three workers to production
+  - `deploy-d1-schema-production.yml` - Deploys database schema to production
+- **Trigger:** Automatic on push to `production` branch
+- **Environment:** Production Cloudflare environment (uses `--env production` flag)
 
 ### Setup GitHub Actions Deployment
 
@@ -578,36 +596,85 @@ For continuous deployment, the repository includes a GitHub Actions workflow tha
      - Use "Edit Cloudflare Workers" template or create custom token with Workers permissions
    - `CLOUDFLARE_ACCOUNT_ID`: Found in your Cloudflare Dashboard or Workers overview page
 
-2. **Workflow Configuration**
+2. **Development Workflow Configuration**
    
-   The workflow file is located at `.github/workflows/deploy-workers.yml` and will:
-   - Trigger on push to `main` branch when `worker/**` files change
+   The development workflow files are located at:
+   - `.github/workflows/deploy-workers.yml`
+   - `.github/workflows/deploy-d1-schema.yml`
+   
+   These workflows will:
+   - Trigger on push to `main` branch when relevant files change
    - Can also be manually triggered from GitHub Actions tab
-   - Deploy all three workers in parallel using a matrix strategy
-   - Properly handle the shared folder that contains common code
+   - Deploy all three workers to the development environment in parallel
+   - Deploy without the `--env` flag (uses default/development configuration)
 
-3. **How It Works**
+3. **Production Workflow Configuration**
    
-   The workflow runs from the `worker/` directory and deploys each worker with:
+   The production workflow files are located at:
+   - `.github/workflows/deploy-workers-production.yml`
+   - `.github/workflows/deploy-d1-schema-production.yml`
+   
+   These workflows will:
+   - Trigger on push to `production` branch when relevant files change
+   - Can also be manually triggered from GitHub Actions tab
+   - Deploy all three workers to the production environment using `--env production`
+   - Use production-specific database IDs and KV namespaces from `[env.production]` sections
+
+4. **How It Works**
+   
+   **Development deployment:**
    ```bash
    wrangler deploy --config worker-{name}/wrangler.toml
    ```
    
-   This ensures all workers have access to the `shared/` folder containing `news-providers.js`.
+   **Production deployment:**
+   ```bash
+   wrangler deploy --config worker-{name}/wrangler.toml --env production
+   ```
+   
+   This ensures all workers have access to the `shared/` folder containing `news-providers.js` and use the correct environment configuration.
 
-4. **Manual Trigger**
+5. **Deploying to Production**
+   
+   To deploy changes to production:
+   
+   ```bash
+   # First, ensure changes are tested and merged to main
+   git checkout main
+   git pull origin main
+   
+   # Switch to production branch and merge from main
+   git checkout production
+   git merge main
+   
+   # Push to trigger production deployment
+   git push origin production
+   ```
+   
+   Alternatively, if you don't have a local production branch:
+   ```bash
+   # From main branch
+   git checkout main
+   git pull origin main
+   git push origin main:production
+   ```
+
+6. **Manual Trigger**
    
    You can manually trigger deployment:
    - Go to Actions tab in GitHub
-   - Select "Deploy Cloudflare Workers"
+   - Select the appropriate workflow:
+     - "Deploy Cloudflare Workers (Development)" for dev
+     - "Deploy Cloudflare Workers (Production)" for production
    - Click "Run workflow"
-   - Select the branch (usually `main`)
+   - Select the appropriate branch (`main` or `production`)
 
-5. **Monitoring Deployments**
+7. **Monitoring Deployments**
    
    - View deployment status in the Actions tab
    - Check deployment logs in Cloudflare Dashboard
    - Verify worker versions in Cloudflare Workers & Pages dashboard
+   - Monitor separate development and production deployments
 
 For detailed information about the GitHub Actions setup, see [.github/workflows/README.md](../.github/workflows/README.md).
 

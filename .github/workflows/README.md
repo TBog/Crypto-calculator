@@ -16,27 +16,65 @@ Creates preview environments for pull requests.
 - **Target**: https://tbog.github.io/Crypto-calculator/pr-preview/pr-{number}/
 - **What it does**: Builds and deploys PR-specific previews
 
-### 3. Deploy Cloudflare Workers (`deploy-workers.yml`)
-Deploys Cloudflare Workers for the backend API and cron jobs.
+### 3. Deploy Cloudflare Workers - Development (`deploy-workers.yml`)
+Deploys Cloudflare Workers to the development environment.
 - **Trigger**: Push to `main` branch (when `worker/**` changes) or manual dispatch
+- **Environment**: Development (default)
 - **Workers deployed**:
   - `worker-api`: Main API worker (crypto-cache)
   - `worker-news-updater`: News updater cron job (runs hourly)
   - `worker-news-processor`: News processor cron job (runs every 3 minutes)
 
-### 4. Deploy D1 Database Schema (`deploy-d1-schema.yml`)
-Deploys the Cloudflare D1 database schema automatically or on-demand.
+### 4. Deploy Cloudflare Workers - Production (`deploy-workers-production.yml`)
+Deploys Cloudflare Workers to the production environment.
+- **Trigger**: Push to `production` branch (when `worker/**` changes) or manual dispatch
+- **Environment**: Production (uses `--env production` flag)
+- **Workers deployed**:
+  - `worker-api`: Main API worker (crypto-cache) - production environment
+  - `worker-news-updater`: News updater cron job - production environment
+  - `worker-news-processor`: News processor cron job - production environment
+
+### 5. Deploy D1 Database Schema - Development (`deploy-d1-schema.yml`)
+Deploys the Cloudflare D1 database schema to development.
 - **Trigger**: Push to `main` branch (when `worker/schema.sql` changes) or manual dispatch
+- **Environment**: Development (default)
 - **What it does**:
-  - Deploys schema from `worker/schema.sql` to D1 database
+  - Deploys schema from `worker/schema.sql` to development D1 database
+  - Runs migrations from `worker/migrations/*.sql`
   - Initializes the `processing_checkpoint` table
   - Verifies the deployment by querying the database
 - **Manual options**: 
-  - `development` - Deploy to development database only
-  - `production` - Deploy to production database only
-  - `both` - Deploy to both environments
+  - `development` - Deploy to development database (default)
+  - `production` - Deploy to production database
+
+### 6. Deploy D1 Database Schema - Production (`deploy-d1-schema-production.yml`)
+Deploys the Cloudflare D1 database schema to production.
+- **Trigger**: Push to `production` branch (when `worker/schema.sql` changes) or manual dispatch
+- **Environment**: Production (uses `--env production` flag)
+- **What it does**:
+  - Deploys schema from `worker/schema.sql` to production D1 database
+  - Runs migrations from `worker/migrations/*.sql`
+  - Verifies the deployment by querying the database
 
 ## Cloudflare Workers Deployment
+
+### Deployment Environments
+
+The repository supports two separate deployment environments:
+
+**Development Environment:**
+- **Branch**: `main`
+- **Workflows**: `deploy-workers.yml`, `deploy-d1-schema.yml`
+- **Trigger**: Automatic on push to `main` branch
+- **Usage**: Uses default configuration from wrangler.toml files
+- **Purpose**: Development and testing environment
+
+**Production Environment:**
+- **Branch**: `production`
+- **Workflows**: `deploy-workers-production.yml`, `deploy-d1-schema-production.yml`
+- **Trigger**: Automatic on push to `production` branch
+- **Usage**: Uses `[env.production]` configuration from wrangler.toml files with `--env production` flag
+- **Purpose**: Live production environment
 
 ### Prerequisites
 
@@ -120,11 +158,44 @@ The deployment process ensures the shared folder is available to all workers.
 
 ### Manual Deployment
 
-You can also manually trigger the deployment:
+You can manually trigger deployments for either environment:
+
+**Development Deployment:**
 1. Go to Actions tab in GitHub
-2. Select "Deploy Cloudflare Workers"
+2. Select "Deploy Cloudflare Workers (Development)"
 3. Click "Run workflow"
-4. Select the branch (usually `main`)
+4. Select the `main` branch
+
+**Production Deployment:**
+1. Go to Actions tab in GitHub
+2. Select "Deploy Cloudflare Workers (Production)"
+3. Click "Run workflow"
+4. Select the `production` branch
+
+### Deploying to Production
+
+To deploy changes to production:
+
+```bash
+# First, ensure changes are tested and merged to main
+git checkout main
+git pull origin main
+
+# Switch to production branch and merge from main
+git checkout production
+git merge main
+
+# Push to trigger production deployment
+git push origin production
+```
+
+Alternatively, if you don't have a local production branch:
+```bash
+# From main branch
+git checkout main
+git pull origin main
+git push origin main:production
+```
 
 ### Local Deployment
 
