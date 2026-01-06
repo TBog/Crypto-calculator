@@ -50,14 +50,14 @@ jobs:
             --region ${{ secrets.AWS_REGION }}
 
       - name: Update Lambda Configuration
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           aws lambda update-function-configuration \
             --function-name crypto-news-scraper \
-            --environment Variables="{
-              CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }},
-              CLOUDFLARE_D1_DATABASE_ID=${{ secrets.CLOUDFLARE_D1_DATABASE_ID }},
-              CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}
-            }" \
+            --environment "Variables={CLOUDFLARE_ACCOUNT_ID=${CF_ACCOUNT_ID},CLOUDFLARE_D1_DATABASE_ID=${CF_DATABASE_ID},CLOUDFLARE_API_TOKEN=${CF_API_TOKEN}}" \
             --region ${{ secrets.AWS_REGION }}
 
       - name: Wait for Update to Complete
