@@ -48,9 +48,7 @@ wrangler d1 migrations apply crypto-news-db --env production
 
 ### CI/CD Pipeline
 
-The GitHub Actions workflow (`.github/workflows/deploy-d1-schema.yml`) automatically applies migrations when:
-- A push is made to the `main` branch
-- The workflow is manually triggered via `workflow_dispatch`
+The GitHub Actions workflow (`.github/workflows/deploy-d1-schema.yml`) currently uses `wrangler d1 execute` with `schema.sql` for database deployments. Migration-based deployment via `wrangler d1 migrations apply` is planned for future implementation.
 
 ## Migration Best Practices
 
@@ -64,10 +62,10 @@ The GitHub Actions workflow (`.github/workflows/deploy-d1-schema.yml`) automatic
 
 The project is transitioning from using `schema.sql` with `d1 execute` to using the migration system:
 
-1. **Current State**: The `schema.sql` file in the parent directory is currently used for initial database setup
+1. **Current State**: The `schema.sql` file in the parent directory is currently used for database setup via `wrangler d1 execute`
 2. **Initial Migration**: `0001_initial_schema.sql` mirrors the current schema for tracking purposes
 3. **Future Changes**: All future schema changes should be made as new migration files
-4. **CI/CD**: The workflow has been updated to support both methods during the transition
+4. **CI/CD**: The current workflow uses `schema.sql` via `wrangler d1 execute`; migration-based deployment in CI/CD is planned but not yet implemented
 
 ## Verifying Migrations
 
