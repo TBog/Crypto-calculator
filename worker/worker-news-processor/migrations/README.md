@@ -75,7 +75,7 @@ To check which migrations have been applied:
 
 ```bash
 cd worker/worker-news-processor
-wrangler d1 execute crypto-news-db --command "SELECT * FROM d1_migrations"
+wrangler d1 execute crypto-news-db --command "SELECT * FROM d1_migrations" --remote
 ```
 
 ## Resources
