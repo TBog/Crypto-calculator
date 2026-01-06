@@ -43,9 +43,6 @@ Deploys the Cloudflare D1 database schema to development.
   - Runs migrations from `worker/migrations/*.sql`
   - Initializes the `processing_checkpoint` table
   - Verifies the deployment by querying the database
-- **Manual options**: 
-  - `development` - Deploy to development database (default)
-  - `production` - Deploy to production database
 
 ### 6. Deploy D1 Database Schema - Production (`deploy-d1-schema-production.yml`)
 Deploys the Cloudflare D1 database schema to production.

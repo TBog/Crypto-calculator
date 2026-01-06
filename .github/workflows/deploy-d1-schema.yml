@@ -1,4 +1,4 @@
-name: Deploy D1 Database Schema
+name: Deploy D1 Database Schema (Development)
 
 on:
   push:
@@ -9,18 +9,9 @@ on:
       - 'worker/migrations/*.sql'
       - '.github/workflows/deploy-d1-schema.yml'
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        default: 'development'
-        type: choice
-        options:
-          - development
-          - production
 
 jobs:
-  deploy-schema:
+  deploy-schema-dev:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -41,9 +32,6 @@ jobs:
         run: npm install -g wrangler
 
       - name: Deploy Schema to Development
-        if: >-
-          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-          github.event.inputs.environment == 'development'
         working-directory: worker/worker-news-processor
         run: |
           echo "Deploying schema to development database..."
@@ -59,30 +47,7 @@ jobs:
           done
           echo "✅ Migrations completed"
 
-      - name: Deploy Schema to Production
-        if: >-
-          (github.event_name == 'push' && github.ref == 'refs/heads/production') ||
-          github.event.inputs.environment == 'production'
-        working-directory: worker/worker-news-processor
-        run: |
-          echo "Deploying schema to production database..."
-          wrangler d1 execute crypto-news-db \
-            --file=../schema.sql --env production --remote --yes
-          echo "✅ Schema deployed to production database successfully"
-          
-          echo "Running migrations..."
-          for migration in ../migrations/*.sql; do
-            if [ -f "$migration" ]; then
-              echo "Running migration: $(basename $migration)"
-              wrangler d1 execute crypto-news-db --file="$migration" --env production --yes || echo "⚠️  Migration may have already been applied: $(basename $migration)"
-            fi
-          done
-          echo "✅ Migrations completed"
-
       - name: Verify Development Database
-        if: >-
-          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-          github.event.inputs.environment == 'development'
         working-directory: worker/worker-news-processor
         run: |
           echo "Verifying development database schema..."
@@ -93,18 +58,3 @@ jobs:
           wrangler d1 execute crypto-news-db \
             --command "SELECT * FROM processing_checkpoint" \
             --remote --json
-
-      - name: Verify Production Database
-        if: >-
-          (github.event_name == 'push' && github.ref == 'refs/heads/production') ||
-          github.event.inputs.environment == 'production'
-        working-directory: worker/worker-news-processor
-        run: |
-          echo "Verifying production database schema..."
-          wrangler d1 execute crypto-news-db \
-            --command "SELECT name FROM sqlite_master WHERE type='table'" \
-            --env production --remote --json
-          echo "Checking processing checkpoint initialization..."
-          wrangler d1 execute crypto-news-db \
-            --command "SELECT * FROM processing_checkpoint" \
-            --env production --remote --json
