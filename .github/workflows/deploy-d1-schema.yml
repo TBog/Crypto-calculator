@@ -42,7 +42,7 @@ jobs:
           for migration in ../migrations/*.sql; do
             if [ -f "$migration" ]; then
               echo "Running migration: $(basename $migration)"
-              wrangler d1 execute crypto-news-db --file="$migration" --yes || echo "⚠️  Migration may have already been applied: $(basename $migration)"
+              wrangler d1 execute crypto-news-db --file="$migration" --remote --yes || echo "⚠️  Migration may have already been applied: $(basename $migration)"
             fi
           done
           echo "✅ Migrations completed"
