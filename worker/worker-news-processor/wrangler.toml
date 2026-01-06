@@ -3,17 +3,27 @@ main = "index.js"
 compatibility_date = "2024-10-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Cron trigger - runs every 10 minutes to stay within KV write limits
+# Cron trigger - runs every 3 minutes (optimized for free tier with batch size 1)
 # Format: "minute hour day month day-of-week"
-# "*/10 * * * *" = every 10 minutes (144 runs/day)
-# This keeps us well under the free tier 1,000 writes/day limit
-# Previous: "*/2 * * * *" was causing ~2160 writes/day from processor alone
+# "*/3 * * * *" = every 3 minutes (480 runs/day)
+# With batch size 1 and HTML rewriter being slow, we run more frequently to compensate
+# This prevents CPU timeout on free tier (10ms limit) while maintaining good throughput
+# Expected usage: ~480 D1 writes/day, ~160 KV writes/day (well within free tier)
 [triggers]
-crons = ["*/10 * * * *"]
+crons = ["*/3 * * * *"]
 
 # AI binding for sentiment analysis and summarization
 [ai]
 binding = "AI"
+
+# D1 database for article storage and queries
+[[d1_databases]]
+binding = "DB"
+database_name = "crypto-news-db"
+database_id = "1729d3f6-8035-41c4-90b3-e1d75d3ace86"
+# Create database with: wrangler d1 create crypto-news-db
+# Initialize schema with: wrangler d1 execute crypto-news-db --file=../schema.sql
+# See D1_SETUP_GUIDE.md for detailed instructions
 
 # KV namespace for reading and updating articles
 [[kv_namespaces]]
@@ -28,9 +38,9 @@ id = "4933e1596e304b71b4aac4cae364b75f"
 # Configuration variables (optional - defaults are set in shared/constants.js)
 # Uncomment and modify these to override defaults:
 [vars]
-MAX_ARTICLES_PER_RUN = 1       # Articles to process per run (default: 5)
+MAX_ARTICLES_PER_RUN = 1         # Articles to process per run (must be 1 for free tier - CPU time limit is 10ms)
 # MAX_CONTENT_CHARS = 10240      # Max chars to extract from webpage (default: 10KB)
-MAX_CONTENT_FETCH_ATTEMPTS = 2 # Max retry attempts for content fetch (default: 5)
+MAX_CONTENT_FETCH_ATTEMPTS = 2   # Max retry attempts for content fetch (default: 5)
 
 # Observability configuration for logs and traces
 [observability]
@@ -50,6 +60,12 @@ head_sampling_rate = 1
 
 [env.production]
 # Production environment configuration
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "crypto-news-db"
+database_id = "REPLACE_WITH_YOUR_PRODUCTION_D1_DATABASE_ID"
+# Create production database with: wrangler d1 create crypto-news-db --env production
+
 [[env.production.kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with production KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE" --env production

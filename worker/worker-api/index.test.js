@@ -319,12 +319,18 @@ describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
 
     it('should successfully fetch bitcoin news when KV data is available', async () => {
       const mockArticle = { 
+        id: 'article1-id',
         title: 'Test Article', 
+        description: 'Test description',
         sentiment: 'positive',
-        link: 'https://example.com/article1'
+        link: 'https://example.com/article1',
+        pubDate: '2024-01-01T00:00:00Z',
+        source: 'Test Source',
+        imageUrl: null,
+        aiSummary: null,
+        needsSentiment: false,
+        needsSummary: false
       };
-      
-      const articleId = 'article1-id';
 
       const request = new Request('http://localhost/api/bitcoin-news', {
         headers: {
@@ -335,17 +341,14 @@ describe('Bitcoin News Feed Feature - Scheduled Worker Architecture', () => {
       const env = {
         CRYPTO_NEWS_CACHE: {
           get: async (key, options) => {
-            // Return ID index
+            // Return article ID list
             if (key === 'BTC_ID_INDEX') {
-              return [articleId];
+              return ['article1-id'];
             }
-            
             // Return individual article
-            if (key === `article:${articleId}`) {
+            if (key === 'article:article1-id') {
               return mockArticle;
             }
-            
-            // Return null for any other key (including legacy BTC_ANALYZED_NEWS)
             return null;
           }
         }

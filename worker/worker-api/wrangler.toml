@@ -7,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 [ai]
 binding = "AI"
 
-# KV namespace for reading cached news (written by news-updater-cron worker)
+# KV namespace for reading cached news (populated by news-updater and news-processor workers)
 [[kv_namespaces]]
 binding = "CRYPTO_NEWS_CACHE"
 # Replace with actual KV namespace ID from: wrangler kv:namespace create "CRYPTO_NEWS_CACHE"
