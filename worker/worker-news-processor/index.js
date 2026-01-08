@@ -48,6 +48,7 @@ import {
   getArticleById,
   updateArticle as updateArticleInD1,
   updateCheckpoint,
+  getCheckpoint,
   rowToArticle,
   getAllArticles
 } from '../shared/d1-utils.js';
@@ -473,13 +474,23 @@ async function processArticle(db, env, article, config) {
       let content = article.extractedContent || null;
       
       if (!content) {
-        // Increment timeout counter for crash tracking only when we actually attempt scraping
+        // Increment timeout counter BEFORE attempting fetch
+        // This ensures the counter is saved even if worker times out during fetch
         const timeoutCount = (article.contentTimeout || 0) + 1;
         updates.contentTimeout = timeoutCount;
         
-        // This is the scraping phase - extract RAW content (undecoded) and exit
+        console.log(`  Phase 1: Fetching article content (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})...`);
+        
+        // Save incremented counter to D1 BEFORE attempting fetch
+        // This way if we timeout during fetch, the counter is already updated
+        const articleId = getArticleId(article);
+        await updateArticleInD1(db, articleId, {
+          contentTimeout: timeoutCount,
+          summaryError: `fetch_attempt (${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`
+        });
+        
+        // Now attempt the fetch - if this times out, counter is already saved
         try {
-          console.log(`  Phase 1: Fetching article content...`);
           content = await fetchArticleContent(article.link, false, config.MAX_CONTENT_CHARS);
           
           if (content) {
@@ -660,6 +671,84 @@ function articleIsComplete(article, config) {
 }
 
 /**
+ * Check for stuck article in checkpoint and handle timeout
+ * 
+ * If an article is in the checkpoint when a new worker run starts, it means
+ * the previous worker run did not complete successfully (timeout, crash, etc.).
+ * Increment its contentTimeout counter and handle accordingly.
+ * 
+ * This approach is robust regardless of cron schedule - we simply detect
+ * incomplete processing by checking the checkpoint at worker startup.
+ * 
+ * @param {D1Database} db - D1 database instance
+ * @param {Object} config - Configuration object
+ * @returns {Promise<Object|null>} Stuck article info {id, article} or null if none
+ */
+async function checkAndHandleStuckArticle(db, config) {
+  const checkpoint = await getCheckpoint(db);
+  
+  // No article in checkpoint - previous run completed successfully
+  if (!checkpoint || !checkpoint.currentArticleId) {
+    return null;
+  }
+  
+  // Article found in checkpoint at worker startup = previous run did not complete
+  console.log(`⚠ Incomplete processing detected: ${checkpoint.currentArticleId}`);
+  console.log(`  Previous worker run did not complete (timeout or crash)`);
+  
+  // Get the article from D1
+  const article = await getArticleById(db, checkpoint.currentArticleId);
+  
+  // Article was deleted
+  if (!article) {
+    console.log(`  Article no longer exists, clearing checkpoint`);
+    await updateCheckpoint(db, null);
+    return null;
+  }
+  
+  // Article was completed by another process
+  if (article.needsSentiment === 0 && article.needsSummary === 0) {
+    console.log(`  Article already completed, clearing checkpoint`);
+    await updateCheckpoint(db, null);
+    return null;
+  }
+  
+  // Increment timeout counter
+  const newTimeout = (article.contentTimeout || 0) + 1;
+  console.log(`  Incrementing timeout counter: ${newTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS}`);
+  
+  // Check if we've hit max retries
+  if (newTimeout >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
+    console.log(`  Max retries exceeded, marking article as failed`);
+    await updateArticleInD1(db, checkpoint.currentArticleId, {
+      contentTimeout: newTimeout,
+      needsSummary: false,
+      summaryError: `incomplete_processing_max_retries (attempt ${newTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`,
+      processedAt: Date.now()
+    });
+    await updateCheckpoint(db, null);
+    return null;
+  }
+  
+  // Update article with incremented timeout
+  await updateArticleInD1(db, checkpoint.currentArticleId, {
+    contentTimeout: newTimeout,
+    summaryError: `incomplete_processing (attempt ${newTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`,
+    extractedContent: undefined  // Clear any partial content
+  });
+  
+  // Clear checkpoint so the article can be picked up again
+  await updateCheckpoint(db, null);
+  
+  console.log(`  Incomplete processing handled, article ready for retry`);
+  
+  return {
+    id: checkpoint.currentArticleId,
+    article: article
+  };
+}
+
+/**
  * Process next batch of articles from D1
  * Simplified approach: Read articles from D1, process them, update D1
  * 
@@ -670,6 +759,13 @@ function articleIsComplete(article, config) {
  */
 async function processBatchFromD1(db, env, config) {
   const maxArticles = config.MAX_ARTICLES_PER_RUN || 5;
+  
+  // Check for incomplete processing from previous worker run
+  // If there's an article in the checkpoint, the previous run didn't complete
+  const incompleteArticle = await checkAndHandleStuckArticle(db, config);
+  if (incompleteArticle) {
+    console.log(`Handled incomplete processing: ${incompleteArticle.id}`);
+  }
   
   console.log(`Reading up to ${maxArticles} articles needing processing from D1...`);
   
@@ -1000,7 +1096,8 @@ export {
   processArticle, 
   articleNeedsProcessing, 
   articleIsComplete, 
-  updateKVWithProcessedArticles 
+  updateKVWithProcessedArticles,
+  checkAndHandleStuckArticle
 };
 
 export default {

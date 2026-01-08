@@ -177,7 +177,7 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
   });
 
   describe('Stuck Article Detection', () => {
-    it('should detect article stuck in checkpoint for too long', async () => {
+    it('should detect article in checkpoint at worker startup', async () => {
       // Insert an article
       await insertArticlesBatch(mockDB, [{
         id: 'stuck-article-1',
@@ -188,25 +188,18 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
         needsSummary: true
       }]);
 
-      // Simulate article getting stuck in checkpoint (e.g., worker timeout during processing)
-      const oldTimestamp = Date.now() - (10 * 60 * 1000); // 10 minutes ago
+      // Simulate article in checkpoint from previous run (worker did not complete)
       await updateCheckpoint(mockDB, 'stuck-article-1');
-      mockDB.checkpoint.lastProcessedAt = oldTimestamp;
 
-      // Get checkpoint and verify it shows stuck article
+      // Get checkpoint and verify it shows article from previous run
       const checkpoint = await getCheckpoint(mockDB);
       expect(checkpoint.currentArticleId).toBe('stuck-article-1');
-      expect(checkpoint.lastProcessedAt).toBe(oldTimestamp);
-
-      // On next run, system should detect this stuck article
-      const timeSinceLastUpdate = Date.now() - checkpoint.lastProcessedAt;
-      const STUCK_THRESHOLD = 5 * 60 * 1000; // 5 minutes
       
-      expect(timeSinceLastUpdate).toBeGreaterThan(STUCK_THRESHOLD);
+      // At worker startup, finding an article in checkpoint means incomplete processing
       expect(checkpoint.currentArticleId).not.toBeNull();
     });
 
-    it('should increment contentTimeout when stuck article is detected', async () => {
+    it('should increment contentTimeout when incomplete processing is detected', async () => {
       // Insert an article with initial contentTimeout
       await insertArticlesBatch(mockDB, [{
         id: 'timeout-article',
@@ -221,26 +214,24 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
       const articleBefore = await getArticleById(mockDB, 'timeout-article');
       expect(articleBefore.contentTimeout).toBe(1);
 
-      // Simulate stuck in checkpoint
-      const oldTimestamp = Date.now() - (10 * 60 * 1000); // 10 minutes ago
+      // Simulate article in checkpoint from previous incomplete run
       await updateCheckpoint(mockDB, 'timeout-article');
-      mockDB.checkpoint.lastProcessedAt = oldTimestamp;
 
-      // When detected, contentTimeout should be incremented
+      // When detected at startup, contentTimeout should be incremented
       const article = await getArticleById(mockDB, 'timeout-article');
       
       // Simulate the increment that should happen on detection
       await updateArticle(mockDB, 'timeout-article', {
         contentTimeout: (article.contentTimeout || 0) + 1,
-        summaryError: `timeout_detected (attempt ${(article.contentTimeout || 0) + 1}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`
+        summaryError: `incomplete_processing (attempt ${(article.contentTimeout || 0) + 1}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`
       });
 
       const articleAfter = await getArticleById(mockDB, 'timeout-article');
       expect(articleAfter.contentTimeout).toBe(2);
-      expect(articleAfter.summaryError).toContain('timeout_detected');
+      expect(articleAfter.summaryError).toContain('incomplete_processing');
     });
 
-    it('should mark article as failed after max retries on stuck detection', async () => {
+    it('should mark article as failed after max retries on incomplete processing detection', async () => {
       // Insert an article that's already at max retries
       await insertArticlesBatch(mockDB, [{
         id: 'max-retry-article',
@@ -256,9 +247,8 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
       expect(articleBefore.contentTimeout).toBe(config.MAX_CONTENT_FETCH_ATTEMPTS - 1);
       expect(articleBefore.needsSummary).toBe(1);
 
-      // Simulate stuck in checkpoint
+      // Simulate article in checkpoint from previous incomplete run
       await updateCheckpoint(mockDB, 'max-retry-article');
-      mockDB.checkpoint.lastProcessedAt = Date.now() - (10 * 60 * 1000);
 
       // On detection, increment would hit max, so article should be marked as failed
       const newTimeout = articleBefore.contentTimeout + 1;
@@ -267,7 +257,7 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
         await updateArticle(mockDB, 'max-retry-article', {
           contentTimeout: newTimeout,
           needsSummary: false,
-          summaryError: `max_retries_exceeded (attempt ${newTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`,
+          summaryError: `incomplete_processing_max_retries (attempt ${newTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`,
           processedAt: Date.now()
         });
       }
@@ -275,38 +265,22 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
       const articleAfter = await getArticleById(mockDB, 'max-retry-article');
       expect(articleAfter.contentTimeout).toBe(config.MAX_CONTENT_FETCH_ATTEMPTS);
       expect(articleAfter.needsSummary).toBe(0);
-      expect(articleAfter.summaryError).toContain('max_retries_exceeded');
+      expect(articleAfter.summaryError).toContain('max_retries');
       expect(articleAfter.processedAt).not.toBeNull();
     });
 
-    it('should not falsely detect recent processing as stuck', async () => {
-      // Insert an article
-      await insertArticlesBatch(mockDB, [{
-        id: 'recent-article',
-        title: 'Recent Processing',
-        link: 'https://example.com/recent',
-        pubDate: new Date().toISOString(),
-        needsSentiment: true,
-        needsSummary: true
-      }]);
-
-      // Simulate article currently being processed (recent timestamp)
-      const recentTimestamp = Date.now() - (30 * 1000); // 30 seconds ago
-      await updateCheckpoint(mockDB, 'recent-article');
-      mockDB.checkpoint.lastProcessedAt = recentTimestamp;
-
+    it('should not falsely detect when checkpoint is empty', async () => {
+      // Ensure checkpoint is empty  
       const checkpoint = await getCheckpoint(mockDB);
-      const timeSinceLastUpdate = Date.now() - checkpoint.lastProcessedAt;
-      const STUCK_THRESHOLD = 5 * 60 * 1000; // 5 minutes
-
-      // Should NOT be considered stuck
-      expect(timeSinceLastUpdate).toBeLessThan(STUCK_THRESHOLD);
+      expect(checkpoint.currentArticleId).toBeNull();
+      
+      // Empty checkpoint = previous run completed successfully, no detection needed
     });
   });
 
   describe('Stuck Article Recovery Integration', () => {
-    it('should handle stuck article during Phase 1 content fetching', async () => {
-      // Insert an article stuck during content fetching
+    it('should handle incomplete processing during Phase 1 content fetching', async () => {
+      // Insert an article that didn't complete in Phase 1
       await insertArticlesBatch(mockDB, [{
         id: 'stuck-phase1',
         title: 'Stuck in Phase 1',
@@ -315,12 +289,11 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
         needsSentiment: false,  // Sentiment already done
         needsSummary: true,
         contentTimeout: 1,
-        extractedContent: null  // Stuck before content extraction completed
+        extractedContent: null  // Incomplete - content extraction didn't finish
       }]);
 
-      // Simulate stuck in checkpoint from Phase 1
+      // Simulate article in checkpoint from previous incomplete run
       await updateCheckpoint(mockDB, 'stuck-phase1');
-      mockDB.checkpoint.lastProcessedAt = Date.now() - (10 * 60 * 1000);
 
       const checkpoint = await getCheckpoint(mockDB);
       expect(checkpoint.currentArticleId).toBe('stuck-phase1');
@@ -331,8 +304,8 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
       expect(article.extractedContent).toBeNull();
     });
 
-    it('should handle multiple stuck article recoveries', async () => {
-      // Test that system can recover from stuck state multiple times
+    it('should handle multiple incomplete processing recoveries', async () => {
+      // Test that system can recover from incomplete processing multiple times
       await insertArticlesBatch(mockDB, [{
         id: 'multi-stuck',
         title: 'Multiple Stuck Recoveries',
@@ -343,9 +316,8 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
         contentTimeout: 0
       }]);
 
-      // First stuck occurrence
+      // First incomplete occurrence
       await updateCheckpoint(mockDB, 'multi-stuck');
-      mockDB.checkpoint.lastProcessedAt = Date.now() - (10 * 60 * 1000);
       
       let article = await getArticleById(mockDB, 'multi-stuck');
       await updateArticle(mockDB, 'multi-stuck', {
@@ -356,9 +328,8 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
       article = await getArticleById(mockDB, 'multi-stuck');
       expect(article.contentTimeout).toBe(1);
 
-      // Second stuck occurrence
+      // Second incomplete occurrence
       await updateCheckpoint(mockDB, 'multi-stuck');
-      mockDB.checkpoint.lastProcessedAt = Date.now() - (10 * 60 * 1000);
       
       article = await getArticleById(mockDB, 'multi-stuck');
       await updateArticle(mockDB, 'multi-stuck', {
@@ -370,7 +341,7 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
       expect(article.contentTimeout).toBe(2);
     });
 
-    it('should clear checkpoint after stuck article reaches max retries', async () => {
+    it('should clear checkpoint after article with incomplete processing reaches max retries', async () => {
       // Insert article at max retries
       await insertArticlesBatch(mockDB, [{
         id: 'clear-checkpoint-test',
@@ -382,9 +353,8 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
         contentTimeout: config.MAX_CONTENT_FETCH_ATTEMPTS - 1
       }]);
 
-      // Stuck in checkpoint
+      // Article in checkpoint from previous incomplete run
       await updateCheckpoint(mockDB, 'clear-checkpoint-test');
-      mockDB.checkpoint.lastProcessedAt = Date.now() - (10 * 60 * 1000);
 
       // Process and hit max retries
       const article = await getArticleById(mockDB, 'clear-checkpoint-test');
@@ -393,7 +363,7 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
       await updateArticle(mockDB, 'clear-checkpoint-test', {
         contentTimeout: newTimeout,
         needsSummary: false,
-        summaryError: `max_retries_exceeded (attempt ${newTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`,
+        summaryError: `incomplete_processing_max_retries (attempt ${newTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`,
         processedAt: Date.now()
       });
       
