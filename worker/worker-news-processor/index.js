@@ -676,11 +676,15 @@ function articleIsComplete(article, config) {
 }
 
 /**
- * Check for stuck article in checkpoint and handle timeout
+ * Check for stuck article in checkpoint and handle recovery
  * 
  * If an article is in the checkpoint when a new worker run starts, it means
  * the previous worker run did not complete successfully (timeout, crash, etc.).
- * Increment its contentTimeout counter and handle accordingly.
+ * This function handles the recovery by either retrying the article or marking
+ * it as failed if max retries have been exceeded.
+ * 
+ * Note: contentTimeout is already incremented in Phase 1 before operations,
+ * so we don't increment it again here to avoid double-counting.
  * 
  * This approach is robust regardless of cron schedule - we simply detect
  * incomplete processing by checking the checkpoint at worker startup.
@@ -698,7 +702,7 @@ async function checkAndHandleStuckArticle(db, config) {
   }
   
   // Article found in checkpoint at worker startup = previous run did not complete
-  console.log(`⚠ Incomplete processing detected: ${checkpoint.currentArticleId}`);
+  console.log(`⚠ Timeout detected: ${checkpoint.currentArticleId}`);
   console.log(`  Previous worker run did not complete (timeout or crash)`);
   
   // Get the article from D1
@@ -718,34 +722,40 @@ async function checkAndHandleStuckArticle(db, config) {
     return null;
   }
   
-  // Increment timeout counter
-  const newTimeout = (article.contentTimeout || 0) + 1;
-  console.log(`  Incrementing timeout counter: ${newTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS}`);
+  // Check current timeout count (already incremented by Phase 1 before the operation)
+  const currentTimeout = article.contentTimeout || 0;
+  console.log(`  Current timeout count: ${currentTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS}`);
   
   // Check if we've hit max retries
-  if (newTimeout >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
+  if (currentTimeout >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
     console.log(`  Max retries exceeded, marking article as failed`);
     await updateArticleInD1(db, checkpoint.currentArticleId, {
-      contentTimeout: newTimeout,
+      needsSentiment: false,
       needsSummary: false,
-      summaryError: `incomplete_processing_max_retries (attempt ${newTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`,
+      summaryError: `timeout_max_retries_exceeded (attempt ${currentTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`,
       processedAt: Date.now()
     });
     await updateCheckpoint(db, null);
     return null;
   }
   
-  // Update article with incremented timeout
-  await updateArticleInD1(db, checkpoint.currentArticleId, {
-    contentTimeout: newTimeout,
-    summaryError: `incomplete_processing (attempt ${newTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`,
-    extractedContent: undefined  // Clear any partial content
-  });
+  // Prepare update data
+  const updateData = {
+    summaryError: `timeout_detected (attempt ${currentTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`
+  };
+  
+  // If we don't yet have extractedContent, clear any partial content so Phase 1 can refetch.
+  // If extractedContent is already populated (stuck in Phase 2), preserve it for retry.
+  if (!article.extractedContent) {
+    updateData.extractedContent = null;
+  }
+  
+  await updateArticleInD1(db, checkpoint.currentArticleId, updateData);
   
   // Clear checkpoint so the article can be picked up again
   await updateCheckpoint(db, null);
   
-  console.log(`  Incomplete processing handled, article ready for retry`);
+  console.log(`  Timeout handled, article ready for retry`);
   
   return {
     id: checkpoint.currentArticleId,
