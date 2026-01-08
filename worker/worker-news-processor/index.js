@@ -752,13 +752,16 @@ async function checkAndHandleStuckArticle(db, config) {
   
   await updateArticleInD1(db, checkpoint.currentArticleId, updateData);
   
+  // Save the article ID before clearing checkpoint
+  const articleId = checkpoint.currentArticleId;
+  
   // Clear checkpoint so the article can be picked up again
   await updateCheckpoint(db, null);
   
   console.log(`  Timeout handled, article ready for retry`);
   
   return {
-    id: checkpoint.currentArticleId,
+    id: articleId,
     article: article
   };
 }
