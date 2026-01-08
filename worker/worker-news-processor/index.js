@@ -425,6 +425,13 @@ async function processArticle(db, env, article, config) {
   // PHASE 0: Sentiment Analysis
   // Process sentiment as a separate phase before scraping/AI
   if (needsSentiment === true) {
+    const articleId = getArticleId(article);
+    
+    // Update state BEFORE processing to track attempt
+    await updateArticleInD1(db, articleId, {
+      processedAt: Date.now()
+    });
+    
     try {
       console.log(`  Phase 0: Analyzing sentiment...`);
       const sentimentResult = await analyzeSentiment(env, article);
@@ -433,8 +440,7 @@ async function processArticle(db, env, article, config) {
       needsUpdate = true;
       console.log(`  ✓ Sentiment: ${sentimentResult}`);
       
-      // Update article in D1
-      const articleId = getArticleId(article);
+      // Update article in D1 with results
       await updateArticleInD1(db, articleId, {
         sentiment: sentimentResult,
         needsSentiment: false,
@@ -443,15 +449,8 @@ async function processArticle(db, env, article, config) {
       
     } catch (error) {
       console.error(`  Failed sentiment analysis:`, error.message);
-      // Keep flag as true to retry next run, but still record last processing attempt time
-      updates.processedAt = Date.now();
-      
-      // Update only processedAt in D1
-      const articleId = getArticleId(article);
-      await updateArticleInD1(db, articleId, {
-        processedAt: Date.now()
-      });
-      
+      // Keep flag as true to retry next run
+      // processedAt was already updated before attempt
       return updates;
     }
   }
@@ -554,6 +553,13 @@ async function processArticle(db, env, article, config) {
       // We have RAW content from previous run - decode and process with AI
       console.log(`  Phase 2: Using previously extracted content (${content.length} chars, raw)`);
       
+      const articleId = getArticleId(article);
+      
+      // Update state BEFORE AI processing to track attempt
+      await updateArticleInD1(db, articleId, {
+        processedAt: Date.now()
+      });
+      
       try {
         console.log(`  Generating AI summary...`);
         
@@ -602,7 +608,6 @@ async function processArticle(db, env, article, config) {
       if (needsUpdate) {
         updates.processedAt = Date.now();
         
-        const articleId = getArticleId(article);
         await updateArticleInD1(db, articleId, {
           aiSummary: updates.aiSummary,
           needsSummary: updates.needsSummary !== undefined ? updates.needsSummary : undefined,
