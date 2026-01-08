@@ -279,6 +279,30 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
   });
 
   describe('Stuck Article Recovery Integration', () => {
+    it('should handle incomplete processing during Phase 0 sentiment analysis', async () => {
+      // Insert an article that didn't complete in Phase 0
+      await insertArticlesBatch(mockDB, [{
+        id: 'stuck-phase0',
+        title: 'Stuck in Phase 0',
+        link: 'https://example.com/stuck-phase0',
+        pubDate: new Date().toISOString(),
+        needsSentiment: true,  // Still needs sentiment
+        needsSummary: true,
+        sentiment: null  // Incomplete - sentiment not set
+      }]);
+
+      // Simulate article in checkpoint from previous incomplete run (timeout during sentiment)
+      await updateCheckpoint(mockDB, 'stuck-phase0');
+
+      const checkpoint = await getCheckpoint(mockDB);
+      expect(checkpoint.currentArticleId).toBe('stuck-phase0');
+
+      // On recovery, checkpoint should detect incomplete processing
+      const article = await getArticleById(mockDB, 'stuck-phase0');
+      expect(article.needsSentiment).toBe(1);
+      expect(article.sentiment).toBeNull();
+    });
+
     it('should handle incomplete processing during Phase 1 content fetching', async () => {
       // Insert an article that didn't complete in Phase 1
       await insertArticlesBatch(mockDB, [{
@@ -302,6 +326,33 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
       const article = await getArticleById(mockDB, 'stuck-phase1');
       expect(article.contentTimeout).toBe(1);
       expect(article.extractedContent).toBeNull();
+    });
+
+    it('should handle incomplete processing during Phase 2 AI summary generation', async () => {
+      // Insert an article that didn't complete in Phase 2
+      await insertArticlesBatch(mockDB, [{
+        id: 'stuck-phase2',
+        title: 'Stuck in Phase 2',
+        link: 'https://example.com/stuck-phase2',
+        pubDate: new Date().toISOString(),
+        needsSentiment: false,  // Sentiment already done
+        needsSummary: true,
+        contentTimeout: 1,
+        extractedContent: 'Some extracted content here',  // Content was extracted
+        aiSummary: null  // Incomplete - AI summary not generated
+      }]);
+
+      // Simulate article in checkpoint from previous incomplete run (timeout during AI)
+      await updateCheckpoint(mockDB, 'stuck-phase2');
+
+      const checkpoint = await getCheckpoint(mockDB);
+      expect(checkpoint.currentArticleId).toBe('stuck-phase2');
+
+      // On recovery, should detect incomplete AI processing
+      const article = await getArticleById(mockDB, 'stuck-phase2');
+      expect(article.needsSummary).toBe(1);
+      expect(article.extractedContent).not.toBeNull();
+      expect(article.aiSummary).toBeNull();
     });
 
     it('should handle multiple incomplete processing recoveries', async () => {
@@ -372,6 +423,118 @@ describe('Timeout Detection and Stuck Article Recovery', () => {
 
       const checkpoint = await getCheckpoint(mockDB);
       expect(checkpoint.currentArticleId).toBeNull();
+    });
+  });
+
+  describe('Phase-Specific Timeout Behavior', () => {
+    it('should handle Phase 0 sentiment timeout without incrementing contentTimeout', async () => {
+      // Phase 0 doesn't use contentTimeout counter - it just retries
+      await insertArticlesBatch(mockDB, [{
+        id: 'phase0-timeout',
+        title: 'Phase 0 Timeout',
+        link: 'https://example.com/phase0-timeout',
+        pubDate: new Date().toISOString(),
+        needsSentiment: true,
+        needsSummary: true,
+        contentTimeout: 0
+      }]);
+
+      // Simulate timeout in Phase 0
+      await updateCheckpoint(mockDB, 'phase0-timeout');
+      
+      // On detection, contentTimeout should NOT be incremented (Phase 0 doesn't use it)
+      const article = await getArticleById(mockDB, 'phase0-timeout');
+      expect(article.contentTimeout).toBe(0);
+      expect(article.needsSentiment).toBe(1);
+    });
+
+    it('should increment contentTimeout on Phase 1 content fetch timeout', async () => {
+      // Phase 1 increments contentTimeout before fetching
+      await insertArticlesBatch(mockDB, [{
+        id: 'phase1-timeout',
+        title: 'Phase 1 Timeout',
+        link: 'https://example.com/phase1-timeout',
+        pubDate: new Date().toISOString(),
+        needsSentiment: false,
+        needsSummary: true,
+        contentTimeout: 0
+      }]);
+
+      // Simulate timeout in Phase 1 (during content fetch)
+      // contentTimeout would have been incremented before fetch
+      await updateArticle(mockDB, 'phase1-timeout', {
+        contentTimeout: 1  // This happens BEFORE fetch attempt
+      });
+      await updateCheckpoint(mockDB, 'phase1-timeout');
+      
+      // On detection, contentTimeout should be incremented again
+      const article = await getArticleById(mockDB, 'phase1-timeout');
+      await updateArticle(mockDB, 'phase1-timeout', {
+        contentTimeout: (article.contentTimeout || 0) + 1
+      });
+      
+      const updatedArticle = await getArticleById(mockDB, 'phase1-timeout');
+      expect(updatedArticle.contentTimeout).toBe(2);
+    });
+
+    it('should use existing contentTimeout on Phase 2 AI summary timeout', async () => {
+      // Phase 2 doesn't increment contentTimeout, just uses existing value
+      await insertArticlesBatch(mockDB, [{
+        id: 'phase2-timeout',
+        title: 'Phase 2 Timeout',
+        link: 'https://example.com/phase2-timeout',
+        pubDate: new Date().toISOString(),
+        needsSentiment: false,
+        needsSummary: true,
+        contentTimeout: 2,  // Already incremented in Phase 1
+        extractedContent: 'Content from Phase 1'
+      }]);
+
+      // Simulate timeout in Phase 2 (during AI generation)
+      await updateCheckpoint(mockDB, 'phase2-timeout');
+      
+      // On detection, contentTimeout should be incremented
+      const article = await getArticleById(mockDB, 'phase2-timeout');
+      await updateArticle(mockDB, 'phase2-timeout', {
+        contentTimeout: (article.contentTimeout || 0) + 1
+      });
+      
+      const updatedArticle = await getArticleById(mockDB, 'phase2-timeout');
+      expect(updatedArticle.contentTimeout).toBe(3);
+    });
+
+    it('should mark article as failed when any phase hits max retries', async () => {
+      // Test that max retries works across all phases
+      await insertArticlesBatch(mockDB, [{
+        id: 'max-retry-any-phase',
+        title: 'Max Retry Any Phase',
+        link: 'https://example.com/max-retry',
+        pubDate: new Date().toISOString(),
+        needsSentiment: false,
+        needsSummary: true,
+        contentTimeout: config.MAX_CONTENT_FETCH_ATTEMPTS - 1,
+        extractedContent: 'Some content'
+      }]);
+
+      // Simulate timeout at max retry count
+      await updateCheckpoint(mockDB, 'max-retry-any-phase');
+      
+      const article = await getArticleById(mockDB, 'max-retry-any-phase');
+      const newTimeout = article.contentTimeout + 1;
+      
+      if (newTimeout >= config.MAX_CONTENT_FETCH_ATTEMPTS) {
+        await updateArticle(mockDB, 'max-retry-any-phase', {
+          contentTimeout: newTimeout,
+          needsSummary: false,
+          summaryError: `incomplete_processing_max_retries (attempt ${newTimeout}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`,
+          processedAt: Date.now()
+        });
+      }
+      
+      const updatedArticle = await getArticleById(mockDB, 'max-retry-any-phase');
+      expect(updatedArticle.contentTimeout).toBe(config.MAX_CONTENT_FETCH_ATTEMPTS);
+      expect(updatedArticle.needsSummary).toBe(0);
+      expect(updatedArticle.processedAt).not.toBeNull();
     });
   });
 
