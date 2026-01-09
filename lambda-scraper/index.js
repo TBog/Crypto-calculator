@@ -336,14 +336,25 @@ async function processArticle(browser, article, config) {
     return;
   }
   
-  // Check if we should retry (contentTimeout < MAX_ATTEMPTS)
-  const timeoutCount = (article.contentTimeout || 0) + 1;
-  
   // Skip if already extracted content in previous run
   if (article.extractedContent) {
     console.log(`  ℹ Content already extracted, skipping scrape`);
     return;
   }
+  
+  // Increment timeout counter BEFORE attempting fetch
+  // This ensures the counter is saved even if Lambda times out during scrape
+  const timeoutCount = (article.contentTimeout || 0) + 1;
+  
+  console.log(`  Fetching article content (attempt ${timeoutCount}/${MAX_CONTENT_FETCH_ATTEMPTS})...`);
+  
+  // Save incremented counter to D1 BEFORE attempting scrape
+  // This way if Lambda times out during scrape, the counter is already updated
+  await updateArticleInD1(config.accountId, config.databaseId, config.apiToken, articleId, {
+    contentTimeout: timeoutCount,
+    summaryError: `fetch_attempt (${timeoutCount}/${MAX_CONTENT_FETCH_ATTEMPTS})`,
+    processedAt: Date.now()
+  });
   
   try {
     // Open a new page (tab) in the browser
@@ -353,7 +364,7 @@ async function processArticle(browser, article, config) {
       // Set user agent
       await page.setUserAgent('Mozilla/5.0 (compatible; NewsBot/1.0; +http://crypto-calculator.com)');
       
-      // Scrape the article content
+      // Now attempt the scrape - if this times out, counter is already saved
       const content = await scrapeArticleContent(page, link, MAX_CONTENT_CHARS);
       
       if (content) {
