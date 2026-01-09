@@ -205,6 +205,26 @@ This project includes Cloudflare Workers for API caching, CORS handling, AI-powe
 - **Origin Validation**: Secure access control
 - **CORS Support**: Proper headers for cross-origin requests
 
+### Web Scraping Options
+
+The project supports two architectures for scraping Bitcoin news articles:
+
+**Option 1: Cloudflare Worker (Default)**
+- Uses HTMLRewriter for text extraction
+- Limited by 10ms CPU timeout on Free Tier
+- Processes articles sequentially every 3 minutes
+- Location: `worker/worker-news-processor/`
+
+**Option 2: AWS Lambda (Recommended)**
+- Full headless browser with Puppeteer + Chromium
+- No CPU timeout limitations
+- Batch processing with parallel tabs (2+ sites simultaneously)
+- Runs every 2 minutes within AWS Free Tier limits
+- Location: `lambda-scraper/`
+- See: [lambda-scraper/README.md](lambda-scraper/README.md) for setup
+
+The Lambda scraper provides better JavaScript rendering support and can handle dynamic content that the HTMLRewriter-based worker cannot process.
+
 ### Deployment
 
 The project uses GitHub Actions for automated deployments with separate environments:

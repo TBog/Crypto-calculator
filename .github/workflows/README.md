@@ -53,6 +53,28 @@ Deploys the Cloudflare D1 database schema to production.
   - Runs migrations from `worker/migrations/*.sql`
   - Verifies the deployment by querying the database
 
+### 7. Deploy AWS Lambda Scraper - Development (`deploy-lambda.yml`)
+Deploys the AWS Lambda news scraper to development.
+- **Trigger**: Push to `main` branch (when `lambda-scraper/**` changes) or manual dispatch
+- **Environment**: Development
+- **What it does**:
+  - Installs dependencies with npm
+  - Creates deployment package (function.zip)
+  - Updates Lambda function code
+  - Updates Lambda environment variables
+  - Waits for deployment to complete
+
+### 8. Deploy AWS Lambda Scraper - Production (`deploy-lambda-production.yml`)
+Deploys the AWS Lambda news scraper to production.
+- **Trigger**: Push to `production` branch (when `lambda-scraper/**` changes) or manual dispatch
+- **Environment**: Production
+- **What it does**:
+  - Installs dependencies with npm
+  - Creates deployment package (function.zip)
+  - Updates Lambda function code (to `crypto-news-scraper-prod`)
+  - Updates Lambda environment variables
+  - Waits for deployment to complete
+
 ## Cloudflare Workers Deployment
 
 ### Deployment Environments
@@ -243,7 +265,102 @@ Required secrets for all workflows:
 - `CLOUDFLARE_API_TOKEN` (manual setup required)
 - `CLOUDFLARE_ACCOUNT_ID` (manual setup required)
 
+### AWS Lambda Deployment Secrets
+
+For AWS Lambda scraper deployment (`deploy-lambda.yml` and `deploy-lambda-production.yml`):
+
+**Development Environment:**
+- `AWS_ACCESS_KEY_ID` - AWS access key for development account
+- `AWS_SECRET_ACCESS_KEY` - AWS secret key for development account
+- `AWS_REGION` - AWS region (e.g., `us-east-1`)
+- `CLOUDFLARE_D1_DATABASE_ID` - D1 database ID for development
+
+**Production Environment:**
+- `AWS_ACCESS_KEY_ID_PROD` - AWS access key for production account
+- `AWS_SECRET_ACCESS_KEY_PROD` - AWS secret key for production account
+- `AWS_REGION_PROD` - AWS region for production (e.g., `us-east-1`)
+- `CLOUDFLARE_ACCOUNT_ID_PROD` - Cloudflare account ID for production
+- `CLOUDFLARE_D1_DATABASE_ID_PROD` - D1 database ID for production
+- `CLOUDFLARE_API_TOKEN_PROD` - Cloudflare API token for production
+
+See `lambda-scraper/GITHUB_ACTIONS_SETUP.md` for detailed AWS Lambda deployment setup instructions.
+
 To add secrets:
 1. Go to repository Settings → Secrets and variables → Actions
 2. Click "New repository secret"
 3. Add the secret name and value
+
+## AWS Lambda Scraper Deployment
+
+### Prerequisites
+
+Before the Lambda deployment workflows can run:
+
+1. **Deploy Lambda Function Manually First**: Use `lambda-scraper/deploy.sh` for initial setup
+2. **Configure AWS IAM User**: Create IAM user with Lambda update permissions
+3. **Add GitHub Secrets**: Configure all required AWS and Cloudflare secrets
+
+### Deployment Environments
+
+**Development Environment:**
+- **Branch**: `main`
+- **Workflow**: `deploy-lambda.yml`
+- **Function Name**: `crypto-news-scraper`
+- **Trigger**: Automatic on push to `main` branch (when `lambda-scraper/**` changes)
+
+**Production Environment:**
+- **Branch**: `production`
+- **Workflow**: `deploy-lambda-production.yml`
+- **Function Name**: `crypto-news-scraper-prod`
+- **Trigger**: Automatic on push to `production` branch (when `lambda-scraper/**` changes)
+
+### How It Works
+
+1. **Checkout Code**: Fetches repository with Lambda scraper code
+2. **Setup Node.js**: Installs Node.js 20 with npm dependency caching
+3. **Install Dependencies**: Runs `npm ci --production` to install only production dependencies
+4. **Create Deployment Package**: Zips code and dependencies into `function.zip`
+5. **Configure AWS Credentials**: Sets up AWS CLI with provided secrets
+6. **Update Lambda Code**: Uploads new code package to Lambda function
+7. **Update Configuration**: Updates environment variables (Cloudflare credentials)
+8. **Wait for Completion**: Ensures deployment finishes successfully before exiting
+
+### Manual Deployment
+
+**Development:**
+1. Go to Actions tab in GitHub
+2. Select "Deploy Lambda Scraper (Development)"
+3. Click "Run workflow"
+4. Select the `main` branch
+
+**Production:**
+1. Go to Actions tab in GitHub
+2. Select "Deploy Lambda Scraper (Production)"
+3. Click "Run workflow"
+4. Select the `production` branch
+
+### Monitoring Lambda Deployments
+
+After deployment:
+1. Check the Actions tab for deployment status and logs
+2. View Lambda function in AWS Console
+3. Monitor Lambda logs: `aws logs tail /aws/lambda/crypto-news-scraper --follow`
+4. Verify function invocations in CloudWatch Metrics
+
+### Troubleshooting Lambda Deployments
+
+**Error: "Function not found"**
+- Lambda function must exist before GitHub Actions can update it
+- Run `lambda-scraper/deploy.sh` for initial deployment
+
+**Error: "Access Denied"**
+- Verify AWS IAM user has Lambda update permissions
+- Check AWS credentials are correctly configured in GitHub secrets
+
+**Error: "Package too large"**
+- Ensure Chromium is deployed as a Lambda Layer (not in package)
+- Verify using `npm ci --production` (no dev dependencies)
+
+**Environment Variable Issues**
+- Verify all required secrets exist in GitHub repository settings
+- Check secret names match exactly (case-sensitive)
