@@ -370,9 +370,9 @@ async function processArticle(browser, article, config) {
       if (content) {
         // Save extracted content for AI processing later
         // Note: Text is extracted directly from DOM (already decoded by browser)
+        // contentTimeout was already saved before the operation, no need to update again
         await updateArticleInD1(config.accountId, config.databaseId, config.apiToken, articleId, {
           extractedContent: content,
-          contentTimeout: timeoutCount,
           summaryError: `scraping_complete (attempt ${timeoutCount}/${MAX_CONTENT_FETCH_ATTEMPTS})`,
           processedAt: Date.now()
         });
@@ -382,8 +382,8 @@ async function processArticle(browser, article, config) {
         // Failed to extract content
         const shouldGiveUp = timeoutCount >= MAX_CONTENT_FETCH_ATTEMPTS;
         
+        // contentTimeout was already saved before the operation, no need to update again
         await updateArticleInD1(config.accountId, config.databaseId, config.apiToken, articleId, {
-          contentTimeout: timeoutCount,
           summaryError: `fetch_failed (attempt ${timeoutCount}/${MAX_CONTENT_FETCH_ATTEMPTS})`,
           needsSummary: shouldGiveUp ? false : undefined,
           processedAt: Date.now()
@@ -406,8 +406,8 @@ async function processArticle(browser, article, config) {
     
     const shouldGiveUp = timeoutCount >= MAX_CONTENT_FETCH_ATTEMPTS;
     
+    // contentTimeout was already saved before the operation, no need to update again
     await updateArticleInD1(config.accountId, config.databaseId, config.apiToken, articleId, {
-      contentTimeout: timeoutCount,
       summaryError: `fetch_error: ${error.message.substring(0, 100)} (attempt ${timeoutCount}/${MAX_CONTENT_FETCH_ATTEMPTS})`,
       needsSummary: shouldGiveUp ? false : undefined,
       processedAt: Date.now()
