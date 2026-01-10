@@ -123,7 +123,16 @@ class MockD1Database {
               const limit = params[0];
               const results = Array.from(db.articles.values())
                 .filter(a => a.needsSentiment === 1 || a.needsSummary === 1)
-                .sort((a, b) => b.pubDate.localeCompare(a.pubDate))
+                .sort((a, b) => {
+                  // First sort by contentTimeout (0 first, >0 last)
+                  const aTimeout = (a.contentTimeout || 0) > 0 ? 1 : 0;
+                  const bTimeout = (b.contentTimeout || 0) > 0 ? 1 : 0;
+                  if (aTimeout !== bTimeout) {
+                    return aTimeout - bTimeout;
+                  }
+                  // Then by pubDate DESC (newest first)
+                  return b.pubDate.localeCompare(a.pubDate);
+                })
                 .slice(0, limit);
               return { results };
             }
