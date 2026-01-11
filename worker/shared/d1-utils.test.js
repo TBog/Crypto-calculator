@@ -12,6 +12,7 @@ import {
   insertArticlesBatch,
   updateArticle,
   getArticleById,
+  getArticlesNeedingProcessing,
   rowToArticle
 } from './d1-utils.js';
 
@@ -94,6 +95,25 @@ describe('D1 Utils - Schema Field Completeness', () => {
           },
           
           all: async () => {
+            // Handle getArticlesNeedingProcessing with ordering
+            if (sql.includes('WHERE needsSentiment = 1 OR needsSummary = 1')) {
+              const limit = query._params[0];
+              const results = Array.from(articles.values())
+                .filter(a => a.needsSentiment === 1 || a.needsSummary === 1)
+                .sort((a, b) => {
+                  // First sort by contentTimeout (0 first, >0 last)
+                  const aTimeout = (a.contentTimeout || 0) > 0 ? 1 : 0;
+                  const bTimeout = (b.contentTimeout || 0) > 0 ? 1 : 0;
+                  if (aTimeout !== bTimeout) {
+                    return aTimeout - bTimeout;
+                  }
+                  // Then by pubDate DESC (newest first)
+                  return b.pubDate.localeCompare(a.pubDate);
+                })
+                .slice(0, limit);
+              return { results };
+            }
+            
             return { results: Array.from(articles.values()) };
           }
         };
@@ -418,6 +438,122 @@ describe('D1 Utils - Schema Field Completeness', () => {
       expect(articleUpdated.title).toBe('Round Trip Test');
       expect(articleUpdated.description).toBe('Full description');
       expect(articleUpdated.link).toBe('https://example.com/article');
+    });
+  });
+
+  describe('getArticlesNeedingProcessing - Timeout Ordering', () => {
+    it('should prioritize fresh articles over timed-out articles', async () => {
+      // Insert articles with different contentTimeout values
+      const now = Date.now();
+      
+      await insertArticlesBatch(mockDB, [
+        {
+          id: 'fresh-1',
+          title: 'Fresh Article 1',
+          pubDate: new Date(now - 1000).toISOString(), // 1 second ago
+          needsSummary: true,
+          contentTimeout: 0  // Fresh article (no timeout)
+        },
+        {
+          id: 'timeout-1',
+          title: 'Timeout Article 1',
+          pubDate: new Date(now - 500).toISOString(),  // 0.5 seconds ago (newer!)
+          needsSummary: true,
+          contentTimeout: 1  // Has timed out once
+        },
+        {
+          id: 'fresh-2',
+          title: 'Fresh Article 2',
+          pubDate: new Date(now - 2000).toISOString(), // 2 seconds ago
+          needsSummary: true,
+          contentTimeout: 0  // Fresh article (no timeout)
+        },
+        {
+          id: 'timeout-2',
+          title: 'Timeout Article 2',
+          pubDate: new Date(now - 100).toISOString(),  // 0.1 seconds ago (newest!)
+          needsSummary: true,
+          contentTimeout: 2  // Has timed out twice
+        }
+      ]);
+
+      // Get articles needing processing
+      const articles = await getArticlesNeedingProcessing(mockDB, 10);
+
+      // Should get all 4 articles
+      expect(articles).toHaveLength(4);
+
+      // Fresh articles should come first (contentTimeout = 0)
+      // Within fresh articles, order by pubDate DESC (newest first)
+      expect(articles[0].id).toBe('fresh-1');  // contentTimeout=0, newer than fresh-2
+      expect(articles[1].id).toBe('fresh-2');  // contentTimeout=0, older than fresh-1
+
+      // Timed-out articles should come last (contentTimeout > 0)
+      // Within timed-out articles, order by pubDate DESC (newest first)
+      expect(articles[2].id).toBe('timeout-2'); // contentTimeout=2, newest timed-out
+      expect(articles[3].id).toBe('timeout-1'); // contentTimeout=1, older timed-out
+    });
+
+    it('should process fresh articles before retrying timed-out articles', async () => {
+      const now = Date.now();
+      
+      await insertArticlesBatch(mockDB, [
+        {
+          id: 'timeout-retry',
+          title: 'Retry This Article',
+          pubDate: new Date(now - 100).toISOString(),  // Very recent
+          needsSummary: true,
+          contentTimeout: 1  // Has timed out
+        },
+        {
+          id: 'fresh-pending',
+          title: 'New Pending Article',
+          pubDate: new Date(now - 10000).toISOString(), // Much older
+          needsSummary: true,
+          contentTimeout: 0  // Fresh, never attempted
+        }
+      ]);
+
+      // Get articles with limit of 1
+      const articles = await getArticlesNeedingProcessing(mockDB, 1);
+
+      // Should process fresh article first, even though timeout article is newer
+      expect(articles).toHaveLength(1);
+      expect(articles[0].id).toBe('fresh-pending');
+      expect(articles[0].contentTimeout).toBe(0);
+    });
+
+    it('should handle mixed articles with sentiment and summary flags', async () => {
+      const now = Date.now();
+      
+      await insertArticlesBatch(mockDB, [
+        {
+          id: 'mixed-1',
+          title: 'Needs Sentiment',
+          pubDate: new Date(now - 1000).toISOString(),
+          needsSentiment: true,
+          needsSummary: false,
+          contentTimeout: 1  // Has timed out
+        },
+        {
+          id: 'mixed-2',
+          title: 'Fresh Needs Both',
+          pubDate: new Date(now - 2000).toISOString(),
+          needsSentiment: true,
+          needsSummary: true,
+          contentTimeout: 0  // Fresh
+        }
+      ]);
+
+      const articles = await getArticlesNeedingProcessing(mockDB, 10);
+
+      // Fresh article should come first
+      expect(articles[0].id).toBe('mixed-2');
+      expect(articles[0].contentTimeout).toBe(0);
+      
+      // Timed-out article should come second
+      expect(articles[1].id).toBe('mixed-1');
+      expect(articles[1].contentTimeout).toBe(1);
     });
   });
 });
