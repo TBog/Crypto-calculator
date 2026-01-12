@@ -101,11 +101,17 @@ describe('D1 Utils - Schema Field Completeness', () => {
               const results = Array.from(articles.values())
                 .filter(a => a.needsSentiment === 1 || a.needsSummary === 1)
                 .sort((a, b) => {
-                  // First sort by contentTimeout (0 first, >0 last)
-                  const aTimeout = (a.contentTimeout || 0) > 0 ? 1 : 0;
-                  const bTimeout = (b.contentTimeout || 0) > 0 ? 1 : 0;
-                  if (aTimeout !== bTimeout) {
-                    return aTimeout - bTimeout;
+                  // Priority sorting:
+                  // 0 = Fresh (contentTimeout=0)
+                  // 1 = Has extracted content (ready for Phase 2)
+                  // 2 = Failed (contentTimeout>0 AND no extractedContent)
+                  const aPriority = (a.contentTimeout || 0) === 0 ? 0 : 
+                                   (a.extractedContent != null ? 1 : 2);
+                  const bPriority = (b.contentTimeout || 0) === 0 ? 0 : 
+                                   (b.extractedContent != null ? 1 : 2);
+                  
+                  if (aPriority !== bPriority) {
+                    return aPriority - bPriority;
                   }
                   // Then by pubDate DESC (newest first)
                   return b.pubDate.localeCompare(a.pubDate);
@@ -554,6 +560,63 @@ describe('D1 Utils - Schema Field Completeness', () => {
       // Timed-out article should come second
       expect(articles[1].id).toBe('mixed-1');
       expect(articles[1].contentTimeout).toBe(1);
+    });
+
+    it('should prioritize articles with extracted content over failed articles', async () => {
+      // This test verifies the fix for the issue where articles with successfully
+      // extracted content were being deprioritized due to contentTimeout > 0
+      const now = Date.now();
+      
+      await insertArticlesBatch(mockDB, [
+        {
+          id: 'has-content',
+          title: 'Article With Extracted Content',
+          pubDate: new Date(now - 3000).toISOString(), // Older article
+          needsSummary: true,
+          contentTimeout: 1,  // Has contentTimeout from Phase 1
+          extractedContent: 'Successfully extracted content from Phase 1'  // Phase 1 succeeded
+        },
+        {
+          id: 'failed-fetch',
+          title: 'Article That Failed',
+          pubDate: new Date(now - 100).toISOString(),  // Much newer article
+          needsSummary: true,
+          contentTimeout: 2,  // Failed twice
+          extractedContent: null  // No content extracted
+        },
+        {
+          id: 'fresh-article',
+          title: 'Fresh Pending Article',
+          pubDate: new Date(now - 5000).toISOString(), // Oldest article
+          needsSummary: true,
+          contentTimeout: 0,  // Fresh, never attempted
+          extractedContent: null
+        }
+      ]);
+
+      const articles = await getArticlesNeedingProcessing(mockDB, 10);
+
+      // Priority order should be:
+      // 1. Fresh articles (contentTimeout=0)
+      // 2. Articles with extracted content (ready for Phase 2)
+      // 3. Failed articles (retry later)
+      
+      expect(articles).toHaveLength(3);
+      
+      // Fresh article should be first (highest priority)
+      expect(articles[0].id).toBe('fresh-article');
+      expect(articles[0].contentTimeout).toBe(0);
+      expect(articles[0].extractedContent).toBeNull();
+      
+      // Article with extracted content should be second (ready for Phase 2)
+      expect(articles[1].id).toBe('has-content');
+      expect(articles[1].contentTimeout).toBe(1);
+      expect(articles[1].extractedContent).toBe('Successfully extracted content from Phase 1');
+      
+      // Failed article should be last (retry later)
+      expect(articles[2].id).toBe('failed-fetch');
+      expect(articles[2].contentTimeout).toBe(2);
+      expect(articles[2].extractedContent).toBeNull();
     });
   });
 });

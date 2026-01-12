@@ -153,8 +153,15 @@ export async function updateArticle(db, articleId, updates) {
 
 /**
  * Get articles that need processing (sentiment or summary)
- * Orders articles to process fresh articles first, timed-out articles last.
- * This ensures that articles that have timed out are retried after other pending articles.
+ * Orders articles by priority:
+ * 1. Fresh articles (contentTimeout=0): Never attempted, highest priority
+ * 2. Articles with extracted content (ready for Phase 2 AI processing): High priority
+ * 3. Failed articles (contentTimeout>0 AND no extractedContent): Retry later, lowest priority
+ * 
+ * This ensures that articles with successfully extracted content are processed
+ * immediately in Phase 2, while failed articles are retried only after processing
+ * fresh and ready articles.
+ * 
  * @param {D1Database} db - D1 database instance
  * @param {number} limit - Maximum number of articles to return
  * @returns {Promise<Array>} Array of articles needing processing
@@ -164,7 +171,11 @@ export async function getArticlesNeedingProcessing(db, limit = 5) {
     SELECT * FROM articles
     WHERE needsSentiment = 1 OR needsSummary = 1
     ORDER BY 
-      CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC,
+      CASE 
+        WHEN contentTimeout = 0 THEN 0
+        WHEN extractedContent IS NOT NULL THEN 1
+        ELSE 2
+      END ASC,
       pubDate DESC
     LIMIT ?
   `).bind(limit).all();
