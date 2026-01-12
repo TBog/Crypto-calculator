@@ -474,5 +474,61 @@ describe('Complete Article Processing - All Phases', () => {
       expect(consoleLogs.some(log => log.includes('Phase 0:'))).toBe(true);
       expect(consoleLogs.some(log => log.includes('Phase 2:'))).toBe(false);
     });
+
+    it('should require extractedContent for Phase 2 to execute', async () => {
+      const article = {
+        id: 'phase2-requirement-test',
+        title: 'Test Article',
+        link: 'https://example.com/test',
+        needsSentiment: false,  // Phase 0 complete
+        needsSummary: true,
+        // NO extractedContent - this is the problem in production!
+      };
+
+      mockDB._articles.set(article.id, {
+        ...article,
+        needsSentiment: 0,
+        needsSummary: 1
+      });
+
+      consoleLogs = [];
+      await processArticle(mockDB, mockEnv, article, config);
+
+      // Phase 1 should run (attempting to fetch content)
+      expect(consoleLogs.some(log => log.includes('Phase 1:'))).toBe(true);
+      
+      // Phase 2 should NOT run because extractedContent is not present
+      expect(consoleLogs.some(log => log.includes('Phase 2:'))).toBe(false);
+      
+      // This demonstrates the production issue: if Phase 1 fails to fetch content,
+      // Phase 2 will never execute, even though needsSummary = true
+    });
+
+    it('should demonstrate Phase 2 only runs with extractedContent present', async () => {
+      const article = {
+        id: 'phase2-with-content-test',
+        title: 'Test Article',
+        link: 'https://example.com/test',
+        needsSentiment: false,
+        needsSummary: true,
+        extractedContent: 'This is extracted content from Phase 1 that allows Phase 2 to execute properly.'
+      };
+
+      mockDB._articles.set(article.id, {
+        ...article,
+        needsSentiment: 0,
+        needsSummary: 1
+      });
+
+      consoleLogs = [];
+      await processArticle(mockDB, mockEnv, article, config);
+
+      // Phase 2 should run because extractedContent IS present
+      expect(consoleLogs.some(log => log.includes('Phase 2:'))).toBe(true);
+      expect(consoleLogs.some(log => log.includes('Generating AI summary'))).toBe(true);
+      
+      // Phase 1 should NOT run because extractedContent already exists
+      expect(consoleLogs.some(log => log.includes('Phase 1: Fetching'))).toBe(false);
+    });
   });
 });
