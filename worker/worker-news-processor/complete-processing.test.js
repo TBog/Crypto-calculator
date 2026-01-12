@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { processArticle, processBatchFromD1 } from './index.js';
+import { processArticle } from './index.js';
 
 describe('Complete Article Processing - All Phases', () => {
   let mockDB;
