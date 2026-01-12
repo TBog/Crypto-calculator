@@ -101,17 +101,11 @@ describe('D1 Utils - Schema Field Completeness', () => {
               const results = Array.from(articles.values())
                 .filter(a => a.needsSentiment === 1 || a.needsSummary === 1)
                 .sort((a, b) => {
-                  // Priority sorting:
-                  // 0 = Fresh (contentTimeout=0)
-                  // 1 = Has extracted content (ready for Phase 2)
-                  // 2 = Failed (contentTimeout>0 AND no extractedContent)
-                  const aPriority = (a.contentTimeout || 0) === 0 ? 0 : 
-                                   (a.extractedContent != null ? 1 : 2);
-                  const bPriority = (b.contentTimeout || 0) === 0 ? 0 : 
-                                   (b.extractedContent != null ? 1 : 2);
-                  
-                  if (aPriority !== bPriority) {
-                    return aPriority - bPriority;
+                  // First sort by contentTimeout (0 first, >0 last)
+                  const aTimeout = (a.contentTimeout || 0) > 0 ? 1 : 0;
+                  const bTimeout = (b.contentTimeout || 0) > 0 ? 1 : 0;
+                  if (aTimeout !== bTimeout) {
+                    return aTimeout - bTimeout;
                   }
                   // Then by pubDate DESC (newest first)
                   return b.pubDate.localeCompare(a.pubDate);
@@ -563,8 +557,9 @@ describe('D1 Utils - Schema Field Completeness', () => {
     });
 
     it('should prioritize articles with extracted content over failed articles', async () => {
-      // This test verifies the fix for the issue where articles with successfully
-      // extracted content were being deprioritized due to contentTimeout > 0
+      // This test verifies the fix where contentTimeout is reset to 0 when
+      // extractedContent is successfully set, ensuring articles ready for Phase 2
+      // are prioritized alongside fresh articles
       const now = Date.now();
       
       await insertArticlesBatch(mockDB, [
@@ -573,8 +568,8 @@ describe('D1 Utils - Schema Field Completeness', () => {
           title: 'Article With Extracted Content',
           pubDate: new Date(now - 3000).toISOString(), // Older article
           needsSummary: true,
-          contentTimeout: 1,  // Has contentTimeout from Phase 1
-          extractedContent: 'Successfully extracted content from Phase 1'  // Phase 1 succeeded
+          contentTimeout: 0,  // Reset to 0 after successful extraction
+          extractedContent: 'Successfully extracted content from Phase 1'
         },
         {
           id: 'failed-fetch',
@@ -597,21 +592,19 @@ describe('D1 Utils - Schema Field Completeness', () => {
       const articles = await getArticlesNeedingProcessing(mockDB, 10);
 
       // Priority order should be:
-      // 1. Fresh articles (contentTimeout=0)
-      // 2. Articles with extracted content (ready for Phase 2)
-      // 3. Failed articles (retry later)
+      // 1. Articles with contentTimeout=0 (both fresh and successfully extracted)
+      // 2. Failed articles with contentTimeout>0 (retry later)
       
       expect(articles).toHaveLength(3);
       
-      // Fresh article should be first (highest priority)
-      expect(articles[0].id).toBe('fresh-article');
+      // Articles with contentTimeout=0 should come first (sorted by pubDate DESC)
+      expect(articles[0].id).toBe('has-content');  // contentTimeout=0, newest among priority 0
       expect(articles[0].contentTimeout).toBe(0);
-      expect(articles[0].extractedContent).toBeNull();
+      expect(articles[0].extractedContent).toBe('Successfully extracted content from Phase 1');
       
-      // Article with extracted content should be second (ready for Phase 2)
-      expect(articles[1].id).toBe('has-content');
-      expect(articles[1].contentTimeout).toBe(1);
-      expect(articles[1].extractedContent).toBe('Successfully extracted content from Phase 1');
+      expect(articles[1].id).toBe('fresh-article');  // contentTimeout=0, oldest among priority 0
+      expect(articles[1].contentTimeout).toBe(0);
+      expect(articles[1].extractedContent).toBeNull();
       
       // Failed article should be last (retry later)
       expect(articles[2].id).toBe('failed-fetch');

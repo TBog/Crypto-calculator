@@ -496,6 +496,7 @@ async function processArticle(db, env, article, config) {
             // Save RAW extracted content (undecoded) for next run
             // HTML entities will be decoded in Phase 2 when actually used
             updates.extractedContent = content;
+            updates.contentTimeout = 0;  // Reset timeout counter on successful extraction
             updates.summaryError = `scraping_complete (attempt ${timeoutCount}/${config.MAX_CONTENT_FETCH_ATTEMPTS})`;
             needsUpdate = true;
             console.log(`  ✓ Content extracted (${content.length} chars, raw) - AI processing in next run`);
