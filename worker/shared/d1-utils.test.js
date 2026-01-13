@@ -555,5 +555,61 @@ describe('D1 Utils - Schema Field Completeness', () => {
       expect(articles[1].id).toBe('mixed-1');
       expect(articles[1].contentTimeout).toBe(1);
     });
+
+    it('should prioritize articles with extracted content over failed articles', async () => {
+      // This test verifies the fix where contentTimeout is reset to 0 when
+      // extractedContent is successfully set, ensuring articles ready for Phase 2
+      // are prioritized alongside fresh articles
+      const now = Date.now();
+      
+      await insertArticlesBatch(mockDB, [
+        {
+          id: 'has-content',
+          title: 'Article With Extracted Content',
+          pubDate: new Date(now - 3000).toISOString(), // Older article
+          needsSummary: true,
+          contentTimeout: 0,  // Reset to 0 after successful extraction
+          extractedContent: 'Successfully extracted content from Phase 1'
+        },
+        {
+          id: 'failed-fetch',
+          title: 'Article That Failed',
+          pubDate: new Date(now - 100).toISOString(),  // Much newer article
+          needsSummary: true,
+          contentTimeout: 2,  // Failed twice
+          extractedContent: null  // No content extracted
+        },
+        {
+          id: 'fresh-article',
+          title: 'Fresh Pending Article',
+          pubDate: new Date(now - 5000).toISOString(), // Oldest article
+          needsSummary: true,
+          contentTimeout: 0,  // Fresh, never attempted
+          extractedContent: null
+        }
+      ]);
+
+      const articles = await getArticlesNeedingProcessing(mockDB, 10);
+
+      // Priority order should be:
+      // 1. Articles with contentTimeout=0 (both fresh and successfully extracted)
+      // 2. Failed articles with contentTimeout>0 (retry later)
+      
+      expect(articles).toHaveLength(3);
+      
+      // Articles with contentTimeout=0 should come first (sorted by pubDate DESC)
+      expect(articles[0].id).toBe('has-content');  // contentTimeout=0, newest among priority 0
+      expect(articles[0].contentTimeout).toBe(0);
+      expect(articles[0].extractedContent).toBe('Successfully extracted content from Phase 1');
+      
+      expect(articles[1].id).toBe('fresh-article');  // contentTimeout=0, oldest among priority 0
+      expect(articles[1].contentTimeout).toBe(0);
+      expect(articles[1].extractedContent).toBeNull();
+      
+      // Failed article should be last (retry later)
+      expect(articles[2].id).toBe('failed-fetch');
+      expect(articles[2].contentTimeout).toBe(2);
+      expect(articles[2].extractedContent).toBeNull();
+    });
   });
 });
