@@ -9,10 +9,17 @@ describe('News Processor - D1+KV Integration', () => {
   // Mock D1 database
   const createMockD1 = () => {
     const articles = new Map();
+    const checkpoint = {
+      id: 1,
+      currentArticleId: null,
+      lastProcessedAt: Date.now(),
+      articlesProcessedCount: 0
+    };
     
     return {
       // Store articles in memory
       _articles: articles,
+      _checkpoint: checkpoint,
       
       prepare: (sql) => {
         const query = {
@@ -52,6 +59,15 @@ describe('News Processor - D1+KV Integration', () => {
             
             // Handle UPDATE
             if (sql.includes('UPDATE')) {
+              // Handle checkpoint updates
+              if (sql.includes('processing_checkpoint')) {
+                checkpoint.currentArticleId = query._params[0];
+                checkpoint.lastProcessedAt = Date.now();
+                checkpoint.articlesProcessedCount++;
+                return { meta: { changes: 1 } };
+              }
+              
+              // Handle article updates
               const articleId = query._params[query._params.length - 1];
               const article = articles.get(articleId);
               if (article) {
@@ -79,6 +95,17 @@ describe('News Processor - D1+KV Integration', () => {
             
             // Handle DELETE
             if (sql.includes('DELETE')) {
+              if (sql.includes('WHERE id = ?')) {
+                // Delete specific article
+                const id = query._params[0];
+                const deleted = articles.has(id);
+                if (deleted) {
+                  articles.delete(id);
+                  return { meta: { changes: 1 } };
+                }
+                return { meta: { changes: 0 } };
+              }
+              // Delete all articles
               const deleteCount = articles.size;
               articles.clear();
               return { meta: { changes: deleteCount } };
@@ -93,6 +120,15 @@ describe('News Processor - D1+KV Integration', () => {
               const limit = query._params[0] || 1;
               const results = Array.from(articles.values())
                 .filter(a => a.needsSentiment === 1 || a.needsSummary === 1)
+                .slice(0, limit);
+              return { results };
+            }
+            
+            if (sql.includes('SELECT id FROM articles')) {
+              // Handle getArticleIds query
+              const limit = query._params[0] || 1000;
+              const results = Array.from(articles.values())
+                .map(a => ({ id: a.id }))
                 .slice(0, limit);
               return { results };
             }
@@ -114,12 +150,7 @@ describe('News Processor - D1+KV Integration', () => {
             }
             
             if (sql.includes('processing_checkpoint')) {
-              return {
-                id: 1,
-                currentArticleId: null,
-                lastProcessedAt: Date.now(),
-                articlesProcessedCount: 0
-              };
+              return { ...checkpoint };
             }
             
             return null;
