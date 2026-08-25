@@ -152,6 +152,31 @@ export async function updateArticle(db, articleId, updates) {
 }
 
 /**
+ * SQL for getArticlesNeedingProcessing, exported so tests can execute it
+ * directly against a real SQLite/D1 instance (and inspect its query plan)
+ * instead of duplicating/re-implementing the logic in a mock.
+ */
+export const GET_ARTICLES_NEEDING_PROCESSING_SQL = `
+    SELECT * FROM (
+      SELECT * FROM (
+        SELECT * FROM articles WHERE needsSentiment = 1
+        ORDER BY CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC, pubDate DESC
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT * FROM (
+        SELECT * FROM articles WHERE needsSummary = 1 AND needsSentiment = 0
+        ORDER BY CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC, pubDate DESC
+        LIMIT ?
+      )
+    )
+    ORDER BY
+      CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC,
+      pubDate DESC
+    LIMIT ?
+  `;
+
+/**
  * Get articles that need processing (sentiment or summary)
  * Orders articles to process fresh articles first, timed-out articles last.
  * This ensures that articles that have timed out are retried after other pending articles.
@@ -170,25 +195,8 @@ export async function updateArticle(db, articleId, updates) {
  * @returns {Promise<Array>} Array of articles needing processing
  */
 export async function getArticlesNeedingProcessing(db, limit = 5) {
-  const result = await db.prepare(`
-    SELECT * FROM (
-      SELECT * FROM (
-        SELECT * FROM articles WHERE needsSentiment = 1
-        ORDER BY CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC, pubDate DESC
-        LIMIT ?
-      )
-      UNION ALL
-      SELECT * FROM (
-        SELECT * FROM articles WHERE needsSummary = 1 AND needsSentiment = 0
-        ORDER BY CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC, pubDate DESC
-        LIMIT ?
-      )
-    )
-    ORDER BY
-      CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC,
-      pubDate DESC
-    LIMIT ?
-  `).bind(limit, limit, limit).all();
+  const result = await db.prepare(GET_ARTICLES_NEEDING_PROCESSING_SQL)
+    .bind(limit, limit, limit).all();
   
   return result.results || [];
 }
