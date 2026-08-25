@@ -159,9 +159,11 @@ export async function updateArticle(db, articleId, updates) {
  * Note: contentTimeout is reset to 0 when extractedContent is successfully set in Phase 1,
  * ensuring that articles ready for Phase 2 are prioritized alongside fresh articles.
  * 
- * Performance note: uses UNION ALL + outer ORDER BY so D1 can satisfy both branches
- * with the idx_articles_processing composite index (contentTimeout, pubDate DESC)
- * instead of scanning the entire table for the OR predicate.
+ * Performance note: uses UNION ALL with per-branch LIMIT so D1 only reads `limit`
+ * rows from each partial index scan (idx_articles_processing on contentTimeout,
+ * pubDate DESC) rather than scanning the whole table for the OR predicate.
+ * The outer ORDER BY + LIMIT then merges at most 2×limit rows, making the query
+ * O(limit) regardless of table size — critical when limit=1 on the free tier.
  * 
  * @param {D1Database} db - D1 database instance
  * @param {number} limit - Maximum number of articles to return
@@ -170,15 +172,23 @@ export async function updateArticle(db, articleId, updates) {
 export async function getArticlesNeedingProcessing(db, limit = 5) {
   const result = await db.prepare(`
     SELECT * FROM (
-      SELECT * FROM articles WHERE needsSentiment = 1
+      SELECT * FROM (
+        SELECT * FROM articles WHERE needsSentiment = 1
+        ORDER BY CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC, pubDate DESC
+        LIMIT ?
+      )
       UNION ALL
-      SELECT * FROM articles WHERE needsSummary = 1 AND needsSentiment = 0
+      SELECT * FROM (
+        SELECT * FROM articles WHERE needsSummary = 1 AND needsSentiment = 0
+        ORDER BY CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC, pubDate DESC
+        LIMIT ?
+      )
     )
     ORDER BY
       CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC,
       pubDate DESC
     LIMIT ?
-  `).bind(limit).all();
+  `).bind(limit, limit, limit).all();
   
   return result.results || [];
 }
