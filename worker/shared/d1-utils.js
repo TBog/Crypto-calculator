@@ -159,15 +159,22 @@ export async function updateArticle(db, articleId, updates) {
  * Note: contentTimeout is reset to 0 when extractedContent is successfully set in Phase 1,
  * ensuring that articles ready for Phase 2 are prioritized alongside fresh articles.
  * 
+ * Performance note: uses UNION ALL + outer ORDER BY so D1 can satisfy both branches
+ * with the idx_articles_processing composite index (contentTimeout, pubDate DESC)
+ * instead of scanning the entire table for the OR predicate.
+ * 
  * @param {D1Database} db - D1 database instance
  * @param {number} limit - Maximum number of articles to return
  * @returns {Promise<Array>} Array of articles needing processing
  */
 export async function getArticlesNeedingProcessing(db, limit = 5) {
   const result = await db.prepare(`
-    SELECT * FROM articles
-    WHERE needsSentiment = 1 OR needsSummary = 1
-    ORDER BY 
+    SELECT * FROM (
+      SELECT * FROM articles WHERE needsSentiment = 1
+      UNION ALL
+      SELECT * FROM articles WHERE needsSummary = 1 AND needsSentiment = 0
+    )
+    ORDER BY
       CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC,
       pubDate DESC
     LIMIT ?

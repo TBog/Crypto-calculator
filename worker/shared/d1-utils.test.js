@@ -95,8 +95,8 @@ describe('D1 Utils - Schema Field Completeness', () => {
           },
           
           all: async () => {
-            // Handle getArticlesNeedingProcessing with ordering
-            if (sql.includes('WHERE needsSentiment = 1 OR needsSummary = 1')) {
+            // Handle getArticlesNeedingProcessing with ordering (UNION ALL rewrite)
+            if (sql.includes('WHERE needsSentiment = 1') && sql.includes('WHERE needsSummary = 1 AND needsSentiment = 0')) {
               const limit = query._params[0];
               const results = Array.from(articles.values())
                 .filter(a => a.needsSentiment === 1 || a.needsSummary === 1)
