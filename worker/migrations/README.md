@@ -7,6 +7,7 @@ This directory contains SQL migration files for the D1 database schema changes.
 Migrations are numbered sequentially and should be run in order:
 
 - `0001_add_extractedContent_column.sql` - Adds the `extractedContent` column to the `articles` table
+- `0002_processing_composite_index.sql` - Replaces `idx_articles_pending` with a composite `(needsSentiment, CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END, pubDate DESC)` index so the `getArticlesNeedingProcessing` UNION ALL query can use index-only scans
 
 ## Running Migrations
 

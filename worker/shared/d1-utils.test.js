@@ -40,7 +40,7 @@ function createSqliteD1() {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(path.join(__dirname, '..', 'schema.sql'), 'utf8'));
   sqlite.exec(readFileSync(
-    path.join(__dirname, '..', 'worker-news-processor', 'migrations', '0002_processing_composite_index.sql'),
+    path.join(__dirname, '..', 'migrations', '0002_processing_composite_index.sql'),
     'utf8'
   ));
 
