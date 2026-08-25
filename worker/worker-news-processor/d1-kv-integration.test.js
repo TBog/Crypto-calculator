@@ -116,10 +116,26 @@ describe('News Processor - D1+KV Integration', () => {
           
           all: async () => {
             // Handle SELECT
-            if (sql.includes('WHERE needsSentiment = 1 OR needsSummary = 1')) {
+            if (sql.includes('needsSentiment = 1') && sql.includes('UNION ALL')) {
               const limit = query._params[0] || 1;
-              const results = Array.from(articles.values())
-                .filter(a => a.needsSentiment === 1 || a.needsSummary === 1)
+              const branchSort = (a, b) => {
+                const aTimeout = (a.contentTimeout || 0) > 0 ? 1 : 0;
+                const bTimeout = (b.contentTimeout || 0) > 0 ? 1 : 0;
+                if (aTimeout !== bTimeout) {
+                  return aTimeout - bTimeout;
+                }
+                return (b.pubDate || '').localeCompare(a.pubDate || '');
+              };
+              const sentimentBranch = Array.from(articles.values())
+                .filter(a => a.needsSentiment === 1)
+                .sort(branchSort)
+                .slice(0, limit);
+              const summaryBranch = Array.from(articles.values())
+                .filter(a => a.needsSummary === 1 && a.needsSentiment === 0)
+                .sort(branchSort)
+                .slice(0, limit);
+              const results = [...sentimentBranch, ...summaryBranch]
+                .sort(branchSort)
                 .slice(0, limit);
               return { results };
             }

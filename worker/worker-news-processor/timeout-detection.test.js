@@ -118,21 +118,29 @@ class MockD1Database {
           
       async all() {
         const params = boundStatement.params;
-            // Handle SELECT articles needing processing
-            if (sql.includes('WHERE needsSentiment = 1 OR needsSummary = 1')) {
+            // Handle SELECT articles needing processing (UNION ALL query)
+            if (sql.includes('needsSentiment = 1') && sql.includes('UNION ALL')) {
               const limit = params[0];
-              const results = Array.from(db.articles.values())
-                .filter(a => a.needsSentiment === 1 || a.needsSummary === 1)
-                .sort((a, b) => {
-                  // First sort by contentTimeout (0 first, >0 last)
-                  const aTimeout = (a.contentTimeout || 0) > 0 ? 1 : 0;
-                  const bTimeout = (b.contentTimeout || 0) > 0 ? 1 : 0;
-                  if (aTimeout !== bTimeout) {
-                    return aTimeout - bTimeout;
-                  }
-                  // Then by pubDate DESC (newest first)
-                  return b.pubDate.localeCompare(a.pubDate);
-                })
+              const branchSort = (a, b) => {
+                // First sort by contentTimeout (0 first, >0 last)
+                const aTimeout = (a.contentTimeout || 0) > 0 ? 1 : 0;
+                const bTimeout = (b.contentTimeout || 0) > 0 ? 1 : 0;
+                if (aTimeout !== bTimeout) {
+                  return aTimeout - bTimeout;
+                }
+                // Then by pubDate DESC (newest first)
+                return b.pubDate.localeCompare(a.pubDate);
+              };
+              const sentimentBranch = Array.from(db.articles.values())
+                .filter(a => a.needsSentiment === 1)
+                .sort(branchSort)
+                .slice(0, limit);
+              const summaryBranch = Array.from(db.articles.values())
+                .filter(a => a.needsSummary === 1 && a.needsSentiment === 0)
+                .sort(branchSort)
+                .slice(0, limit);
+              const results = [...sentimentBranch, ...summaryBranch]
+                .sort(branchSort)
                 .slice(0, limit);
               return { results };
             }
