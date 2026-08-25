@@ -15,5 +15,9 @@ DROP INDEX IF EXISTS idx_articles_pending;
 -- issues one query per flag value (needsSentiment, needsSummary) so D1 can use
 -- this index for both branches without a merge-sort over the whole table.
 CREATE INDEX IF NOT EXISTS idx_articles_processing
-    ON articles (contentTimeout, pubDate DESC)
+    ON articles (
+        needsSentiment,
+        CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END,
+        pubDate DESC
+    )
     WHERE needsSentiment = 1 OR needsSummary = 1;
