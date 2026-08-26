@@ -152,6 +152,31 @@ export async function updateArticle(db, articleId, updates) {
 }
 
 /**
+ * SQL for getArticlesNeedingProcessing, exported so tests can execute it
+ * directly against a real SQLite/D1 instance (and inspect its query plan)
+ * instead of duplicating/re-implementing the logic in a mock.
+ */
+export const GET_ARTICLES_NEEDING_PROCESSING_SQL = `
+    SELECT * FROM (
+      SELECT * FROM (
+        SELECT * FROM articles WHERE needsSentiment = 1
+        ORDER BY CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC, pubDate DESC
+        LIMIT ?
+      )
+      UNION ALL
+      SELECT * FROM (
+        SELECT * FROM articles WHERE needsSummary = 1 AND needsSentiment = 0
+        ORDER BY CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC, pubDate DESC
+        LIMIT ?
+      )
+    )
+    ORDER BY
+      CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC,
+      pubDate DESC
+    LIMIT ?
+  `;
+
+/**
  * Get articles that need processing (sentiment or summary)
  * Orders articles to process fresh articles first, timed-out articles last.
  * This ensures that articles that have timed out are retried after other pending articles.
@@ -159,19 +184,19 @@ export async function updateArticle(db, articleId, updates) {
  * Note: contentTimeout is reset to 0 when extractedContent is successfully set in Phase 1,
  * ensuring that articles ready for Phase 2 are prioritized alongside fresh articles.
  * 
+ * Performance note: uses UNION ALL with per-branch LIMIT so D1 only reads `limit`
+ * rows from each partial index scan (idx_articles_processing on contentTimeout,
+ * pubDate DESC) rather than scanning the whole table for the OR predicate.
+ * The outer ORDER BY + LIMIT then merges at most 2×limit rows, making the query
+ * O(limit) regardless of table size — critical when limit=1 on the free tier.
+ * 
  * @param {D1Database} db - D1 database instance
  * @param {number} limit - Maximum number of articles to return
  * @returns {Promise<Array>} Array of articles needing processing
  */
 export async function getArticlesNeedingProcessing(db, limit = 5) {
-  const result = await db.prepare(`
-    SELECT * FROM articles
-    WHERE needsSentiment = 1 OR needsSummary = 1
-    ORDER BY 
-      CASE WHEN contentTimeout > 0 THEN 1 ELSE 0 END ASC,
-      pubDate DESC
-    LIMIT ?
-  `).bind(limit).all();
+  const result = await db.prepare(GET_ARTICLES_NEEDING_PROCESSING_SQL)
+    .bind(limit, limit, limit).all();
   
   return result.results || [];
 }

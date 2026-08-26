@@ -7,14 +7,67 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+
+// Vite's dependency scanner doesn't yet recognize the (still experimental)
+// `node:sqlite` module, so it's loaded via `require` to bypass static
+// resolution/bundling and get the real Node.js built-in module.
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite');
 import {
   insertArticle,
   insertArticlesBatch,
   updateArticle,
   getArticleById,
   getArticlesNeedingProcessing,
+  GET_ARTICLES_NEEDING_PROCESSING_SQL,
   rowToArticle
 } from './d1-utils.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Wraps a real (in-memory) SQLite database, created from the actual
+ * schema.sql + migrations, in a minimal D1-compatible interface
+ * (prepare/bind/run/first/all/batch). Unlike the hand-rolled mock above,
+ * this executes the real SQL against a real SQLite engine, so it validates
+ * the query is syntactically valid, that all bound parameters are used
+ * correctly, and it also allows inspecting the real query plan.
+ */
+function createSqliteD1() {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(readFileSync(path.join(__dirname, '..', 'schema.sql'), 'utf8'));
+  sqlite.exec(readFileSync(
+    path.join(__dirname, '..', 'migrations', '0002_processing_composite_index.sql'),
+    'utf8'
+  ));
+
+  return {
+    _sqlite: sqlite,
+    prepare(sql) {
+      let params = [];
+      const query = {
+        bind: (...p) => { params = p; return query; },
+        run: async () => {
+          const info = sqlite.prepare(sql).run(...params);
+          return { meta: { changes: info.changes } };
+        },
+        first: async () => sqlite.prepare(sql).get(...params) || null,
+        all: async () => ({ results: sqlite.prepare(sql).all(...params) })
+      };
+      return query;
+    },
+    batch: async (statements) => {
+      const results = [];
+      for (const stmt of statements) {
+        results.push(await stmt.run());
+      }
+      return results;
+    }
+  };
+}
 
 describe('D1 Utils - Schema Field Completeness', () => {
   // Simplified mock D1 for testing field persistence
@@ -95,8 +148,8 @@ describe('D1 Utils - Schema Field Completeness', () => {
           },
           
           all: async () => {
-            // Handle getArticlesNeedingProcessing with ordering
-            if (sql.includes('WHERE needsSentiment = 1 OR needsSummary = 1')) {
+            // Handle getArticlesNeedingProcessing with ordering (UNION ALL rewrite)
+            if (sql.includes('WHERE needsSentiment = 1') && sql.includes('WHERE needsSummary = 1 AND needsSentiment = 0')) {
               const limit = query._params[0];
               const results = Array.from(articles.values())
                 .filter(a => a.needsSentiment === 1 || a.needsSummary === 1)
@@ -610,6 +663,97 @@ describe('D1 Utils - Schema Field Completeness', () => {
       expect(articles[2].id).toBe('failed-fetch');
       expect(articles[2].contentTimeout).toBe(2);
       expect(articles[2].extractedContent).toBeNull();
+    });
+  });
+
+  describe('getArticlesNeedingProcessing - SQLite-backed query execution', () => {
+    // These tests execute the real UNION ALL query against a real SQLite
+    // database (built from schema.sql + migrations) instead of a JS mock,
+    // so an invalid query, a misplaced branch LIMIT, or an unused index
+    // would actually be caught here.
+    let sqliteD1;
+
+    beforeEach(() => {
+      sqliteD1 = createSqliteD1();
+    });
+
+    it('returns correctly ordered/limited results for mixed needsSentiment/needsSummary flag groups', async () => {
+      const now = Date.now();
+
+      await insertArticlesBatch(sqliteD1, [
+        {
+          id: 'sentiment-fresh',
+          title: 'Needs Sentiment, Fresh',
+          pubDate: new Date(now - 1000).toISOString(),
+          needsSentiment: true,
+          needsSummary: false,
+          contentTimeout: 0
+        },
+        {
+          id: 'sentiment-timeout',
+          title: 'Needs Sentiment, Timed Out',
+          pubDate: new Date(now - 100).toISOString(), // newest, but timed out
+          needsSentiment: true,
+          needsSummary: false,
+          contentTimeout: 1
+        },
+        {
+          id: 'summary-fresh',
+          title: 'Needs Summary Only, Fresh',
+          pubDate: new Date(now - 2000).toISOString(),
+          needsSentiment: false,
+          needsSummary: true,
+          contentTimeout: 0
+        },
+        {
+          id: 'summary-timeout',
+          title: 'Needs Summary Only, Timed Out',
+          pubDate: new Date(now - 3000).toISOString(),
+          needsSentiment: false,
+          needsSummary: true,
+          contentTimeout: 2
+        },
+        {
+          id: 'not-pending',
+          title: 'Fully Processed',
+          pubDate: new Date(now).toISOString(),
+          needsSentiment: false,
+          needsSummary: false,
+          contentTimeout: 0
+        }
+      ]);
+
+      // Small limit so the per-branch LIMIT is actually exercised.
+      const articles = await getArticlesNeedingProcessing(sqliteD1, 2);
+
+      expect(articles.map(a => a.id)).toEqual(['sentiment-fresh', 'summary-fresh']);
+      expect(articles.every(a => a.id !== 'not-pending')).toBe(true);
+    });
+
+    it('does not perform a full table scan of articles for either UNION ALL branch', async () => {
+      const now = Date.now();
+
+      await insertArticlesBatch(sqliteD1, [
+        { id: 'a', title: 'A', pubDate: new Date(now).toISOString(), needsSentiment: true, contentTimeout: 0 },
+        { id: 'b', title: 'B', pubDate: new Date(now - 1000).toISOString(), needsSummary: true, needsSentiment: false, contentTimeout: 1 }
+      ]);
+
+      const plan = sqliteD1._sqlite
+        .prepare(`EXPLAIN QUERY PLAN ${GET_ARTICLES_NEEDING_PROCESSING_SQL}`)
+        .all(2, 2, 2);
+      const details = plan.map(row => row.detail);
+
+      // A full/unindexed table scan shows up as "SCAN articles" (no "USING INDEX").
+      // Scans of the already-limited derived subqueries (e.g. "SCAN subquery-1")
+      // are expected and fine, since they operate on at most `limit` rows.
+      const fullTableScans = details.filter(
+        (detail) => /SCAN\s+articles\b/i.test(detail) && !/USING INDEX/i.test(detail)
+      );
+      expect(fullTableScans).toEqual([]);
+
+      // Each branch should reach the articles table via an index seek.
+      const indexSearches = details.filter((detail) => /SEARCH articles USING INDEX/i.test(detail));
+      expect(indexSearches.length).toBeGreaterThanOrEqual(2);
     });
   });
 });
