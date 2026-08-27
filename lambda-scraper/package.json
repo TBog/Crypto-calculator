@@ -1,0 +1,24 @@
+{
+  "name": "crypto-news-scraper-lambda",
+  "version": "1.0.0",
+  "description": "AWS Lambda function for scraping Bitcoin news articles with headless browser",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "scraper",
+    "bitcoin",
+    "puppeteer",
+    "chromium"
+  ],
+  "author": "TBog",
+  "license": "MIT",
+  "dependencies": {
+    "@sparticuz/chromium": "^123.0.1",
+    "puppeteer-core": "^22.0.0"
+  }
+}
